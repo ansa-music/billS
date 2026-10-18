@@ -43,12 +43,22 @@ export function migrate(db: Db, now: number, migrationsDir: URL = MIGRATIONS_DIR
     applied_at INTEGER NOT NULL
   )`);
   const applied = new Set(all<{ version: number }>(db, 'SELECT version FROM schema_migrations').map((r) => r.version));
+  const newest = Math.max(0, ...applied);
   const files = readdirSync(migrationsDir)
     .filter((f) => /^\d+_.+\.sql$/.test(f))
     .sort();
   for (const file of files) {
     const version = Number.parseInt(file, 10);
     if (applied.has(version)) continue;
+    // Migrations assume everything before them has run. A lower number that is still pending
+    // means this database was created by a build with a different migration list — applying
+    // it now could silently undo later changes (a table rebuild dropping newer columns).
+    if (version < newest) {
+      throw new Error(
+        `Migration ${file} is older than the newest applied migration (${newest}) but was never applied: ` +
+          'this database was created by a different build. Restore it from a backup made by that build or start with a new database.',
+      );
+    }
     const sql = readFileSync(new URL(file, migrationsDir), 'utf8');
     transaction(db, () => {
       db.exec(sql);
