@@ -1,4 +1,4 @@
-import type { LampDriver } from './driver.ts';
+import type { LampDriver, LampSetOptions } from './driver.ts';
 
 /**
  * fail      the controller answers with an error, the lamp does not change
@@ -12,6 +12,8 @@ export interface SimulatorStatus {
   offline: boolean;
   faults: SimulatorFault[];
   lamps: Record<string, boolean>;
+  /** Channels asked to blink (always a subset of lamps that are on). */
+  blink: Record<string, boolean>;
 }
 
 /** In-memory lamp controller for development, demos and tests. */
@@ -19,8 +21,9 @@ export class SimulatorLampDriver implements LampDriver {
   latencyMs: number;
   /** While true every command fails, like an unplugged controller. */
   offline = false;
-  readonly calls: Array<{ channel: string; on: boolean }> = [];
+  readonly calls: Array<{ channel: string; on: boolean; blink: boolean }> = [];
   readonly #lamps = new Map<string, boolean>();
+  readonly #blink = new Map<string, boolean>();
   #faults: SimulatorFault[] = [];
 
   constructor(options: { latencyMs?: number } = {}) {
@@ -40,17 +43,23 @@ export class SimulatorLampDriver implements LampDriver {
     return this.#lamps.get(channel) ?? false;
   }
 
+  isBlinking(channel: string): boolean {
+    return this.#blink.get(channel) ?? false;
+  }
+
   status(): SimulatorStatus {
     return {
       latencyMs: this.latencyMs,
       offline: this.offline,
       faults: [...this.#faults],
       lamps: Object.fromEntries(this.#lamps),
+      blink: Object.fromEntries(this.#blink),
     };
   }
 
-  setLamp(channel: string, on: boolean, signal: AbortSignal): Promise<void> {
-    this.calls.push({ channel, on });
+  setLamp(channel: string, on: boolean, signal: AbortSignal, options: LampSetOptions = {}): Promise<void> {
+    const blink = on && (options.blink ?? false);
+    this.calls.push({ channel, on, blink });
     const fault: SimulatorFault | undefined = this.offline ? 'fail' : this.#faults.shift();
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -59,6 +68,7 @@ export class SimulatorLampDriver implements LampDriver {
           return;
         }
         this.#lamps.set(channel, on);
+        this.#blink.set(channel, blink);
         if (fault !== 'drop-ack') resolve();
       }, this.latencyMs);
       signal.addEventListener(

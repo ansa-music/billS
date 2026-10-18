@@ -125,12 +125,17 @@ export function SimulatorPanel({ onError }: { onError: (message: string) => void
       <ul className="relays">
         {Object.entries(sim.lamps)
           .sort(([a], [b]) => a.localeCompare(b, 'en', { numeric: true }))
-          .map(([channel, on]) => (
-            <li key={channel} data-on={on || undefined}>
-              <span className="lamp-dot" aria-hidden="true" />
-              {channel}
-            </li>
-          ))}
+          .map(([channel, on]) => {
+            // Older HUBs do not report blinking yet.
+            const blink = sim.blink?.[channel] ?? false;
+            return (
+              <li key={channel} data-on={on || undefined} data-blink={blink || undefined}>
+                <span className="lamp-dot" aria-hidden="true" />
+                {channel}
+                {blink && <span className="relay-note">мигает</span>}
+              </li>
+            );
+          })}
       </ul>
     </details>
   );

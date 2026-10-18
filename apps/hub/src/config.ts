@@ -8,6 +8,8 @@ export interface HubConfig {
   demoTimezone: string;
   /** Simulated controller response time. */
   simulatorLatencyMs: number;
+  /** Built hall screen (apps/web/dist) served on `/`; skipped when the folder is missing. */
+  webDistPath: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
@@ -17,5 +19,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
     dbPath: env.HUB_DB_PATH ?? fileURLToPath(new URL('../data/hub.db', import.meta.url)),
     demoTimezone: env.HUB_DEMO_TZ ?? 'Asia/Almaty',
     simulatorLatencyMs: Number(env.HUB_SIM_LATENCY_MS ?? 300),
+    webDistPath: env.HUB_WEB_DIST ?? fileURLToPath(new URL('../../web/dist', import.meta.url)),
   };
 }

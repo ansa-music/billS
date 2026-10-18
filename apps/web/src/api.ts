@@ -76,7 +76,10 @@ export interface SimulatorStatus {
   latencyMs: number;
   offline: boolean;
   faults: Array<'fail' | 'drop-ack'>;
+  /** Channel → relay is on. */
   lamps: Record<string, boolean>;
+  /** Channel → the lamp was asked to blink (paused game). */
+  blink: Record<string, boolean>;
 }
 
 export async function fetchSimulator(): Promise<SimulatorStatus | null> {
