@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type {
-  LoginRequest,
+  CloudLoginRequest,
   OwnerView,
   SyncEventsRequest,
   SyncSnapshotRequest,
@@ -202,7 +202,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   // --- owner auth -----------------------------------------------------------
 
-  app.post<{ Body: LoginRequest }>('/api/auth/login', { schema: { body: loginSchema } }, async (req, reply) => {
+  app.post<{ Body: CloudLoginRequest }>('/api/auth/login', { schema: { body: loginSchema } }, async (req, reply) => {
     const owner = await authenticateOwner(db, req.body.email, req.body.password);
     if (!owner) throw new CloudError(401, 'INVALID_CREDENTIALS', 'Неверная почта или пароль');
     const token = await createSession(db, owner.id, clock.now());

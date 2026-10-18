@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type {
-  ClubSettings,
+  ClubSnapshot,
   SyncEvent,
   SyncEventPayload,
   SyncEventsRequest,
@@ -150,7 +150,7 @@ const TABLE_KINDS = new Set<TableSetting['kind']>(['pool', 'russian', 'snooker']
  * Any invalid tariff or table rejects the whole package — nothing is applied partially.
  * Running games keep their tariff snapshot and are not repriced.
  */
-export function applySettings(db: Db, now: number, settings: ClubSettings, events?: HubEvents): void {
+export function applySettings(db: Db, now: number, settings: ClubSnapshot, events?: HubEvents): void {
   transaction(db, () => {
     const club = one<{ id: string; timezone: string }>(db, 'SELECT id, timezone FROM clubs ORDER BY created_at LIMIT 1');
     if (!club) throw new Error('Клуб не настроен');

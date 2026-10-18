@@ -1,4 +1,4 @@
-import type { ClubSettings, StaffSetting, TableSetting, TariffSetting } from '@bills/domain';
+import type { ClubSnapshot, StaffSetting, TableSetting, TariffSetting } from '@bills/domain';
 import type { SqlDriver } from './db/driver.ts';
 
 export interface ClubRow {
@@ -21,7 +21,7 @@ interface SettingsRow {
   source: 'hub' | 'owner';
 }
 
-export interface StoredSettings extends ClubSettings {
+export interface StoredSettings extends ClubSnapshot {
   source: 'hub' | 'owner' | null;
   updatedAt: number | null;
 }
@@ -63,7 +63,7 @@ export async function loadSettings(db: SqlDriver, club: ClubRow): Promise<Stored
 export async function saveSettings(
   db: SqlDriver,
   clubId: string,
-  settings: ClubSettings,
+  settings: ClubSnapshot,
   source: 'hub' | 'owner',
   now: number,
 ): Promise<void> {
@@ -87,16 +87,16 @@ export async function saveSettings(
   );
 }
 
-export function toClubSettings(s: StoredSettings): ClubSettings {
+export function toClubSettings(s: StoredSettings): ClubSnapshot {
   return { version: s.version, club: s.club, tariffs: s.tariffs, tables: s.tables, staff: s.staff };
 }
 
 /** tariffId → name, for naming games in the projection. */
-export function tariffNames(settings: ClubSettings): Map<string, string> {
+export function tariffNames(settings: ClubSnapshot): Map<string, string> {
   return new Map(settings.tariffs.map((t) => [t.id, t.name]));
 }
 
 /** tableId → name. */
-export function tableNames(settings: ClubSettings): Map<string, string> {
+export function tableNames(settings: ClubSnapshot): Map<string, string> {
   return new Map(settings.tables.map((t) => [t.id, t.name]));
 }

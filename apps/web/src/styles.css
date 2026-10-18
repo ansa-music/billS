@@ -1,14 +1,18 @@
-/* Hall screen. Dark by default: clubs are dim and tablets should not glare.
-   System fonts only — the HUB must work without internet. */
+/* Hall screens. Dark by default: clubs are dim and tablets should not glare.
+   The font is bundled (@fontsource) — the HUB must work without internet.
+   Theme: OS preference, overridden by <html data-theme="dark|light"> (theme.ts). */
 
 :root {
   color-scheme: dark;
-  --bg: #0e1311;
-  --surface: #151c19;
-  --surface-2: #1b2420;
-  --border: #27332e;
-  --text: #e6eee9;
-  --muted: #8a9e95;
+  --bg: #0b0f0d;
+  --surface: #131a17;
+  --surface-2: #1a2320;
+  --surface-3: #222d29;
+  --border: #26322d;
+  --border-strong: #35443d;
+  --text: #e8efea;
+  --text-2: #b8c6be;
+  --muted: #84978d;
   --felt: #1d6b45;
   --felt-dark: #183026;
   --felt-lit: #23905c;
@@ -18,21 +22,47 @@
   --danger: #ef5b51;
   --danger-soft: #3a1d1b;
   --warn: #e3a72f;
+  --warn-soft: #36290f;
+  --info: #5aa9e6;
+  --info-soft: #142a3c;
+  --floor: #0f1513;
+  --floor-line: rgb(255 255 255 / 0.035);
+  --floor-line-strong: rgb(255 255 255 / 0.07);
+  --wall: #3d4c45;
+  --wood-1: #7a4a2a;
+  --wood-2: #44281a;
+  --brass: #d9b46a;
+  --plan-felt-off: #1d3a2c;
+  --plan-felt-on: #26975f;
+  --chart-grid: #232e2a;
+  --chart-axis: #35443d;
+  --seq-1: #3a3021;
+  --seq-2: #62491f;
+  --seq-3: #93691f;
+  --seq-4: #c98f25;
+  --seq-5: #f7c454;
   --radius: 16px;
+  --radius-sm: 10px;
   --shadow: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 8px 24px rgb(0 0 0 / 0.25);
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --shadow-lg: 0 24px 64px rgb(0 0 0 / 0.5);
+  --nav-w: 232px;
+  font-family: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
   font-size: 16px;
   line-height: 1.4;
+  font-feature-settings: 'cv11', 'ss01';
 }
 
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme='dark']) {
     color-scheme: light;
     --bg: #eef2ef;
     --surface: #ffffff;
     --surface-2: #f4f7f5;
+    --surface-3: #e8eee9;
     --border: #d6dfda;
+    --border-strong: #c0ccc5;
     --text: #13201a;
+    --text-2: #3b4c43;
     --muted: #5d6f66;
     --felt: #1f7a4d;
     --felt-dark: #6f8f80;
@@ -43,8 +73,71 @@
     --danger: #d23f35;
     --danger-soft: #fde8e6;
     --warn: #b7791f;
+    --warn-soft: #fbf0db;
+    --info: #2a78d6;
+    --info-soft: #e3eefb;
+    --floor: #e3e9e5;
+    --floor-line: rgb(16 40 28 / 0.05);
+    --floor-line-strong: rgb(16 40 28 / 0.1);
+    --wall: #9fb0a7;
+    --wood-1: #8a5530;
+    --wood-2: #5b3519;
+    --brass: #c9a24c;
+    --plan-felt-off: #2c6548;
+    --plan-felt-on: #23955c;
+    --chart-grid: #e3e8e4;
+    --chart-axis: #c0ccc5;
+    --seq-1: #fbebc6;
+    --seq-2: #f5d283;
+    --seq-3: #e8b13e;
+    --seq-4: #c48812;
+    --seq-5: #8a5c05;
     --shadow: 0 1px 2px rgb(16 40 28 / 0.06), 0 6px 18px rgb(16 40 28 / 0.06);
+    --shadow-lg: 0 24px 64px rgb(16 40 28 / 0.18);
   }
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #eef2ef;
+  --surface: #ffffff;
+  --surface-2: #f4f7f5;
+  --surface-3: #e8eee9;
+  --border: #d6dfda;
+  --border-strong: #c0ccc5;
+  --text: #13201a;
+  --text-2: #3b4c43;
+  --muted: #5d6f66;
+  --felt: #1f7a4d;
+  --felt-dark: #6f8f80;
+  --felt-lit: #229058;
+  --accent: #1f8a55;
+  --accent-text: #ffffff;
+  --lamp: #e3a21a;
+  --danger: #d23f35;
+  --danger-soft: #fde8e6;
+  --warn: #b7791f;
+  --warn-soft: #fbf0db;
+  --info: #2a78d6;
+  --info-soft: #e3eefb;
+  --floor: #e3e9e5;
+  --floor-line: rgb(16 40 28 / 0.05);
+  --floor-line-strong: rgb(16 40 28 / 0.1);
+  --wall: #9fb0a7;
+  --wood-1: #8a5530;
+  --wood-2: #5b3519;
+  --brass: #c9a24c;
+  --plan-felt-off: #2c6548;
+  --plan-felt-on: #23955c;
+  --chart-grid: #e3e8e4;
+  --chart-axis: #c0ccc5;
+  --seq-1: #fbebc6;
+  --seq-2: #f5d283;
+  --seq-3: #e8b13e;
+  --seq-4: #c48812;
+  --seq-5: #8a5c05;
+  --shadow: 0 1px 2px rgb(16 40 28 / 0.06), 0 6px 18px rgb(16 40 28 / 0.06);
+  --shadow-lg: 0 24px 64px rgb(16 40 28 / 0.18);
 }
 
 * {
@@ -82,83 +175,6 @@ select {
   color: var(--muted);
 }
 
-.app {
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: 16px;
-  display: grid;
-  gap: 16px;
-}
-
-/* Top bar */
-
-.topbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px 24px;
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.brand h1 {
-  font-size: 20px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-}
-
-.brand p {
-  font-size: 14px;
-}
-
-.ball {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: radial-gradient(circle at 35% 30%, #3b3b3b, #050505 70%);
-  color: #111;
-  font-weight: 800;
-  font-size: 13px;
-  position: relative;
-  isolation: isolate;
-  flex: none;
-}
-
-.ball::before {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #f4f4f4;
-}
-
-.topbar-right {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px 16px;
-}
-
-.actor {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-}
-
-.actor input {
-  width: 140px;
-}
-
 input,
 select {
   background: var(--surface-2);
@@ -176,40 +192,16 @@ summary:focus-visible {
   outline-offset: 2px;
 }
 
-.clock {
-  font-size: 20px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.conn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--danger);
-}
-
-.conn::before {
-  content: '';
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.conn[data-online] {
-  color: var(--accent);
-}
-
-/* Cloud sync indicator (stage 6); shown only when the HUB has a cloud configured. */
+/* Cloud sync indicator (stage 6) in the top bar; shown only when the HUB has a cloud configured. */
 .cloud {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  padding: 0 8px;
   font-size: 13px;
   color: var(--muted);
   cursor: default;
+  white-space: nowrap;
 }
 
 .cloud::before {
@@ -218,6 +210,7 @@ summary:focus-visible {
   height: 8px;
   border-radius: 50%;
   background: currentColor;
+  flex: none;
 }
 
 .cloud[data-state='ok'] {
@@ -232,63 +225,10 @@ summary:focus-visible {
   color: var(--danger);
 }
 
-/* Alerts */
-
-.alerts {
-  display: grid;
-  gap: 8px;
-}
-
-.alert {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid color-mix(in oklab, var(--danger) 55%, transparent);
-  background: var(--danger-soft);
-  border-radius: 12px;
-}
-
-.alert-time {
-  font-variant-numeric: tabular-nums;
-  color: var(--danger);
-  font-weight: 600;
-}
-
-.alert-text {
-  flex: 1;
-}
-
-/* Layout */
-
-.layout {
-  display: grid;
-  gap: 16px;
-  align-items: start;
-}
-
-@media (min-width: 1100px) {
-  .layout {
-    grid-template-columns: minmax(0, 1fr) 340px;
+@media (max-width: 900px) {
+  .cloud-text {
+    display: none;
   }
-}
-
-.hall {
-  display: grid;
-  gap: 12px;
-  align-content: start;
-  min-width: 0;
-}
-
-.tables {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 16px;
-}
-
-.side {
-  display: grid;
-  gap: 16px;
 }
 
 /* Table card */
@@ -444,8 +384,7 @@ summary:focus-visible {
   flex: none;
 }
 
-.lamp[data-lamp='on'] .lamp-dot,
-.relays li[data-on] .lamp-dot {
+.lamp[data-lamp='on'] .lamp-dot {
   background: var(--lamp);
   box-shadow: 0 0 10px 2px color-mix(in oklab, var(--lamp) 70%, transparent);
 }
@@ -711,7 +650,33 @@ summary:focus-visible {
   flex: none;
 }
 
-/* Side panels */
+.empty {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.check input {
+  min-height: auto;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+/* Cash desk panels (cash/cash.css extends these) */
 
 .panel {
   background: var(--surface);
@@ -736,11 +701,6 @@ summary:focus-visible {
 .panel-total {
   font-weight: 650;
   font-variant-numeric: tabular-nums;
-}
-
-.empty {
-  color: var(--muted);
-  font-size: 14px;
 }
 
 .unpaid {
@@ -774,28 +734,6 @@ summary:focus-visible {
   white-space: nowrap;
 }
 
-.sim summary {
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  list-style: none;
-}
-
-.sim summary::before {
-  content: '▸';
-  color: var(--muted);
-  transition: transform 0.15s;
-}
-
-.sim[open] summary::before {
-  transform: rotate(90deg);
-}
-
-.sim summary::-webkit-details-marker {
-  display: none;
-}
-
 .tag {
   font-size: 12px;
   padding: 2px 8px;
@@ -807,26 +745,7 @@ summary:focus-visible {
   color: var(--danger);
 }
 
-.check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-}
-
-.check input {
-  min-height: auto;
-  width: 18px;
-  height: 18px;
-  accent-color: var(--accent);
-}
-
-.field {
-  display: grid;
-  gap: 4px;
-  font-size: 14px;
-  color: var(--muted);
-}
+/* Lamp simulator relay list (Equipment page) */
 
 .relays {
   list-style: none;
@@ -873,7 +792,7 @@ summary:focus-visible {
     font-size: 34px;
   }
 
-  .actor input {
+  .actor-input {
     width: 110px;
   }
 }

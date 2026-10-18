@@ -1,11 +1,8 @@
-import { createHash } from 'node:crypto';
 import Fastify from 'fastify';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { BillingError } from '@bills/domain';
 import { HubError } from '../errors.ts';
 import type { Hub } from '../hub.ts';
-import type { CommandResult } from '../idempotency.ts';
-import { idempotent } from '../idempotency.ts';
 import type { ChangeEvent } from '../events.ts';
 import type { SimulatorFault, SimulatorLampDriver } from '../lamps/simulator.ts';
 import { SIMULATOR_FAULTS } from '../lamps/simulator.ts';
@@ -14,10 +11,18 @@ import { renderPowerMetrics } from '../power/metrics.ts';
 import type { SimulatorUps } from '../power/ups.ts';
 import type { VersionInfo } from '../version.ts';
 import { versionInfo } from '../version.ts';
+import { registerAuth } from './auth.ts';
+import type { AuthHookOptions } from './auth.ts';
+import { emptyBody, guard, runCommand } from './command.ts';
+import { registerHallRoutes } from './hall-routes.ts';
 import { registerMoneyRoutes } from './money-routes.ts';
+import { registerBarRoutes } from './routes/bar.ts';
+import { registerReportRoutes } from './routes/reports.ts';
+import { registerSettingsRoutes } from './routes/settings.ts';
+import { registerStaffRoutes } from './routes/staff.ts';
 import { registerStatic } from './static.ts';
 
-export interface AppOptions {
+export interface AppOptions extends AuthHookOptions {
   /** Exposes /api/dev/lamps to control the simulator. Never in production. */
   simulator?: SimulatorLampDriver;
   /** Exposes /api/dev/ups to drive the simulated UPS (HUB_UPS=simulator). */
@@ -31,31 +36,6 @@ export interface AppOptions {
   /** Built hall screen (apps/web/dist) to serve on `/` with an SPA fallback; skipped when the folder is missing. */
   staticDir?: string;
 }
-
-function actorOf(req: FastifyRequest): string {
-  // Temporary until staff log in with a PIN (stage 3).
-  const raw = req.headers['x-actor'];
-  if (typeof raw !== 'string' || raw.length === 0) return 'unknown';
-  try {
-    return decodeURIComponent(raw).slice(0, 100);
-  } catch {
-    return 'unknown';
-  }
-}
-
-export function runCommand(req: FastifyRequest, reply: FastifyReply, hub: Hub, command: (actor: string) => CommandResult) {
-  const key = req.headers['idempotency-key'];
-  if (typeof key !== 'string' || key.length < 8 || key.length > 200) {
-    throw new HubError(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Нужен заголовок Idempotency-Key (8–200 символов)');
-  }
-  const hash = createHash('sha256')
-    .update(`${req.method} ${req.url}\n${JSON.stringify(req.body ?? null)}`)
-    .digest('hex');
-  const result = idempotent(hub.db, hub.clock.now(), key, hash, () => command(actorOf(req)));
-  return reply.status(result.status).header('idempotent-replayed', String(result.replayed)).send(result.body);
-}
-
-const emptyBody = { type: 'object', additionalProperties: false, properties: {} } as const;
 
 export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   // Screens poll /api/state on every change: per-request logs would drown real events.
@@ -76,23 +56,32 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
     return reply.status(500).send({ error: { code: 'INTERNAL', message: 'Внутренняя ошибка HUB' } });
   });
 
+  // Resolves the Bearer token on every /api request; routes then check the role.
+  registerAuth(app, hub, { trustActorHeader: options.trustActorHeader ?? false });
+
   const healthCtx = {
     db: hub.db,
     dbPath: options.dbPath ?? ':memory:',
     startedAt: options.startedAt ?? Date.now(),
     version: options.version ?? versionInfo(),
   };
-  // Health for operators and monitoring; `now` stays the HUB clock, the rest is wall time.
-  app.get('/api/health', async () => ({ ...collectHealth(healthCtx), now: hub.clock.now(), power: hub.power.view() }));
+  // Health for operators and monitoring (public); `now` stays the HUB clock, the rest is wall time.
+  app.get('/api/health', async () => ({
+    ...collectHealth(healthCtx),
+    now: hub.clock.now(),
+    power: hub.power.view(),
+  }));
 
-  // Prometheus / Uptime Kuma scrape target.
+  // Prometheus / Uptime Kuma scrape target (public).
   app.get('/metrics', async (_req, reply) =>
     reply
       .header('content-type', 'text/plain; version=0.0.4; charset=utf-8')
       .send(renderMetrics(collectHealth(healthCtx)) + renderPowerMetrics(hub.power.view())),
   );
 
-  app.get('/api/state', async () => hub.state());
+  registerHallRoutes(app, hub, runCommand);
+
+  app.get('/api/state', { preHandler: guard('hall.view') }, async () => hub.state());
 
   app.post<{ Params: { tableId: string }; Body: { tariffId?: string; prepaidMinutes?: number } }>(
     '/api/tables/:tableId/open',
@@ -106,47 +95,71 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
       },
     },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => {
-        const { tariffId, prepaidMinutes } = req.body ?? {};
-        const tableId = req.params.tableId;
-        return {
-          status: 201,
-          body:
-            prepaidMinutes === undefined
-              ? hub.sessions.open({ tableId, tariffId, actor })
-              : hub.prepaid.open({ tableId, tariffId, minutes: prepaidMinutes, actor }),
-        };
-      }),
+      runCommand(
+        req,
+        reply,
+        hub,
+        (actor) => {
+          const { tariffId, prepaidMinutes } = req.body ?? {};
+          const tableId = req.params.tableId;
+          return {
+            status: 201,
+            body:
+              prepaidMinutes === undefined
+                ? hub.sessions.open({ tableId, tariffId, actor })
+                : hub.prepaid.open({ tableId, tariffId, minutes: prepaidMinutes, actor }),
+          };
+        },
+        'table.open',
+      ),
   );
 
   app.post<{ Params: { sessionId: string } }>(
     '/api/sessions/:sessionId/stop',
     { schema: { body: emptyBody } },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => ({
-        status: 200,
-        body: hub.stopGame({ sessionId: req.params.sessionId, actor }),
-      })),
+      runCommand(
+        req,
+        reply,
+        hub,
+        (actor) => ({
+          status: 200,
+          body: hub.stopGame({ sessionId: req.params.sessionId, actor }),
+        }),
+        'table.stop',
+      ),
   );
 
   app.post<{ Params: { sessionId: string } }>(
     '/api/sessions/:sessionId/pause',
     { schema: { body: emptyBody } },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => ({
-        status: 200,
-        body: hub.sessions.pause({ sessionId: req.params.sessionId, actor }),
-      })),
+      runCommand(
+        req,
+        reply,
+        hub,
+        (actor) => ({
+          status: 200,
+          body: hub.sessions.pause({ sessionId: req.params.sessionId, actor }),
+        }),
+        'table.stop',
+      ),
   );
 
   app.post<{ Params: { sessionId: string } }>(
     '/api/sessions/:sessionId/resume',
     { schema: { body: emptyBody } },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => ({
-        status: 200,
-        body: hub.sessions.resume({ sessionId: req.params.sessionId, actor }),
-      })),
+      runCommand(
+        req,
+        reply,
+        hub,
+        (actor) => ({
+          status: 200,
+          body: hub.sessions.resume({ sessionId: req.params.sessionId, actor }),
+        }),
+        'table.open',
+      ),
   );
 
   app.post<{ Params: { sessionId: string }; Body: { toTableId: string } }>(
@@ -162,10 +175,16 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
       },
     },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => ({
-        status: 200,
-        body: hub.sessions.transfer({ sessionId: req.params.sessionId, toTableId: req.body.toTableId, actor }),
-      })),
+      runCommand(
+        req,
+        reply,
+        hub,
+        (actor) => ({
+          status: 200,
+          body: hub.sessions.transfer({ sessionId: req.params.sessionId, toTableId: req.body.toTableId, actor }),
+        }),
+        'table.open',
+      ),
   );
 
   // Flashes the lamp: checks the wiring from the screen; stage 2 uses it before prepaid time ends.
@@ -177,14 +196,20 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
       },
     },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => ({
-        status: 202,
-        body: hub.blink(req.params.tableId, actor, req.body?.times ?? 3),
-      })),
+      runCommand(
+        req,
+        reply,
+        hub,
+        (actor) => ({
+          status: 202,
+          body: hub.blink(req.params.tableId, actor, req.body?.times ?? 3),
+        }),
+        'lamp.blink',
+      ),
   );
 
   // The club's UPS and what to do on power loss.
-  app.get('/api/power', async () => hub.power.view());
+  app.get('/api/power', { preHandler: guard('hall.view') }, async () => hub.power.view());
 
   app.post<{ Body: { autoPauseOnPowerLoss?: boolean } }>(
     '/api/power/settings',
@@ -194,12 +219,19 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
       },
     },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => ({ status: 200, body: hub.setPowerSettings(actor, req.body ?? {}) })),
+      runCommand(
+        req,
+        reply,
+        hub,
+        (actor) => ({ status: 200, body: hub.setPowerSettings(actor, req.body ?? {}) }),
+        'power.edit',
+      ),
   );
 
   // Emergency manual mode: the controller is down, lamps are switched by hand.
-  app.get('/api/lamps/manual', async () => hub.manualMode());
+  app.get('/api/lamps/manual', { preHandler: guard('hall.view') }, async () => hub.manualMode());
 
+  // Anyone at the desk may switch it on; switching it off is a manager's call (checked in Hub.setManualMode).
   app.post<{ Body: { enabled: boolean; reason?: string } }>(
     '/api/lamps/manual',
     {
@@ -213,20 +245,31 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
       },
     },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => ({
-        status: 200,
-        body: hub.setManualMode({ enabled: req.body.enabled, reason: req.body.reason, actor }),
-      })),
+      runCommand(
+        req,
+        reply,
+        hub,
+        (actor, by) => ({
+          status: 200,
+          body: hub.setManualMode({ enabled: req.body.enabled, reason: req.body.reason, actor, by }),
+        }),
+        'lamps.manual',
+      ),
   );
 
   app.post<{ Params: { alertId: string } }>(
     '/api/alerts/:alertId/resolve',
     { schema: { body: emptyBody } },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => ({ status: 200, body: hub.resolveAlert(req.params.alertId, actor) })),
+      runCommand(req, reply, hub, (actor) => ({ status: 200, body: hub.resolveAlert(req.params.alertId, actor) }), 'alert.resolve'),
   );
 
+  // The cash desk (stage 2) and the pages beyond the hall screen: each module owns its routes.
   registerMoneyRoutes(app, hub);
+  registerSettingsRoutes(app, hub);
+  registerBarRoutes(app, hub);
+  registerStaffRoutes(app, hub);
+  registerReportRoutes(app, hub);
 
   // Server-sent events: screens refetch /api/state when something changes.
   app.get('/api/events', (req, reply) => {
@@ -240,7 +283,8 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
     res.write('retry: 2000\n\n');
     const onChange = (e: ChangeEvent) => res.write(`event: changed\ndata: ${JSON.stringify(e)}\n\n`);
     hub.events.on('changed', onChange);
-    const ping = setInterval(() => res.write(': ping\n\n'), 15_000);
+    // A named event, not a comment: screens reconnect when pings stop (a dead proxy or Wi-Fi).
+    const ping = setInterval(() => res.write('event: ping\ndata: {}\n\n'), 15_000);
     req.raw.on('close', () => {
       clearInterval(ping);
       hub.events.off('changed', onChange);

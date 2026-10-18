@@ -8,7 +8,7 @@ import { HubError } from './errors.ts';
 import type { HubEvents } from './events.ts';
 import { record, SYSTEM } from './journal.ts';
 import { shiftPrepaidDeadline } from './prepaid-deadline.ts';
-import { isManualMode } from './settings.ts';
+import { isManualMode } from './manual-mode.ts';
 import type { LampController } from './lamps/controller.ts';
 import { desiredLampFor } from './lamps/controller.ts';
 import type { SessionRow, SessionView } from './views.ts';

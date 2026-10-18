@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { all } from '../src/db.ts';
 import type { LampDriver } from '../src/lamps/driver.ts';
 import { SimulatorLampDriver } from '../src/lamps/simulator.ts';
-import { managerMatcher } from '../src/settings.ts';
+import { managerMatcher } from '../src/manual-mode.ts';
 import { auditActions, Harness, MONDAY_NOON, post, sessionStatus, tableId, tableState, waitFor } from './helpers.ts';
 
 function harness(t: { after: (fn: () => Promise<void>) => void }): Harness {

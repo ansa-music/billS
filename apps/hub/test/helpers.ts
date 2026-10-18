@@ -39,8 +39,14 @@ export class Harness {
   /**
    * Starts a HUB on the same database file, like a process (re)start. The
    * lamp monitor does not poll by itself: tests call `hub.monitor.poll()`.
+   * `options` are extra Hub deps (UPS, sync, power actions…) plus `secure`,
+   * which builds the app like main.ts does: tokens only, no X-Actor fallback.
    */
-  async start(driver = new SimulatorLampDriver({ latencyMs: 5 }), deps: Partial<HubDeps> = {}): Promise<TestHub> {
+  async start(
+    driver = new SimulatorLampDriver({ latencyMs: 5 }),
+    options: Partial<HubDeps> & { secure?: boolean } = {},
+  ): Promise<TestHub> {
+    const { secure, ...deps } = options;
     const db = openDb(this.dbPath, this.clock.now(), this.migrationsDir ? { migrationsDir: this.migrationsDir } : {});
     seedDemo(db, this.clock.now());
     const hub = new Hub({
@@ -55,6 +61,7 @@ export class Harness {
       simulator: driver,
       dbPath: this.dbPath,
       upsSimulator: deps.ups instanceof SimulatorUps ? deps.ups : undefined,
+      trustActorHeader: !secure,
     });
     await app.ready();
     hub.start();

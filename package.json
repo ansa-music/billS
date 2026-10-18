@@ -18,7 +18,8 @@
     "dev:cloud": "npm run dev -w @bills/cloud",
     "dev:cloud-web": "npm run dev -w @bills/cloud-web",
     "start:hub": "npm run start -w @bills/hub",
-    "start:cloud": "npm run start -w @bills/cloud"
+    "start:cloud": "npm run start -w @bills/cloud",
+    "local": "node scripts/local.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

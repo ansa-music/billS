@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ClubSettings, TariffConfig, TariffSetting, UpdateTariffsRequest, Weekday } from '@bills/domain';
+import type { ClubSnapshot, TariffConfig, TariffSetting, UpdateTariffsRequest, Weekday } from '@bills/domain';
 import { validateTariff } from '@bills/domain';
 import { CloudRequestError, fetchClub, updateTariffs } from './api.ts';
 import { WEEKDAYS, currencySymbol, formatDateTime, money, toMajor, toMinor } from './format.ts';
@@ -279,7 +279,7 @@ export function Tariffs({ id }: { id: string }) {
   const [serverError, setServerError] = useState<string | null>(null);
   const [saved, setSaved] = useState<{ version: number; at: number } | null>(null);
 
-  const settings: ClubSettings | undefined = data?.settings;
+  const settings: ClubSnapshot | undefined = data?.settings;
   const currency = data?.club.currency ?? settings?.club.currency ?? 'KZT';
 
   // Take the cloud's list until the owner starts editing; afterwards only an explicit reset replaces it.

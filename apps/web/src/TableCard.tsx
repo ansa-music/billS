@@ -39,16 +39,20 @@ interface Props {
   onPause: (sessionId: string) => void;
   onResume: (sessionId: string) => void;
   onTransfer: (sessionId: string, toTableId: string) => void;
+  /** Opens the table's details panel. */
+  onDetails?: () => void;
 }
 
-const PHASE_LABEL = {
+export type TableCardProps = Props;
+
+export const PHASE_LABEL = {
   free: 'Свободен',
   opening: 'Включаем свет',
   playing: 'Идёт игра',
   paused: 'На паузе',
 } as const;
 
-function LampBadge({ lamp }: { lamp: TableView['lamp'] }) {
+export function LampBadge({ lamp }: { lamp: TableView['lamp'] }) {
   const switching = !lamp.blink && lamp.reported !== lamp.desired;
   // The current sensor disagrees with the relay: a dead bulb or a bypassed relay.
   // A blinking lamp (paused game) is never judged by its sensor.
@@ -80,7 +84,7 @@ function LampBadge({ lamp }: { lamp: TableView['lamp'] }) {
 }
 
 /** Rate now and, if it changes within the hour, when and to what. Recomputed once a minute. */
-function useRate(tariff: TariffConfig | undefined, timezone: string, at: number) {
+export function useRate(tariff: TariffConfig | undefined, timezone: string, at: number) {
   const minute = Math.floor(at / 60_000);
   return useMemo(() => {
     if (!tariff) return null;
@@ -89,7 +93,7 @@ function useRate(tariff: TariffConfig | undefined, timezone: string, at: number)
   }, [tariff, timezone, minute]);
 }
 
-function RateLine(props: {
+export function RateLine(props: {
   tariffName: string;
   tariff: TariffConfig | undefined;
   timezone: string;
@@ -197,6 +201,11 @@ export function TableCard(props: Props) {
         <div className="felt-title">
           <h2>{table.name}</h2>
           <span className="kind">{KIND_LABEL[table.kind]}</span>
+          {props.onDetails && (
+            <button type="button" className="felt-more" onClick={props.onDetails} aria-label={`${table.name}: подробнее`}>
+              Подробнее
+            </button>
+          )}
         </div>
         <div className="felt-foot">
           <LampBadge lamp={table.lamp} />

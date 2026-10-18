@@ -28,7 +28,7 @@ async function startHub(t: { after: (fn: () => Promise<void>) => void }, staticD
   const db = openDb(':memory:', clock.now());
   seedDemo(db, clock.now());
   const hub = new Hub({ db, clock, lampDriver: new SimulatorLampDriver({ latencyMs: 5 }), lampOptions: FAST_LAMPS });
-  const app = buildApp(hub, { staticDir });
+  const app = buildApp(hub, { staticDir, trustActorHeader: true });
   await app.ready();
   t.after(async () => {
     await app.close();

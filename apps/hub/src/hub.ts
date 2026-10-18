@@ -1,3 +1,7 @@
+import { can } from '@bills/domain';
+import type { Actor } from './auth.ts';
+import { AuthService } from './auth.ts';
+import { BarService } from './bar.ts';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
 import { afterCommit, one, run, transaction } from './db.ts';
@@ -15,11 +19,14 @@ import { PowerMonitor, setPowerSettings } from './power/monitor.ts';
 import type { UpsSource } from './power/ups.ts';
 import { CheckService } from './checks.ts';
 import { PrepaidService } from './prepaid.ts';
+import { ReportService } from './reports.ts';
 import type { StopSessionInput } from './sessions.ts';
 import { SessionService } from './sessions.ts';
+import { SettingsService } from './settings.ts';
 import { ShiftService } from './shifts.ts';
-import type { ManualMode } from './settings.ts';
-import { getManualMode, isManualMode, managerMatcher, setManualMode } from './settings.ts';
+import { StaffService } from './staff.ts';
+import type { ManualMode } from './manual-mode.ts';
+import { getManualMode, isManualMode, managerMatcher, setManualMode } from './manual-mode.ts';
 import type { SyncOptions } from './sync.ts';
 import { SyncWorker, syncStatus } from './sync.ts';
 import type { HubState, SessionView } from './views.ts';
@@ -65,6 +72,16 @@ export class Hub {
   readonly shifts: ShiftService;
   readonly sync: SyncWorker | undefined;
   readonly prepaid: PrepaidService;
+  /** Club, tables, tariffs, display and rules. */
+  readonly settings: SettingsService;
+  /** Bar catalog and orders on games. */
+  readonly bar: BarService;
+  /** Staff, roles, PINs, audit log. */
+  readonly staff: StaffService;
+  /** Owner summary. */
+  readonly reports: ReportService;
+  /** Access keys and login sessions. */
+  readonly auth: AuthService;
   readonly #reconcileIntervalMs: number;
   readonly #isManager: (actor: string) => boolean;
   #reconcileTimer: NodeJS.Timeout | undefined;
@@ -118,6 +135,12 @@ export class Hub {
       checks: this.checks,
       lamps: this.lamps,
     });
+    const common = { db: deps.db, clock: deps.clock, events: this.events };
+    this.settings = new SettingsService(common);
+    this.bar = new BarService(common);
+    this.staff = new StaffService(common);
+    this.reports = new ReportService(common);
+    this.auth = new AuthService(common);
   }
 
   /** Restores lamps and pending commands after a (re)start. */
@@ -200,9 +223,20 @@ export class Hub {
     return getManualMode(this.db);
   }
 
-  /** Switches the emergency manual mode. Only a manager may switch it off. */
-  setManualMode(input: { enabled: boolean; reason?: string | undefined; actor: string }): ManualMode {
-    const mode = setManualMode(this.db, this.clock.now(), this.events, { ...input, isManager: this.#isManager });
+  /**
+   * Switches the emergency manual mode. Only a manager may switch it off: a
+   * signed-in employee is judged by role (`lamps.manual_off`), a name-only actor
+   * (tests, HUB_MANAGER_ACTORS) by the name matcher.
+   */
+  setManualMode(input: { enabled: boolean; reason?: string | undefined; actor: string; by?: Actor | undefined }): ManualMode {
+    const by = input.by;
+    const isManager = (name: string) => (by && by.id !== null ? can(by.role, 'lamps.manual_off') : this.#isManager(name));
+    const mode = setManualMode(this.db, this.clock.now(), this.events, {
+      enabled: input.enabled,
+      reason: input.reason,
+      actor: input.actor,
+      isManager,
+    });
     // Leaving manual mode: the controller is back — resync lamps right away.
     if (!input.enabled) {
       this.lamps.reconcile();

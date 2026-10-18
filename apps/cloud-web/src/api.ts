@@ -2,7 +2,7 @@ import type {
   ApiError,
   ClubDetails,
   CloudSessionView,
-  LoginRequest,
+  CloudLoginRequest,
   OwnerOverview,
   OwnerView,
   UpdateTariffsRequest,
@@ -74,7 +74,7 @@ function json(method: string, body: unknown): RequestInit {
 }
 
 export function login(email: string, password: string): Promise<OwnerView> {
-  const body: LoginRequest = { email, password };
+  const body: CloudLoginRequest = { email, password };
   return request<OwnerView>('/api/auth/login', json('POST', body));
 }
 

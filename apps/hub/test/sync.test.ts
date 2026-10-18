@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { ClubSettings, SyncEventsRequest, SyncSnapshotRequest, TariffConfig } from '@bills/domain';
+import type { ClubSnapshot, SyncEventsRequest, SyncSnapshotRequest, TariffConfig } from '@bills/domain';
 import { all, one, run } from '../src/db.ts';
 import { localSnapshot, settingsHash } from '../src/sync.ts';
 import type { SyncWorker } from '../src/sync.ts';
@@ -25,7 +25,7 @@ class FakeCloud {
   /** Non-null: every request fails with this status. */
   failWith: number | null = null;
   settingsVersion = 0;
-  settings: ClubSettings | null = null;
+  settings: ClubSnapshot | null = null;
   lastAcceptedId: number | null = null;
   url = '';
   #server: Server | undefined;

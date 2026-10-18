@@ -1,286 +1,210 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { HubState, SyncStatus } from '@bills/domain';
-import { blinkTable, command, fetchState, setManualMode, setPowerSettings } from './api.ts';
-import { CardBoundary } from './CardBoundary.tsx';
-import { formatClock } from './format.ts';
-import { alertsByTable, matchesFilter } from './hall.ts';
-import { HallToolbar, useHallFilter } from './HallToolbar.tsx';
-import { HardwarePanel, ManualModeBanner } from './Hardware.tsx';
+import { useCallback, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
+import { setManualMode } from './api.ts';
+import { useAuth } from './auth.ts';
+import { ManualModeBanner } from './Hardware.tsx';
 import { useWakeLock } from './kiosk.ts';
+import { LoginPage } from './Login.tsx';
 import { OfflineBanner } from './OfflineBanner.tsx';
-import { PowerBadge } from './PowerBadge.tsx';
-import { ShiftPanel } from './cash/ShiftPanel.tsx';
-import { UnpaidPanel } from './cash/UnpaidPanel.tsx';
-import { AlertsBar, SimulatorPanel } from './Panels.tsx';
-import { openTable } from './prepaid/prepaid.ts';
-import type { PrepaidTarget } from './prepaid/PrepaidDialog.tsx';
-import { PrepaidDialog } from './prepaid/PrepaidDialog.tsx';
-import { TableCard } from './TableCard.tsx';
+import { Link, navigate, REDIRECTS, ROUTES, routeFor, sectionOf, useLocation } from './router.tsx';
+import { BottomNav, Sidebar, Toast, Topbar } from './Shell.tsx';
+import type { NavBadges } from './Shell.tsx';
+import { applyTheme, useTheme } from './theme.ts';
+import { Page } from './ui.tsx';
+import { HubContext, useHallCommands, useHubConnection, useNow } from './useHub.tsx';
+import type { HubContextValue } from './useHub.tsx';
+import { HallSection } from './sections/Hall.tsx';
+import { ChecksSection } from './sections/Checks.tsx';
+import { StatsSection } from './sections/Stats.tsx';
+import { TariffsSection } from './sections/Tariffs.tsx';
+import { JournalSection } from './sections/Journal.tsx';
+import { EquipmentSection } from './sections/Equipment.tsx';
+import { BarMenuPage } from './pages/BarMenu.tsx';
+import { ClubSettingsPage } from './pages/ClubSettings.tsx';
+import { OrdersPage } from './pages/Orders.tsx';
+import { OwnerPage } from './pages/Owner.tsx';
+import { PlatformPage } from './pages/Platform.tsx';
+import { StaffPage } from './pages/Staff.tsx';
 
-const ACTOR_KEY = 'bills.actor';
+/** Route path → page. The table of routes (titles, icons, permissions) lives in router.tsx. */
+const PAGES: Record<string, (query: URLSearchParams) => ReactNode> = {
+  '/': () => <HallSection />,
+  '/checks': () => <ChecksSection />,
+  '/orders': () => <OrdersPage />,
+  '/stats': () => <StatsSection />,
+  '/tariffs': () => <TariffsSection />,
+  '/bar': () => <BarMenuPage />,
+  '/staff': () => <StaffPage />,
+  '/journal': (query) => <JournalSection params={query} />,
+  '/equipment': () => <EquipmentSection />,
+  '/settings': () => <ClubSettingsPage />,
+  '/owner': () => <OwnerPage />,
+  '/platform': () => <PlatformPage />,
+};
 
-function readActor(): string {
-  try {
-    return localStorage.getItem(ACTOR_KEY) ?? 'Кассир';
-  } catch {
-    return 'Кассир';
-  }
-}
-
-function useHubState() {
-  const [state, setState] = useState<HubState | null>(null);
-  const [offset, setOffset] = useState(0);
-  const [online, setOnline] = useState(false);
-  const inFlight = useRef(false);
-  const again = useRef(false);
-
-  // Coalesces bursts of change events into one request at a time.
-  const refresh = useCallback(async () => {
-    if (inFlight.current) {
-      again.current = true;
-      return;
-    }
-    inFlight.current = true;
-    try {
-      do {
-        again.current = false;
-        const s = await fetchState();
-        setState(s);
-        setOffset(s.serverNow - Date.now());
-        setOnline(true);
-      } while (again.current);
-    } catch {
-      setOnline(false);
-    } finally {
-      inFlight.current = false;
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-    const events = new EventSource('/api/events');
-    events.onopen = () => void refresh();
-    events.addEventListener('changed', () => void refresh());
-    events.onerror = () => setOnline(false);
-    const poll = setInterval(() => void refresh(), 15_000);
-    return () => {
-      events.close();
-      clearInterval(poll);
-    };
-  }, [refresh]);
-
-  return { state, offset, online, refresh };
-}
-
-/** «Облако: …» next to the HUB link status; hidden when the club runs without a cloud. */
-function CloudStatus({ sync, timezone }: { sync: SyncStatus; timezone: string }) {
-  if (!sync.enabled) return null;
-  let state: 'ok' | 'queue' | 'error' | 'wait';
-  let text: string;
-  let title: string | undefined;
-  if (sync.lastError) {
-    state = 'error';
-    text = 'Облако: нет связи';
-    title = sync.lastErrorAt ? `${sync.lastError} (${formatClock(sync.lastErrorAt, timezone)})` : sync.lastError;
-  } else if (sync.pending > 0) {
-    state = 'queue';
-    text = `Облако: ${sync.pending} в очереди`;
-    title = sync.lastSentAt ? `Последняя отправка ${formatClock(sync.lastSentAt, timezone)}` : undefined;
-  } else if (sync.lastSentAt) {
-    state = 'ok';
-    text = 'Облако: синхронизировано';
-    title = `Последняя отправка ${formatClock(sync.lastSentAt, timezone)}`;
-  } else {
-    state = 'wait';
-    text = 'Облако: подключение…';
-  }
-  return (
-    <span className="cloud" data-state={state} title={title}>
-      {text}
-    </span>
-  );
-}
-
-function useNow(intervalMs = 1000): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(t);
-  }, [intervalMs]);
-  return now;
-}
-
+/**
+ * The app shell: one HUB connection, the logged-in staff member and their
+ * permissions, the sidebar / top bar / phone tabs, and the page for the
+ * current hash route inside. The hall-tablet helpers (screen wake lock,
+ * fullscreen) live here too, so every page gets them.
+ */
 export function App() {
-  const { state, offset, online, refresh } = useHubState();
+  const hub = useHubConnection();
+  const { path, query } = useLocation();
+  const { staff, role, can, logout } = useAuth();
   const now = useNow();
-  const [actor, setActor] = useState(readActor);
-  const [busy, setBusy] = useState<Set<string>>(new Set());
+  const { theme, cycle } = useTheme();
   const [toast, setToast] = useState<string | null>(null);
-  const [filter, setFilter] = useHallFilter();
-  const [prepaidFor, setPrepaidFor] = useState<PrepaidTarget | null>(null);
+  const actor = staff?.name ?? 'unknown';
+  const commands = useHallCommands(actor, hub.refresh, setToast);
   useWakeLock();
 
+  // Old addresses from bookmarks and notes.
   useEffect(() => {
-    try {
-      localStorage.setItem(ACTOR_KEY, actor);
-    } catch {
-      // Storage may be blocked; the name just will not be remembered.
-    }
-  }, [actor]);
+    const to = REDIRECTS[path];
+    if (to) navigate(to, Object.fromEntries(query));
+  }, [path, query]);
+
+  const state = hub.state;
+  const display = state?.settings.display;
+  const route = routeFor(path);
+  const title = route?.title ?? 'Страницы нет';
 
   useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 5000);
-    return () => clearTimeout(t);
-  }, [toast]);
+    document.title = `${title} — ${display?.title ?? state?.club.name ?? 'Billiard Control'}`;
+  }, [title, display?.title, state?.club.name]);
 
-  // `keys` are the cards to lock while the command runs (a transfer locks both tables).
-  const run = useCallback(
-    async (keys: string | string[], fn: () => Promise<unknown>) => {
-      const locked = Array.isArray(keys) ? keys : [keys];
-      setBusy((b) => {
-        const next = new Set(b);
-        for (const k of locked) next.add(k);
-        return next;
-      });
-      try {
-        await fn();
-      } catch (e) {
-        setToast((e as Error).message);
-      } finally {
-        setBusy((b) => {
-          const next = new Set(b);
-          for (const k of locked) next.delete(k);
-          return next;
-        });
-        void refresh();
-      }
-    },
-    [refresh],
-  );
+  // Hall screen settings from the club → <html>, where the CSS picks them up.
+  // The theme chosen on this device wins over the club's; `auto` follows the club.
+  useEffect(() => {
+    applyTheme(theme, display?.theme ?? 'auto');
+    const html = document.documentElement;
+    const cards = display?.cardSize ?? 'normal';
+    if (cards === 'normal') delete html.dataset.cards;
+    else html.dataset.cards = cards;
+    if (role === 'waiter' && display?.waiterSees === 'time') html.dataset.hideAmounts = '';
+    else delete html.dataset.hideAmounts;
+  }, [theme, display?.theme, display?.cardSize, display?.waiterSees, role]);
+
+  const closeToast = useCallback(() => setToast(null), []);
+
+  // Without a session the HUB answers 401 to /api/state, so the login page comes
+  // before the boot screen; LoginPage signs in through useAuth and stores the token.
+  if (path === '/login' || !staff) {
+    const next = path === '/login' ? (query.get('next') ?? '/') : path;
+    return (
+      <div className="login-shell">
+        <LoginPage next={next} />
+      </div>
+    );
+  }
 
   if (!state) {
     return (
       <main className="boot">
-        <p>{online ? 'Загрузка…' : 'Подключаемся к HUB клуба…'}</p>
+        <span className="ball boot-ball" aria-hidden="true">
+          8
+        </span>
+        <p>{hub.online ? 'Загрузка…' : 'Подключаемся к HUB клуба…'}</p>
       </main>
     );
   }
 
-  const serverNow = now + offset;
-  const tableAlerts = alertsByTable(state.alerts);
-  const shown = state.tables.filter((t) => matchesFilter(t, filter, tableAlerts.get(t.id)));
+  const ctx: HubContextValue = {
+    state,
+    serverNow: now + hub.offset,
+    offset: hub.offset,
+    online: hub.online,
+    version: hub.version,
+    layoutVersion: hub.layoutVersion,
+    refresh: hub.refresh,
+    actor,
+    role,
+    can,
+    run: commands.run,
+    isBusy: commands.isBusy,
+    notify: setToast,
+    openTable: commands.openTable,
+    stopSession: commands.stopSession,
+    pauseSession: commands.pauseSession,
+    resumeSession: commands.resumeSession,
+    transferSession: commands.transferSession,
+    resolveAlert: commands.resolveAlert,
+  };
+
+  const visible = ROUTES.filter((r) => !r.hidden && r.action !== null && can(r.action));
+  const lampProblems = state.tables.filter((t) => t.lamp.reported === 'UNKNOWN').length;
+  const powerProblem = state.power.configured && (!state.power.reachable || state.power.onBattery) ? 1 : 0;
+  const badges: NavBadges = {
+    '/checks': { count: state.unpaid.length + state.checks.length, tone: 'info' },
+    '/equipment': { count: lampProblems + powerProblem + (state.manualMode.enabled ? 1 : 0), tone: 'danger' },
+  };
+
+  let content: ReactNode;
+  const render = route ? PAGES[route.path] : undefined;
+  if (!route || !render) {
+    content = (
+      <Page title="Страницы нет">
+        <p>
+          Такого раздела нет. <Link to="/">На экран зала</Link>
+        </p>
+      </Page>
+    );
+  } else if (route.action && !can(route.action)) {
+    content = (
+      <Page title="Нет доступа" subtitle={`Раздел «${route.title}» недоступен для вашей роли.`}>
+        <p>
+          <Link to="/">На экран зала</Link> или <Link to="/login">войти под другим сотрудником</Link>.
+        </p>
+      </Page>
+    );
+  } else {
+    content = render(query);
+  }
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <span className="ball" aria-hidden="true">
-            8
-          </span>
-          <div>
-            <h1>{state.club.name}</h1>
-            <p className="muted">Экран зала</p>
-          </div>
-        </div>
-        <div className="topbar-right">
-          <label className="actor">
-            <span className="muted">Сотрудник</span>
-            <input value={actor} onChange={(e) => setActor(e.target.value)} maxLength={60} />
-          </label>
-          <span className="clock">{formatClock(serverNow, state.club.timezone)}</span>
-          <PowerBadge power={state.power} />
-          <span className="conn" data-online={online || undefined}>
-            {online ? 'HUB на связи' : 'Нет связи с HUB'}
-          </span>
-          <CloudStatus sync={state.sync} timezone={state.club.timezone} />
-        </div>
-      </header>
-
-      <OfflineBanner online={online} />
-
-      <ManualModeBanner
-        mode={state.manualMode}
-        timezone={state.club.timezone}
-        busy={busy.has('manual') || !online}
-        onDisable={() => run('manual', () => setManualMode(actor, false))}
-      />
-
-      <AlertsBar
-        alerts={state.alerts}
-        timezone={state.club.timezone}
-        busy={busy.size > 0}
-        onResolve={(id) => run(`alert:${id}`, () => command(`/api/alerts/${id}/resolve`, actor))}
-      />
-
-      <div className="layout">
-        <div className="hall">
-          <HallToolbar tables={state.tables} alerts={tableAlerts} filter={filter} onFilter={setFilter} />
-          {shown.length === 0 && <p className="empty">В этом фильтре столов нет</p>}
-          <main className="tables" aria-label="Столы">
-            {shown.map((table) => (
-              <CardBoundary key={table.id} name={table.name} resetKey={table}>
-                <TableCard
-                  table={table}
-                  tables={state.tables}
-                  tariffs={state.tariffs}
-                  timezone={state.club.timezone}
-                  alert={tableAlerts.get(table.id)}
-                  currency={state.club.currency}
-                  serverNow={serverNow}
-                  busy={busy.has(table.id) || !online}
-                  shiftOpen={state.shift !== null}
-                  onOpen={(tariffId, prepaidMinutes) =>
-                    run(table.id, () => openTable(table.id, actor, tariffId, prepaidMinutes))
-                  }
-                  onPrepaid={(tariffId, minutes) => setPrepaidFor({ tableId: table.id, tariffId, minutes })}
-                  onStop={(sessionId) => run(table.id, () => command(`/api/sessions/${sessionId}/stop`, actor))}
-                  onPause={(sessionId) => run(table.id, () => command(`/api/sessions/${sessionId}/pause`, actor))}
-                  onResume={(sessionId) =>
-                    run(table.id, () => command(`/api/sessions/${sessionId}/resume`, actor))
-                  }
-                  onTransfer={(sessionId, toTableId) =>
-                    run([table.id, toTableId], () =>
-                      command(`/api/sessions/${sessionId}/transfer`, actor, { toTableId }),
-                    )
-                  }
-                />
-              </CardBoundary>
-            ))}
+    <HubContext.Provider value={ctx}>
+      <div className="shell" data-section={sectionOf(path)}>
+        <Sidebar
+          title={display?.title ?? state.club.name}
+          logoUrl={display?.logoUrl ?? null}
+          routes={visible}
+          active={path}
+          badges={badges}
+          online={hub.online}
+        />
+        <div className="shell-main">
+          <Topbar
+            title={title}
+            state={state}
+            serverNow={ctx.serverNow}
+            online={hub.online}
+            staff={staff}
+            onLogout={() => {
+              // Drops the session on the HUB (best effort), then shows the login page.
+              void logout().finally(() => navigate('/login'));
+            }}
+            theme={theme}
+            onTheme={cycle}
+            onResolveAlert={(id) => void commands.resolveAlert(id)}
+            canResolveAlerts={can('alert.resolve')}
+            busy={commands.anyBusy}
+          />
+          <OfflineBanner online={hub.online} />
+          <ManualModeBanner
+            mode={state.manualMode}
+            timezone={state.club.timezone}
+            busy={commands.isBusy('manual') || !hub.online}
+            canDisable={can('equipment.view')}
+            onDisable={() => void commands.run('manual', () => setManualMode(actor, false))}
+          />
+          <main className="content" id="content">
+            {content}
           </main>
         </div>
-        <aside className="side">
-          <ShiftPanel state={state} actor={actor} refresh={refresh} notify={setToast} />
-          <UnpaidPanel state={state} actor={actor} refresh={refresh} notify={setToast} />
-          <HardwarePanel
-            state={state}
-            busy={busy.has('manual') || !online}
-            onBlink={(id) => run(`blink:${id}`, () => blinkTable(id, actor))}
-            onManual={(enabled, reason) => run('manual', () => setManualMode(actor, enabled, reason))}
-            onAutoPause={(enabled) => run('manual', () => setPowerSettings(actor, { autoPauseOnPowerLoss: enabled }))}
-          />
-          <SimulatorPanel onError={setToast} />
-        </aside>
+        <BottomNav routes={visible} active={path} badges={badges} />
+        {toast && <Toast message={toast} onClose={closeToast} />}
       </div>
-
-      {prepaidFor && (
-        <PrepaidDialog
-          key={prepaidFor.tableId}
-          state={state}
-          actor={actor}
-          refresh={refresh}
-          notify={setToast}
-          serverNow={serverNow}
-          target={prepaidFor}
-          onClose={() => setPrepaidFor(null)}
-        />
-      )}
-
-      {toast && (
-        <div className="toast" role="status" onClick={() => setToast(null)}>
-          {toast}
-        </div>
-      )}
-    </div>
+    </HubContext.Provider>
   );
 }

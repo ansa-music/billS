@@ -78,7 +78,7 @@ export interface StaffSetting {
   isActive: boolean;
 }
 
-export interface ClubSettings {
+export interface ClubSnapshot {
   /** Monotonic per club. 0 = nothing edited in the cloud yet. */
   version: number;
   club: { name: string; timezone: string; currency: string };
@@ -106,7 +106,7 @@ export interface SyncSnapshotResponse {
 }
 
 /** DOWN: GET /sync/settings?since=<version>. */
-export type SyncSettingsResponse = { changed: false; version: number } | ({ changed: true } & ClubSettings);
+export type SyncSettingsResponse = { changed: false; version: number } | ({ changed: true } & ClubSnapshot);
 
 /** Reported by the HUB in GET /api/state as `sync`. */
 export interface SyncStatus {
@@ -131,7 +131,7 @@ export interface OwnerView {
   company: { id: string; name: string };
 }
 
-export interface LoginRequest {
+export interface CloudLoginRequest {
   email: string;
   password: string;
 }
@@ -245,7 +245,7 @@ export interface ClubDetails {
   /** Open first, then recently resolved. */
   alerts: CloudAlertView[];
   recentSessions: CloudSessionView[];
-  settings: ClubSettings;
+  settings: ClubSnapshot;
 }
 
 export interface UpdateTariffsRequest {
@@ -254,5 +254,5 @@ export interface UpdateTariffsRequest {
 }
 
 export interface UpdateTariffsResponse {
-  settings: ClubSettings;
+  settings: ClubSnapshot;
 }

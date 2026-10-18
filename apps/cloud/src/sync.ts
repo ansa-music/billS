@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type {
-  ClubSettings,
+  ClubSnapshot,
   SyncEventsRequest,
   SyncEventsResponse,
   SyncSettingsResponse,
@@ -207,7 +207,7 @@ export async function updateTariffs(
   return db.transaction(async (tx) => {
     const current = await loadSettings(tx, club);
     for (const old of current.tariffs) if (!seen.has(old.id)) next.push({ ...old, isActive: false });
-    const settings: ClubSettings = {
+    const settings: ClubSnapshot = {
       version: current.version + 1,
       club: current.club,
       tariffs: next,

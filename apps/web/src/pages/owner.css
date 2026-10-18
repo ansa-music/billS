@@ -1,0 +1,263 @@
+/* Owner cabinet (#/owner) and platform mock (#/platform). Only tokens from
+   styles.css / app.css, so both themes work; charts are inline SVG that take
+   the full width of their panel. */
+
+/* Toolbar: club switcher, date, refresh. */
+
+.owner-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.owner-clubs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.owner-clubs .chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.owner-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.owner-date input[type='date'] {
+  min-height: 44px;
+  max-width: 180px;
+}
+
+.owner-note {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Stat tiles: colored states. */
+
+.stat[data-danger] .stat-value {
+  color: var(--danger);
+}
+
+.stat[data-warn] .stat-value {
+  color: var(--warn);
+}
+
+.stat[data-accent] .stat-value {
+  color: var(--accent);
+}
+
+/* Charts */
+
+.chart-box {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  overflow: visible;
+}
+
+.chart text {
+  fill: currentColor;
+  font-size: 11px;
+}
+
+.chart .label {
+  fill: var(--text);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.chart .grid {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+
+.chart .grid[data-major] {
+  stroke-dasharray: none;
+}
+
+.chart .hit {
+  fill: transparent;
+}
+
+.chart .bar {
+  fill: var(--accent);
+  transition: opacity 0.15s;
+}
+
+.chart .bar[data-low] {
+  fill: color-mix(in oklab, var(--accent) 45%, var(--surface-2));
+}
+
+.chart .bar-group:hover .bar,
+.chart .row-group:hover .hbar {
+  opacity: 0.8;
+}
+
+.chart .area {
+  fill: color-mix(in oklab, var(--accent) 18%, transparent);
+}
+
+.chart .line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart .dot {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.chart .dot[data-max] {
+  fill: var(--accent);
+}
+
+.chart .point-group:hover .dot {
+  r: 6;
+}
+
+.chart .track {
+  fill: var(--surface-2);
+}
+
+.chart .hbar {
+  fill: var(--accent);
+}
+
+/* Alerts and quick links */
+
+.owner-alerts > li {
+  align-items: flex-start;
+}
+
+.owner-alerts .alert-time {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.owner-alerts .alert-table {
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+.owner-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.owner-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.owner-links a:hover {
+  border-color: var(--accent);
+}
+
+.owner-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  color: var(--danger);
+}
+
+/* Platform mock */
+
+.platform-banner {
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px dashed var(--warn);
+  background: color-mix(in oklab, var(--warn) 12%, transparent);
+  font-weight: 600;
+}
+
+.company-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.company-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.company-meta {
+  display: grid;
+  gap: 2px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.company-meta strong {
+  color: var(--text);
+}
+
+.company-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.company-actions .btn {
+  flex: none;
+}
+
+.hub-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.hub-status::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+.hub-status[data-online]::before {
+  background: var(--accent);
+}
+
+@media (max-width: 480px) {
+  .owner-date input[type='date'] {
+    max-width: 150px;
+  }
+}

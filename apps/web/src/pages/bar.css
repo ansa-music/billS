@@ -1,0 +1,522 @@
+/* Bar and menu (stage 4): the catalog admin page and the waiter's order page.
+   Only tokens from styles.css / app.css, so both themes work. Touch targets
+   are at least 44px; phones get card lists instead of wide tables. */
+
+/* ── Shared ─────────────────────────────────────────────────────────────── */
+
+.bar-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bar-chips .chip[data-off] {
+  color: var(--muted);
+  border-style: dashed;
+}
+
+.bar-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.bar-toolbar .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.bar-error {
+  color: var(--danger);
+  font-size: 14px;
+}
+
+.bar-money {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── Catalog admin: products table → cards on phones ────────────────────── */
+
+.bar-products {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.bar-products th,
+.bar-products td {
+  text-align: left;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.bar-products th {
+  border-top: none;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.bar-products td.num,
+.bar-products th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bar-products tr[data-inactive] .bar-product-name {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklab, var(--muted) 60%, transparent);
+}
+
+.bar-product-name {
+  font-weight: 600;
+}
+
+.bar-products .actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.bar-products .cell-label {
+  display: none;
+}
+
+/* A switch that looks like a chip and is big enough for a finger. */
+.bar-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  user-select: none;
+}
+
+.bar-switch input {
+  min-height: auto;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.bar-switch[data-on] {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 18%, var(--surface-2));
+}
+
+.bar-switch:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 720px) {
+  .bar-products,
+  .bar-products tbody,
+  .bar-products tr,
+  .bar-products td {
+    display: block;
+  }
+
+  .bar-products thead {
+    display: none;
+  }
+
+  .bar-products tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 12px;
+    padding: 12px 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .bar-products tr:first-child {
+    border-top: none;
+  }
+
+  .bar-products td {
+    border-top: none;
+    padding: 0;
+  }
+
+  .bar-products td.cell-name {
+    grid-column: 1;
+    font-size: 16px;
+  }
+
+  .bar-products td.cell-price {
+    grid-column: 2;
+    grid-row: 1;
+    font-size: 16px;
+    font-weight: 650;
+    text-align: right;
+  }
+
+  .bar-products td.cell-category,
+  .bar-products td.cell-stock {
+    grid-column: 1 / -1;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .bar-products td.cell-active,
+  .bar-products td.cell-actions {
+    grid-column: 1 / -1;
+  }
+
+  .bar-products td.cell-actions .actions {
+    justify-content: flex-start;
+  }
+
+  .bar-products .cell-label {
+    display: inline;
+    color: var(--muted);
+  }
+}
+
+/* ── Waiter: tables that can take an order ──────────────────────────────── */
+
+.order-targets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.order-target {
+  display: grid;
+  gap: 6px;
+  min-height: 96px;
+  padding: 12px 14px;
+  text-align: left;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.order-target:hover {
+  background: var(--surface-2);
+}
+
+.order-target[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 14%, var(--surface));
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.order-target:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.order-target-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.order-target-head strong {
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.order-target .phase {
+  font-size: 11px;
+}
+
+.order-target .phase[data-phase='unpaid'] {
+  background: color-mix(in oklab, var(--warn) 25%, transparent);
+  color: var(--warn);
+}
+
+.order-target .phase[data-phase='playing'] {
+  background: color-mix(in oklab, var(--lamp) 25%, transparent);
+  color: var(--text);
+}
+
+.order-target-meta {
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.order-target-meta .line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.order-target-total {
+  font-size: 17px;
+  font-weight: 650;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A waiter sees only time when the club says so (Layout sets data-hide-amounts). */
+:root[data-hide-amounts] .order-target .amount,
+:root[data-hide-amounts] .order-target .order-target-total,
+:root[data-hide-amounts] .order-composer .amount {
+  display: none;
+}
+
+/* ── Waiter: order composer ─────────────────────────────────────────────── */
+
+.order-composer {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .order-composer {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+
+  .order-cart {
+    position: sticky;
+    top: 72px;
+  }
+}
+
+.order-products {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.order-product {
+  display: grid;
+  gap: 4px;
+  align-content: center;
+  min-height: 64px;
+  padding: 8px 12px;
+  text-align: left;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.order-product:not(:disabled):hover {
+  border-color: var(--accent);
+}
+
+.order-product:not(:disabled):active {
+  background: color-mix(in oklab, var(--accent) 18%, var(--surface-2));
+}
+
+.order-product:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.order-product[data-in-cart] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.order-product-name {
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.order-product-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.order-product-count {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.order-cart {
+  display: grid;
+  gap: 10px;
+}
+
+.order-cart-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.order-cart-lines > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.order-cart-lines > li:first-child {
+  border-top: none;
+}
+
+.order-cart-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.order-cart-sub {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.order-qty {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  grid-row: 1 / span 2;
+  grid-column: 2;
+}
+
+.order-qty .btn {
+  min-width: 44px;
+  padding: 0;
+  flex: none;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.order-qty output {
+  min-width: 32px;
+  text-align: center;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.order-cart-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-weight: 650;
+}
+
+.order-cart-total .bar-money {
+  font-size: 20px;
+}
+
+/* ── Waiter: orders of the game ─────────────────────────────────────────── */
+
+.order-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.order-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.order-card[data-cancelled] {
+  opacity: 0.7;
+}
+
+.order-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+
+.order-card-head .muted {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.order-card-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  font-size: 14px;
+}
+
+.order-card-items li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.order-card[data-cancelled] .order-card-items li span:first-child {
+  text-decoration: line-through;
+}
+
+.order-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.order-card-total {
+  font-weight: 650;
+  font-size: 16px;
+}
+
+.order-card-note {
+  font-size: 13px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .order-targets {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+
+  .order-products {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

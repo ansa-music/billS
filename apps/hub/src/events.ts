@@ -1,7 +1,19 @@
 import { EventEmitter } from 'node:events';
 
 export interface ChangeEvent {
-  kind: 'session' | 'lamp' | 'alert' | 'check' | 'shift' | 'settings' | 'power';
+  kind:
+    | 'session'
+    | 'lamp'
+    | 'alert'
+    | 'check'
+    | 'shift'
+    | 'settings'
+    | 'power'
+    | 'layout'
+    | 'order'
+    | 'catalog'
+    | 'club'
+    | 'staff';
   tableId?: string;
 }
 

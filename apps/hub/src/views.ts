@@ -5,24 +5,37 @@ import type {
   CheckPaymentView,
   CheckStatus,
   CheckView,
+  ClubSettings,
   DiscountKind,
   HubState,
+  OrderItemView,
+  OrderView,
   PauseReason,
   PauseSpan,
   PaymentMethod,
+  PowerView,
   SessionStatus,
   SessionView,
   ShiftLedger,
   ShiftStatus,
   ShiftView,
+  SyncStatus,
   TableView,
   TariffConfig,
 } from '@bills/domain';
-import { calculateChargeWithPauses, checkTotals, minorPerMajor, prepaidDeadline, shiftTotals, unpaidSpans } from '@bills/domain';
+import {
+  calculateChargeWithPauses,
+  checkTotals,
+  minorPerMajor,
+  normalizeClubSettings,
+  prepaidDeadline,
+  shiftTotals,
+  unpaidSpans,
+} from '@bills/domain';
 import type { Db, Param } from './db.ts';
 import { all, one } from './db.ts';
 import { HubError } from './errors.ts';
-import { getManualMode } from './settings.ts';
+import { getManualMode } from './manual-mode.ts';
 
 export type { AlertView, CheckView, HubState, SessionView, ShiftView, TableView };
 
@@ -67,6 +80,24 @@ export interface SessionRow {
   prepaid_warned_at: number | null;
 }
 
+/** The club this HUB serves. */
+export function clubId(db: Db): string {
+  const club = one<{ id: string }>(db, 'SELECT id FROM clubs ORDER BY created_at LIMIT 1');
+  if (!club) throw new HubError(503, 'CLUB_NOT_CONFIGURED', 'Клуб не настроен');
+  return club.id;
+}
+
+/** Sum of open bar orders on a game, minor units. */
+export function ordersTotalOf(db: Db, sessionId: string): number {
+  return (
+    one<{ total: number | null }>(
+      db,
+      "SELECT SUM(total) AS total FROM bar_orders WHERE session_id = ? AND status = 'OPEN'",
+      sessionId,
+    )?.total ?? 0
+  );
+}
+
 export interface PauseRow {
   id: string;
   session_id: string;
@@ -103,6 +134,26 @@ export function loadSessionRow(db: Db, id: string): SessionRow | undefined {
   return one<SessionRow>(db, `${SESSION_SQL} WHERE s.id = ?`, id);
 }
 
+/** Pauses of the given games (any status), keyed by game id. */
+export function loadPauseSpansByIds(db: Db, sessionIds: string[]): Map<string, PauseSpan[]> {
+  const map = new Map<string, PauseSpan[]>();
+  if (sessionIds.length === 0) return map;
+  const rows = all<PauseRow>(
+    db,
+    `SELECT * FROM session_pauses WHERE session_id IN (SELECT value FROM json_each(?)) ORDER BY paused_at, rowid`,
+    JSON.stringify(sessionIds),
+  );
+  for (const r of rows) {
+    let list = map.get(r.session_id);
+    if (!list) {
+      list = [];
+      map.set(r.session_id, list);
+    }
+    list.push(toPauseSpan(r));
+  }
+  return map;
+}
+
 export function toPauseSpan(p: PauseRow): PauseSpan {
   return { from: p.paused_at, to: p.resumed_at, reason: p.reason };
 }
@@ -137,7 +188,8 @@ export function loadPauseSpansFor(db: Db, clubId: string, statuses: readonly Sto
   return map;
 }
 
-export function toSessionView(row: SessionRow, pauses: PauseSpan[], now: number): SessionView {
+/** `ordersTotal` — open bar orders on the game (stage 4), shown next to the time charge. */
+export function toSessionView(row: SessionRow, pauses: PauseSpan[], now: number, ordersTotal = 0): SessionView {
   const tariff = JSON.parse(row.tariff_snapshot) as TariffConfig;
   const status = effectiveStatus(row);
   let { amount, played_seconds: playedSeconds, billed_seconds: billedSeconds, paused_seconds: pausedSeconds } = row;
@@ -167,6 +219,7 @@ export function toSessionView(row: SessionRow, pauses: PauseSpan[], now: number)
     pauses,
     pausedAt: status === 'PAUSED' ? row.pause_started_at : null,
     resumeRequestedAt: status === 'PAUSED' ? row.resume_requested_at : null,
+    ordersTotal,
     failureReason: row.failure_reason,
     openedBy: row.opened_by,
     stoppedBy: row.stopped_by,
@@ -192,15 +245,104 @@ export function toSessionView(row: SessionRow, pauses: PauseSpan[], now: number)
 export function loadSession(db: Db, id: string, now: number): SessionView {
   const row = loadSessionRow(db, id);
   if (!row) throw new HubError(404, 'SESSION_NOT_FOUND', 'Игра не найдена');
-  return toSessionView(row, loadPauseSpans(db, id), now);
+  return toSessionView(row, loadPauseSpans(db, id), now, ordersTotalOf(db, id));
 }
 
-import type { PowerView, SyncStatus } from '@bills/domain';
+export function loadSettings(db: Db, club: string): ClubSettings {
+  const row = one<{ settings: string }>(db, 'SELECT settings FROM clubs WHERE id = ?', club);
+  let parsed: unknown = {};
+  try {
+    parsed = JSON.parse(row?.settings ?? '{}');
+  } catch {
+    // A damaged JSON must not take the hall screen down: fall back to defaults.
+  }
+  return normalizeClubSettings(parsed);
+}
+
+export interface OrderRow {
+  id: string;
+  club_id: string;
+  session_id: string;
+  table_id: string;
+  status: OrderView['status'];
+  note: string | null;
+  total: number;
+  created_at: number;
+  created_by: string;
+  cancelled_at: number | null;
+  cancelled_by: string | null;
+  cancel_reason: string | null;
+}
+
+interface OrderItemRow {
+  id: string;
+  order_id: string;
+  product_id: string;
+  title: string;
+  price: number;
+  qty: number;
+  amount: number;
+}
+
+export function toOrderViews(db: Db, rows: OrderRow[]): OrderView[] {
+  if (rows.length === 0) return [];
+  const ids = rows.map((r) => r.id);
+  const items = new Map<string, OrderItemView[]>();
+  for (const it of all<OrderItemRow>(
+    db,
+    `SELECT id, order_id, product_id, title, price, qty, amount FROM bar_order_items
+     WHERE order_id IN (${ids.map(() => '?').join(',')}) ORDER BY created_at, id`,
+    ...ids,
+  )) {
+    let list = items.get(it.order_id);
+    if (!list) items.set(it.order_id, (list = []));
+    list.push({ id: it.id, productId: it.product_id, title: it.title, price: it.price, qty: it.qty, amount: it.amount });
+  }
+  return rows.map((r) => ({
+    id: r.id,
+    sessionId: r.session_id,
+    tableId: r.table_id,
+    status: r.status,
+    note: r.note,
+    items: items.get(r.id) ?? [],
+    total: r.total,
+    createdAt: r.created_at,
+    createdBy: r.created_by,
+    cancelledAt: r.cancelled_at,
+    cancelledBy: r.cancelled_by,
+    cancelReason: r.cancel_reason,
+  }));
+}
+
+export function loadOrder(db: Db, id: string): OrderView {
+  const row = one<OrderRow>(db, 'SELECT * FROM bar_orders WHERE id = ?', id);
+  if (!row) throw new HubError(404, 'ORDER_NOT_FOUND', 'Заказ не найден');
+  return toOrderViews(db, [row])[0]!;
+}
+
+/** Open bar orders on games that are live or waiting for payment, plus their totals per game. */
+function openOrders(db: Db, club: string): { orders: OrderView[]; bySession: Map<string, number> } {
+  const orders = toOrderViews(
+    db,
+    all<OrderRow>(
+      db,
+      `SELECT o.* FROM bar_orders o JOIN table_sessions s ON s.id = o.session_id
+       WHERE o.club_id = ? AND o.status = 'OPEN' AND s.status IN ('OPENING', 'ACTIVE', 'AWAITING_PAYMENT')
+       ORDER BY o.created_at`,
+      club,
+    ),
+  );
+  const bySession = new Map<string, number>();
+  for (const o of orders) bySession.set(o.sessionId, (bySession.get(o.sessionId) ?? 0) + o.total);
+  return { orders, bySession };
+}
 
 /** `power` comes from the power monitor and `sync` from the sync worker (or `syncStatus(db, false)` without a cloud). */
 export function buildState(db: Db, now: number, power: PowerView, sync: SyncStatus): HubState {
   const club = one<HubState['club']>(db, 'SELECT id, name, timezone, currency FROM clubs ORDER BY created_at LIMIT 1');
   if (!club) throw new HubError(503, 'CLUB_NOT_CONFIGURED', 'Клуб не настроен');
+
+  const settings = loadSettings(db, club.id);
 
   const tariffs = all<{ id: string; name: string; config: string }>(
     db,
@@ -209,7 +351,8 @@ export function buildState(db: Db, now: number, power: PowerView, sync: SyncStat
   ).map((t) => ({ id: t.id, name: t.name, config: JSON.parse(t.config) as TariffConfig }));
 
   const pauses = loadPauseSpansFor(db, club.id, ['OPENING', 'ACTIVE', 'AWAITING_PAYMENT']);
-  const view = (r: SessionRow) => toSessionView(r, pauses.get(r.id) ?? [], now);
+  const { orders, bySession: ordersBySession } = openOrders(db, club.id);
+  const view = (r: SessionRow) => toSessionView(r, pauses.get(r.id) ?? [], now, ordersBySession.get(r.id) ?? 0);
 
   const live = new Map(
     all<SessionRow>(db, `${SESSION_SQL} WHERE s.club_id = ? AND s.status IN ('OPENING', 'ACTIVE')`, club.id).map((r) => [
@@ -266,7 +409,21 @@ export function buildState(db: Db, now: number, power: PowerView, sync: SyncStat
   const open = openShiftRow(db, club.id);
   const shift = open ? toShiftView(db, open) : null;
 
-  return { serverNow: now, club, tariffs, tables, unpaid, checks, shift, alerts, manualMode: getManualMode(db), power, sync };
+  return {
+    serverNow: now,
+    club,
+    settings,
+    tariffs,
+    tables,
+    unpaid,
+    orders,
+    checks,
+    shift,
+    alerts,
+    manualMode: getManualMode(db),
+    power,
+    sync,
+  };
 }
 
 // ── Checks ───────────────────────────────────────────────────────────────────
