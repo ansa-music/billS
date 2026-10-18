@@ -22,6 +22,7 @@ import { calculateChargeWithPauses, checkTotals, minorPerMajor, shiftTotals, unp
 import type { Db, Param } from './db.ts';
 import { all, one } from './db.ts';
 import { HubError } from './errors.ts';
+import { getManualMode } from './settings.ts';
 
 export type { AlertView, CheckView, HubState, SessionView, ShiftView, TableView };
 
@@ -49,6 +50,8 @@ export interface SessionRow {
   stopped_by: string | null;
   cancel_reason: string | null;
   cancel_approved_by: string | null;
+  /** Opened in manual mode (1): billing started at the button press. */
+  manual: number;
   /** Joined from check_items. */
   check_id: string | null;
   /** The open pause, if any (joined from session_pauses). */
@@ -158,6 +161,7 @@ export function toSessionView(row: SessionRow, pauses: PauseSpan[], now: number)
     failureReason: row.failure_reason,
     openedBy: row.opened_by,
     stoppedBy: row.stopped_by,
+    manual: row.manual === 1,
     checkId: row.check_id ?? null,
     cancelReason: row.cancel_reason ?? null,
     cancelApprovedBy: row.cancel_approved_by ?? null,
@@ -198,9 +202,11 @@ export function buildState(db: Db, now: number): HubState {
     desired: 'ON' | 'OFF' | null;
     reported: 'ON' | 'OFF' | 'UNKNOWN' | null;
     blink: number | null;
+    current_on: number | null;
+    polled_at: number | null;
   }>(
     db,
-    `SELECT t.id, t.name, t.kind, t.default_tariff_id, l.desired, l.reported, l.blink
+    `SELECT t.id, t.name, t.kind, t.default_tariff_id, l.desired, l.reported, l.blink, l.current_on, l.polled_at
      FROM billiard_tables t LEFT JOIN lamp_states l ON l.table_id = t.id
      WHERE t.club_id = ? AND t.is_active = 1
      ORDER BY t.sort_order, t.name`,
@@ -210,7 +216,13 @@ export function buildState(db: Db, now: number): HubState {
     name: t.name,
     kind: t.kind,
     defaultTariffId: t.default_tariff_id,
-    lamp: { desired: t.desired ?? 'OFF', reported: t.reported ?? 'UNKNOWN', blink: (t.desired ?? 'OFF') === 'ON' && t.blink === 1 },
+    lamp: {
+      desired: t.desired ?? 'OFF',
+      reported: t.reported ?? 'UNKNOWN',
+      blink: (t.desired ?? 'OFF') === 'ON' && t.blink === 1,
+      currentOn: t.current_on === null || t.current_on === undefined ? null : t.current_on === 1,
+      polledAt: t.polled_at ?? null,
+    },
     session: live.get(t.id) ?? null,
   }));
 
@@ -230,7 +242,7 @@ export function buildState(db: Db, now: number): HubState {
   const open = openShiftRow(db, club.id);
   const shift = open ? toShiftView(db, open) : null;
 
-  return { serverNow: now, club, tariffs, tables, unpaid, checks, shift, alerts };
+  return { serverNow: now, club, tariffs, tables, unpaid, checks, shift, alerts, manualMode: getManualMode(db) };
 }
 
 // ── Checks ───────────────────────────────────────────────────────────────────

@@ -43,13 +43,21 @@ const PHASE_LABEL = {
 
 function LampBadge({ lamp }: { lamp: TableView['lamp'] }) {
   const switching = !lamp.blink && lamp.reported !== lamp.desired;
+  // The current sensor disagrees with the relay: a dead bulb or a bypassed relay.
+  // A blinking lamp (paused game) is never judged by its sensor.
+  const sensorOff =
+    !lamp.blink && lamp.currentOn !== null && !switching && lamp.currentOn !== (lamp.reported === 'ON');
   const label = lamp.blink
     ? 'Свет мигает'
     : lamp.reported === 'UNKNOWN'
       ? 'Свет: нет ответа'
-      : lamp.reported === 'ON'
-        ? 'Свет включён'
-        : 'Свет выключен';
+      : sensorOff
+        ? lamp.reported === 'ON'
+          ? 'Свет включён, тока нет'
+          : 'Свет горит без команды'
+        : lamp.reported === 'ON'
+          ? 'Свет включён'
+          : 'Свет выключен';
   return (
     <span
       className="lamp"

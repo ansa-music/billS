@@ -7,6 +7,7 @@ import { afterCommit, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import type { HubEvents } from './events.ts';
 import { record } from './journal.ts';
+import { isManualMode } from './settings.ts';
 import type { LampController } from './lamps/controller.ts';
 import { desiredLampFor } from './lamps/controller.ts';
 import type { SessionRow, SessionView } from './views.ts';
@@ -48,7 +49,12 @@ export class SessionService {
     this.#events = deps.events;
   }
 
-  /** Requests the lamp; time starts only when the lamp confirms (see LampController). */
+  /**
+   * Requests the lamp; time starts only when the lamp confirms (see LampController).
+   * In manual mode (controller broken, lamps switched by hand) the game starts at
+   * once and is marked `manual`; the lamp command is still sent in case the
+   * controller is back.
+   */
   open(input: OpenTableInput): SessionView {
     const db = this.#db;
     const now = this.#clock.now();
@@ -67,12 +73,13 @@ export class SessionService {
       const club = one<{ timezone: string }>(db, 'SELECT timezone FROM clubs WHERE id = ?', table.club_id);
       if (!club) throw new HubError(503, 'CLUB_NOT_CONFIGURED', 'Клуб не настроен');
 
+      const manual = isManualMode(db);
       const id = randomUUID();
       run(
         db,
         `INSERT INTO table_sessions
-           (id, club_id, table_id, tariff_id, tariff_name, tariff_snapshot, timezone, status, requested_at, opened_by, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'OPENING', ?, ?, ?)`,
+           (id, club_id, table_id, tariff_id, tariff_name, tariff_snapshot, timezone, status, requested_at, started_at, manual, opened_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
         table.club_id,
         table.id,
@@ -80,7 +87,10 @@ export class SessionService {
         tariff.name,
         tariff.config,
         club.timezone,
+        manual ? 'ACTIVE' : 'OPENING',
         now,
+        manual ? now : null,
+        manual ? 1 : 0,
         input.actor,
         now,
       );
@@ -89,8 +99,17 @@ export class SessionService {
         action: 'session.open_requested',
         entityType: 'session',
         entityId: id,
-        data: { tableId: table.id, tariffId: tariff.id },
+        data: { tableId: table.id, tariffId: tariff.id, manual },
       });
+      if (manual) {
+        record(db, now, {
+          actor: input.actor,
+          action: 'session.started',
+          entityType: 'session',
+          entityId: id,
+          data: { tableId: table.id, startedAt: now, manual: true },
+        });
+      }
       this.#lamps.request(table.id, 'ON', id);
       afterCommit(db, () => this.#events.changed({ kind: 'session', tableId: table.id }));
       return loadSession(db, id, now);
@@ -226,7 +245,10 @@ export class SessionService {
     });
   }
 
-  /** Asks for the lamp; like opening, time runs again only once the lamp confirms ON. */
+  /**
+   * Asks for the lamp; like opening, time runs again only once the lamp confirms ON.
+   * In manual mode (lamps switched by hand) time runs again at once.
+   */
   resume(input: SessionCommandInput): SessionView {
     const db = this.#db;
     const now = this.#clock.now();
@@ -238,22 +260,41 @@ export class SessionService {
       // Already switching the lamp on: a second press changes nothing.
       if (s.resume_requested_at !== null) return loadSession(db, s.id, now);
 
+      const manual = isManualMode(db);
       run(
         db,
-        'UPDATE session_pauses SET resume_requested_at = ?, resumed_by = ? WHERE id = ?',
+        'UPDATE session_pauses SET resume_requested_at = ?, resumed_by = ?, resumed_at = ? WHERE id = ?',
         now,
         input.actor,
+        manual ? now : null,
         s.pause_id,
       );
       run(db, 'UPDATE table_sessions SET updated_at = ? WHERE id = ?', now, s.id);
+      // The lamp command is still sent in case the controller is back.
       this.#lamps.request(s.table_id, 'ON', s.id);
       record(db, now, {
         actor: input.actor,
         action: 'session.resume_requested',
         entityType: 'session',
         entityId: s.id,
-        data: { tableId: s.table_id, pauseId: s.pause_id, pausedAt: s.pause_started_at },
+        data: { tableId: s.table_id, pauseId: s.pause_id, pausedAt: s.pause_started_at, manual },
       });
+      if (manual && s.pause_started_at !== null) {
+        record(db, now, {
+          actor: input.actor,
+          action: 'session.resumed',
+          entityType: 'session',
+          entityId: s.id,
+          data: {
+            tableId: s.table_id,
+            reason: s.pause_reason,
+            pausedAt: s.pause_started_at,
+            resumedAt: now,
+            pausedSeconds: Math.floor((now - s.pause_started_at) / 1000),
+            manual: true,
+          },
+        });
+      }
       afterCommit(db, () => this.#events.changed({ kind: 'session', tableId: s.table_id }));
       return loadSession(db, s.id, now);
     });
@@ -262,7 +303,8 @@ export class SessionService {
   /**
    * Moves a game to a free table. The old lamp goes off, the new one on; the
    * time in between is an unpaid pause (reason `transfer`) that ends when the
-   * new lamp confirms. The tariff snapshot stays as it was.
+   * new lamp confirms. The tariff snapshot stays as it was. In manual mode the
+   * lamps are switched by hand, so a running game keeps running: no pause.
    */
   transfer(input: TransferSessionInput): SessionView {
     const db = this.#db;
@@ -283,9 +325,10 @@ export class SessionService {
       if (to.id === s.table_id) throw new HubError(422, 'SAME_TABLE', 'Игра уже на этом столе');
       this.#assertFree(to);
       const from = s.table_id;
+      const manual = isManualMode(db);
 
       let pauseId: string | null = null;
-      if (status === 'ACTIVE') {
+      if (status === 'ACTIVE' && !manual) {
         pauseId = randomUUID();
         run(
           db,
@@ -319,7 +362,7 @@ export class SessionService {
         action: 'session.transferred',
         entityType: 'session',
         entityId: s.id,
-        data: { fromTableId: from, toTableId: to.id, status, pauseId },
+        data: { fromTableId: from, toTableId: to.id, status, pauseId, manual },
       });
       afterCommit(db, () => {
         this.#events.changed({ kind: 'session', tableId: from });

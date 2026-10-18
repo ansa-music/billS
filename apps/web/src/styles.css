@@ -820,6 +820,10 @@ summary:focus-visible {
   color: var(--lamp);
 }
 
+.relays.relays-wide {
+  grid-template-columns: 1fr;
+}
+
 .toast {
   position: fixed;
   left: 50%;

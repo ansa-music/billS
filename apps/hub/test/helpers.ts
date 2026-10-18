@@ -7,6 +7,7 @@ import { ManualClock } from '../src/clock.ts';
 import type { Db } from '../src/db.ts';
 import { all, openDb } from '../src/db.ts';
 import { buildApp } from '../src/http/app.ts';
+import type { HubDeps } from '../src/hub.ts';
 import { Hub } from '../src/hub.ts';
 import { SimulatorLampDriver } from '../src/lamps/simulator.ts';
 import { seedDemo } from '../src/seed.ts';
@@ -15,7 +16,7 @@ import type { HubState, SessionView } from '../src/views.ts';
 /** Monday 2026-10-12, 12:00 in Almaty (UTC+5): the base rate of the demo tariff applies. */
 export const MONDAY_NOON = Date.UTC(2026, 9, 12, 7, 0);
 
-export const FAST_LAMPS = { attemptTimeoutMs: 200, retryDelaysMs: [10, 10] };
+export const FAST_LAMPS = { attemptTimeoutMs: 200, retryDelaysMs: [10, 10], blinkPeriodMs: 20 };
 
 export interface TestHub {
   dbPath: string;
@@ -34,11 +35,21 @@ export class Harness {
   migrationsDir: URL | undefined;
   current: TestHub | undefined;
 
-  /** Starts a HUB on the same database file, like a process (re)start. */
-  async start(driver = new SimulatorLampDriver({ latencyMs: 5 })): Promise<TestHub> {
+  /**
+   * Starts a HUB on the same database file, like a process (re)start. The
+   * monitor does not poll by itself: tests call `hub.monitor.poll()`.
+   */
+  async start(driver = new SimulatorLampDriver({ latencyMs: 5 }), deps: Partial<HubDeps> = {}): Promise<TestHub> {
     const db = openDb(this.dbPath, this.clock.now(), this.migrationsDir ? { migrationsDir: this.migrationsDir } : {});
     seedDemo(db, this.clock.now());
-    const hub = new Hub({ db, clock: this.clock, lampDriver: driver, lampOptions: FAST_LAMPS });
+    const hub = new Hub({
+      db,
+      clock: this.clock,
+      lampDriver: driver,
+      lampOptions: FAST_LAMPS,
+      monitorOptions: { intervalMs: 0, alertAfterMs: 60_000 },
+      ...deps,
+    });
     const app = buildApp(hub, { simulator: driver, dbPath: this.dbPath });
     await app.ready();
     hub.start();
@@ -84,12 +95,18 @@ export async function waitFor<T>(probe: () => T | undefined | null | false, time
   }
 }
 
-export async function post(t: TestHub, url: string, body: object = {}, key: string = randomUUID()) {
+export async function post(
+  t: TestHub,
+  url: string,
+  body: object = {},
+  key: string = randomUUID(),
+  actor = 'Кассир Айгерим',
+) {
   const res = await t.app.inject({
     method: 'POST',
     url,
     payload: body,
-    headers: { 'idempotency-key': key, 'x-actor': encodeURIComponent('Кассир Айгерим') },
+    headers: { 'idempotency-key': key, 'x-actor': encodeURIComponent(actor) },
   });
   return { status: res.statusCode, body: res.json() as SessionView & { error?: { code: string } }, headers: res.headers };
 }

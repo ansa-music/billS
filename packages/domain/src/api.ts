@@ -38,6 +38,8 @@ export interface SessionView {
   failureReason: string | null;
   openedBy: string;
   stoppedBy: string | null;
+  /** Opened in manual mode: billing started at the button press, the lamp was switched by hand. */
+  manual: boolean;
 }
 
 export interface TableView {
@@ -45,8 +47,15 @@ export interface TableView {
   name: string;
   kind: TableKind;
   defaultTariffId: string;
-  /** `blink`: the lamp was asked to blink (paused game with `pauseLamp: 'blink'`). */
-  lamp: { desired: LampDesired; reported: LampReported; blink: boolean };
+  lamp: {
+    desired: LampDesired;
+    reported: LampReported;
+    /** The lamp was asked to blink steadily (paused game with `pauseLamp: 'blink'`). */
+    blink: boolean;
+    /** From the last poll of the current sensor; null — no sensor or never polled. */
+    currentOn: boolean | null;
+    polledAt: number | null;
+  };
   session: SessionView | null;
 }
 
@@ -58,6 +67,14 @@ export interface AlertView {
   message: string;
 }
 
+/** Emergency mode: lamps are switched by hand, games start at the button press. */
+export interface ManualModeView {
+  enabled: boolean;
+  reason: string | null;
+  since: number | null;
+  by: string | null;
+}
+
 export interface HubState {
   serverNow: number;
   club: { id: string; name: string; timezone: string; currency: string };
@@ -65,6 +82,7 @@ export interface HubState {
   tables: TableView[];
   unpaid: SessionView[];
   alerts: AlertView[];
+  manualMode: ManualModeView;
 }
 
 export interface TransferRequest {

@@ -1,4 +1,4 @@
-import type { ApiError, HubState } from '@bills/domain';
+import type { ApiError, HubState, ManualModeView } from '@bills/domain';
 
 export class HubRequestError extends Error {
   readonly code: string;
@@ -72,14 +72,37 @@ export async function command<T>(path: string, actor: string, body: object = {})
   throw lastError;
 }
 
+/** Flashes the lamp of a table: checks that the relay is wired to the right table. */
+export function blinkTable(tableId: string, actor: string, times = 3): Promise<{ commandId: string }> {
+  return command(`/api/tables/${tableId}/blink`, actor, { times });
+}
+
+export function setManualMode(actor: string, enabled: boolean, reason?: string): Promise<ManualModeView> {
+  return command('/api/lamps/manual', actor, reason === undefined ? { enabled } : { enabled, reason });
+}
+
 export interface SimulatorStatus {
   latencyMs: number;
   offline: boolean;
   faults: Array<'fail' | 'drop-ack'>;
   /** Channel → relay is on. */
   lamps: Record<string, boolean>;
-  /** Channel → the lamp was asked to blink (paused game). */
+  /** Channel → the lamp was asked to blink steadily (paused game). */
   blink: Record<string, boolean>;
+  /** Current-sensor overrides: true — light on by hand, false — dead bulb. */
+  lights: Record<string, boolean>;
+  /** Channel → BLINK commands accepted. */
+  blinks: Record<string, number>;
+}
+
+export interface SimulatorPatch {
+  latencyMs?: number;
+  offline?: boolean;
+  faults?: Array<'fail' | 'drop-ack'>;
+  clearFaults?: boolean;
+  light?: { channel: string; on: boolean | null };
+  /** Poll the sensors right now instead of waiting for the next tick. */
+  poll?: boolean;
 }
 
 export async function fetchSimulator(): Promise<SimulatorStatus | null> {
@@ -89,12 +112,7 @@ export async function fetchSimulator(): Promise<SimulatorStatus | null> {
   return (await res.json()) as SimulatorStatus;
 }
 
-export async function updateSimulator(patch: {
-  latencyMs?: number;
-  offline?: boolean;
-  faults?: Array<'fail' | 'drop-ack'>;
-  clearFaults?: boolean;
-}): Promise<SimulatorStatus> {
+export async function updateSimulator(patch: SimulatorPatch): Promise<SimulatorStatus> {
   const res = await fetch('/api/dev/lamps', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

@@ -7,12 +7,16 @@ import { afterCommit, all, one, run, transaction } from '../db.ts';
 import type { HubEvents } from '../events.ts';
 import { raiseAlert, record, SYSTEM } from '../journal.ts';
 import type { LampDriver } from './driver.ts';
+import { BLINK_PERIOD_MS, blinkByToggling } from './driver.ts';
 
-export type LampAction = 'ON' | 'OFF';
+/** ON/OFF set the desired state; BLINK flashes the lamp and leaves it as it was. */
+export type LampAction = 'ON' | 'OFF' | 'BLINK';
 
 export interface LampRequestOptions {
-  /** ON with a blinking lamp (paused game, tariff pauseLamp = 'blink'). */
+  /** ON with a steadily blinking lamp (paused game, tariff pauseLamp = 'blink'). */
   blink?: boolean;
+  /** BLINK: how many flashes (default DEFAULT_BLINK_TIMES). */
+  times?: number;
 }
 
 export interface DesiredLamp {
@@ -54,16 +58,22 @@ export interface LampOptions {
   attemptTimeoutMs: number;
   /** Pauses between attempts; attempts = retryDelaysMs.length + 1. */
   retryDelaysMs: number[];
+  /** Half-period of a blink done by toggling the relay (controllers without a blink command). */
+  blinkPeriodMs?: number;
 }
 
 export const DEFAULT_LAMP_OPTIONS: LampOptions = { attemptTimeoutMs: 2000, retryDelaysMs: [500, 1000, 2000] };
+export const DEFAULT_BLINK_TIMES = 3;
 
-interface CommandRow {
+export interface CommandRow {
   id: string;
   table_id: string;
   session_id: string | null;
   action: LampAction;
+  /** ON only: keep the lamp blinking (paused game). */
   blink: number;
+  /** BLINK only: number of flashes. */
+  times: number | null;
   status: 'PENDING' | 'ACKED' | 'FAILED' | 'SUPERSEDED';
   attempts: number;
 }
@@ -94,52 +104,90 @@ export class LampController {
   readonly #clock: Clock;
   readonly #events: HubEvents;
   readonly #options: LampOptions;
+  readonly #quiet: () => boolean;
   readonly #inFlight = new Set<string>();
   readonly #retryAt = new Map<string, number>();
   readonly #timers = new Set<NodeJS.Timeout>();
   #closed = false;
 
-  constructor(deps: { db: Db; driver: LampDriver; clock: Clock; events: HubEvents; options?: LampOptions }) {
+  constructor(deps: {
+    db: Db;
+    driver: LampDriver;
+    clock: Clock;
+    events: HubEvents;
+    options?: LampOptions;
+    /** While true (manual mode) lamp failures are audited but raise no alerts. */
+    quiet?: () => boolean;
+  }) {
     this.#db = deps.db;
     this.#driver = deps.driver;
     this.#clock = deps.clock;
     this.#events = deps.events;
     this.#options = deps.options ?? DEFAULT_LAMP_OPTIONS;
+    this.#quiet = deps.quiet ?? (() => false);
   }
 
-  /** Queues a command; call inside the transaction that decided it. Supersedes a pending one. */
+  get driver(): LampDriver {
+    return this.#driver;
+  }
+
+  /**
+   * Queues a command; call inside the transaction that decided it. ON/OFF
+   * supersede every pending command of the table; BLINK only a pending BLINK
+   * and waits behind a pending ON/OFF. `options.blink` keeps an ON lamp
+   * blinking (paused game); `options.times` is the number of BLINK flashes.
+   */
   request(tableId: string, action: LampAction, sessionId: string | null, options: LampRequestOptions = {}): string {
     const db = this.#db;
     const now = this.#clock.now();
     const blink = action === 'ON' && options.blink ? 1 : 0;
-    run(
-      db,
-      "UPDATE lamp_commands SET status = 'SUPERSEDED', finished_at = ? WHERE table_id = ? AND status = 'PENDING'",
-      now,
-      tableId,
-    );
+    const times = action === 'BLINK' ? (options.times ?? DEFAULT_BLINK_TIMES) : null;
+    if (action === 'BLINK') {
+      run(
+        db,
+        "UPDATE lamp_commands SET status = 'SUPERSEDED', finished_at = ? WHERE table_id = ? AND status = 'PENDING' AND action = 'BLINK'",
+        now,
+        tableId,
+      );
+    } else {
+      run(
+        db,
+        "UPDATE lamp_commands SET status = 'SUPERSEDED', finished_at = ? WHERE table_id = ? AND status = 'PENDING'",
+        now,
+        tableId,
+      );
+    }
     const id = randomUUID();
     run(
       db,
-      "INSERT INTO lamp_commands (id, table_id, session_id, action, blink, status, created_at) VALUES (?, ?, ?, ?, ?, 'PENDING', ?)",
+      `INSERT INTO lamp_commands (id, table_id, session_id, action, blink, times, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)`,
       id,
       tableId,
       sessionId,
       action,
       blink,
+      times,
       now,
     );
-    run(
-      db,
-      `INSERT INTO lamp_states (table_id, desired, blink, reported, updated_at) VALUES (?, ?, ?, 'UNKNOWN', ?)
-       ON CONFLICT (table_id) DO UPDATE SET desired = excluded.desired, blink = excluded.blink, updated_at = excluded.updated_at`,
-      tableId,
-      action,
-      blink,
-      now,
-    );
+    if (action !== 'BLINK') {
+      run(
+        db,
+        `INSERT INTO lamp_states (table_id, desired, blink, reported, updated_at) VALUES (?, ?, ?, 'UNKNOWN', ?)
+         ON CONFLICT (table_id) DO UPDATE SET desired = excluded.desired, blink = excluded.blink, updated_at = excluded.updated_at`,
+        tableId,
+        action,
+        blink,
+        now,
+      );
+    }
     afterCommit(db, () => this.kick());
     return id;
+  }
+
+  /** Flashes the lamp of a table (hardware check, "time is ending" warning). */
+  blink(tableId: string, sessionId: string | null, times = DEFAULT_BLINK_TIMES): string {
+    return this.request(tableId, 'BLINK', sessionId, { times });
   }
 
   /**
@@ -156,7 +204,7 @@ export class LampController {
         const desired = desiredLampFor(t);
         const pending = one<CommandRow>(
           db,
-          "SELECT * FROM lamp_commands WHERE table_id = ? AND status = 'PENDING'",
+          "SELECT * FROM lamp_commands WHERE table_id = ? AND status = 'PENDING' AND action <> 'BLINK'",
           t.table_id,
         );
         if (pending && pending.action === desired.action && pending.blink === (desired.blink ? 1 : 0)) continue;
@@ -195,13 +243,18 @@ export class LampController {
     });
   }
 
-  /** Sends every pending command whose table is not busy and whose retry pause is over. */
+  /**
+   * Sends every pending command whose table is not busy and whose retry pause
+   * is over. Commands of one table go strictly in order.
+   */
   kick(): void {
     if (this.#closed) return;
-    const pending = all<CommandRow>(this.#db, "SELECT * FROM lamp_commands WHERE status = 'PENDING' ORDER BY created_at");
+    const pending = all<CommandRow>(this.#db, "SELECT * FROM lamp_commands WHERE status = 'PENDING' ORDER BY created_at, rowid");
     const now = performance.now();
+    const busy = new Set(this.#inFlight);
     for (const cmd of pending) {
-      if (this.#inFlight.has(cmd.table_id)) continue;
+      if (busy.has(cmd.table_id)) continue;
+      busy.add(cmd.table_id);
       const retryAt = this.#retryAt.get(cmd.id);
       if (retryAt !== undefined && retryAt > now) continue;
       void this.#attempt(cmd);
@@ -224,10 +277,19 @@ export class LampController {
         cmd.table_id,
       );
       if (!table) throw new Error(`Unknown table ${cmd.table_id}`);
-      await withTimeout(
-        (signal) => this.#driver.setLamp(table.lamp_channel, cmd.action === 'ON', signal, { blink: cmd.blink === 1 }),
-        this.#options.attemptTimeoutMs,
-      );
+      if (cmd.action === 'BLINK') {
+        // A blink by toggling is several relay switches: allow for all of them.
+        const times = cmd.times ?? DEFAULT_BLINK_TIMES;
+        await withTimeout(
+          (signal) => this.#blink(table.lamp_channel, times, signal),
+          this.#options.attemptTimeoutMs * 2 + times * 2 * (this.#options.blinkPeriodMs ?? BLINK_PERIOD_MS),
+        );
+      } else {
+        await withTimeout(
+          (signal) => this.#driver.setLamp(table.lamp_channel, cmd.action === 'ON', signal, { blink: cmd.blink === 1 }),
+          this.#options.attemptTimeoutMs,
+        );
+      }
     } catch (err) {
       error = err;
     } finally {
@@ -239,19 +301,38 @@ export class LampController {
     this.kick();
   }
 
+  /** Controllers without a blink command are flashed by switching the relay. */
+  async #blink(channel: string, times: number, signal: AbortSignal): Promise<void> {
+    if (this.#driver.blink) {
+      await this.#driver.blink(channel, times, signal);
+      return;
+    }
+    const current = this.#driver.readState ? (await this.#driver.readState(channel, signal)).on : false;
+    await blinkByToggling(
+      (on, s) => this.#driver.setLamp(channel, on, s),
+      current,
+      times,
+      signal,
+      this.#options.blinkPeriodMs ?? BLINK_PERIOD_MS,
+    );
+  }
+
   #confirmed(cmd: CommandRow): void {
     const db = this.#db;
     const now = this.#clock.now();
     this.#retryAt.delete(cmd.id);
     transaction(db, () => {
-      run(
-        db,
-        'UPDATE lamp_states SET reported = ?, reported_at = ?, updated_at = ? WHERE table_id = ?',
-        cmd.action,
-        now,
-        now,
-        cmd.table_id,
-      );
+      if (cmd.action !== 'BLINK') {
+        // The relay just switched: the last current reading is stale until the next poll.
+        run(
+          db,
+          'UPDATE lamp_states SET reported = ?, reported_at = ?, updated_at = ?, current_on = NULL WHERE table_id = ?',
+          cmd.action,
+          now,
+          now,
+          cmd.table_id,
+        );
+      }
       afterCommit(db, () => this.#events.changed({ kind: 'lamp', tableId: cmd.table_id }));
       const acked = run(
         db,
@@ -263,10 +344,14 @@ export class LampController {
       if (!acked) return;
       record(db, now, {
         actor: SYSTEM,
-        action: cmd.action === 'ON' ? 'lamp.on' : 'lamp.off',
+        action: cmd.action === 'ON' ? 'lamp.on' : cmd.action === 'OFF' ? 'lamp.off' : 'lamp.blink',
         entityType: 'table',
         entityId: cmd.table_id,
-        data: { commandId: cmd.id, sessionId: cmd.session_id, blink: cmd.blink === 1 },
+        data: {
+          commandId: cmd.id,
+          sessionId: cmd.session_id,
+          ...(cmd.action === 'BLINK' ? { times: cmd.times } : { blink: cmd.blink === 1 }),
+        },
       });
       if (cmd.action === 'ON' && cmd.session_id && !cmd.blink) {
         const started = run(
@@ -340,14 +425,19 @@ export class LampController {
         now,
         cmd.id,
       );
+      // A failed blink may have left the relay anywhere: let reconcile() resync it.
       run(db, "UPDATE lamp_states SET reported = 'UNKNOWN', updated_at = ? WHERE table_id = ?", now, cmd.table_id);
       record(db, now, {
         actor: SYSTEM,
-        action: 'lamp.failed',
+        action: cmd.action === 'BLINK' ? 'lamp.blink_failed' : 'lamp.failed',
         entityType: 'table',
         entityId: cmd.table_id,
         data: { commandId: cmd.id, action: cmd.action, attempts, error: message },
       });
+      if (cmd.action === 'BLINK') {
+        afterCommit(db, () => this.#events.changed({ kind: 'lamp', tableId: cmd.table_id }));
+        return;
+      }
       const tableName =
         one<{ name: string }>(db, 'SELECT name FROM billiard_tables WHERE id = ?', cmd.table_id)?.name ?? cmd.table_id;
 
@@ -392,19 +482,22 @@ export class LampController {
           }
         }
       }
-      raiseAlert(db, now, {
-        kind: cmd.action === 'ON' ? 'LAMP_ON_FAILED' : 'LAMP_OFF_FAILED',
-        tableId: cmd.table_id,
-        sessionId: cmd.session_id,
-        message:
-          cmd.action === 'OFF'
-            ? `${tableName}: лампа не подтвердила выключение — проверьте свет на столе`
-            : gameFailed
-              ? `${tableName}: лампа не подтвердила включение — игра не начата, время не считается`
-              : resumeFailed
-                ? `${tableName}: лампа не подтвердила включение — игра остаётся на паузе, нажмите «Продолжить» ещё раз`
-                : `${tableName}: лампа не подтвердила включение — проверьте свет на столе`,
-      });
+      // In manual mode staff already know the controller is down: audit only, no alerts.
+      if (!this.#quiet()) {
+        raiseAlert(db, now, {
+          kind: cmd.action === 'ON' ? 'LAMP_ON_FAILED' : 'LAMP_OFF_FAILED',
+          tableId: cmd.table_id,
+          sessionId: cmd.session_id,
+          message:
+            cmd.action === 'OFF'
+              ? `${tableName}: лампа не подтвердила выключение — проверьте свет на столе`
+              : gameFailed
+                ? `${tableName}: лампа не подтвердила включение — игра не начата, время не считается`
+                : resumeFailed
+                  ? `${tableName}: лампа не подтвердила включение — игра остаётся на паузе, нажмите «Продолжить» ещё раз`
+                  : `${tableName}: лампа не подтвердила включение — проверьте свет на столе`,
+        });
+      }
       // The lamp may have switched on without confirming: make sure it goes off.
       if (gameFailed) this.request(cmd.table_id, 'OFF', null);
       if (resumeFailed) this.request(cmd.table_id, 'OFF', cmd.session_id);

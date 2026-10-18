@@ -1,28 +1,37 @@
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
-import { afterCommit, run, transaction } from './db.ts';
+import { afterCommit, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import { HubEvents } from './events.ts';
 import { purgeIdempotencyKeys } from './idempotency.ts';
 import { record } from './journal.ts';
 import type { LampOptions } from './lamps/controller.ts';
-import { LampController } from './lamps/controller.ts';
+import { DEFAULT_BLINK_TIMES, LampController } from './lamps/controller.ts';
 import type { LampDriver } from './lamps/driver.ts';
+import type { MonitorOptions } from './lamps/monitor.ts';
+import { LampMonitor } from './lamps/monitor.ts';
 import { CheckService } from './checks.ts';
 import { SessionService } from './sessions.ts';
 import { ShiftService } from './shifts.ts';
+import type { ManualMode } from './settings.ts';
+import { getManualMode, isManualMode, managerMatcher, setManualMode } from './settings.ts';
 import type { HubState } from './views.ts';
 import { buildState } from './views.ts';
 
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+export const MAX_BLINK_TIMES = 10;
 
 export interface HubDeps {
   db: Db;
   clock: Clock;
   lampDriver: LampDriver;
   lampOptions?: LampOptions;
+  /** Relay/current-sensor poll; intervalMs 0 disables it. */
+  monitorOptions?: Partial<MonitorOptions>;
   /** How often lamps in an unknown state are retried. */
   reconcileIntervalMs?: number;
+  /** Who may switch manual mode off. Default: the X-Actor "Управляющий". */
+  isManager?: (actor: string) => boolean;
 }
 
 /** The club server: wires storage, lamps and game rules together. */
@@ -31,23 +40,37 @@ export class Hub {
   readonly clock: Clock;
   readonly events = new HubEvents();
   readonly lamps: LampController;
+  readonly monitor: LampMonitor;
   readonly sessions: SessionService;
   readonly checks: CheckService;
   readonly shifts: ShiftService;
   readonly #reconcileIntervalMs: number;
+  readonly #isManager: (actor: string) => boolean;
   #reconcileTimer: NodeJS.Timeout | undefined;
 
   constructor(deps: HubDeps) {
     this.db = deps.db;
     this.clock = deps.clock;
     this.#reconcileIntervalMs = deps.reconcileIntervalMs ?? 60_000;
+    this.#isManager = deps.isManager ?? managerMatcher(['Управляющий']);
     this.events.setMaxListeners(0);
+    const quiet = () => isManualMode(this.db);
     this.lamps = new LampController({
       db: deps.db,
       driver: deps.lampDriver,
       clock: deps.clock,
       events: this.events,
+      quiet,
       ...(deps.lampOptions ? { options: deps.lampOptions } : {}),
+    });
+    this.monitor = new LampMonitor({
+      db: deps.db,
+      driver: deps.lampDriver,
+      clock: deps.clock,
+      events: this.events,
+      lamps: this.lamps,
+      quiet,
+      ...(deps.monitorOptions ? { options: deps.monitorOptions } : {}),
     });
     this.sessions = new SessionService({ db: deps.db, clock: deps.clock, lamps: this.lamps, events: this.events });
     this.checks = new CheckService({ db: deps.db, clock: deps.clock, events: this.events, sessions: this.sessions });
@@ -60,6 +83,7 @@ export class Hub {
     this.lamps.recover();
     this.#reconcileTimer = setInterval(() => this.lamps.reconcile(), this.#reconcileIntervalMs);
     this.#reconcileTimer.unref();
+    this.monitor.start();
   }
 
   state(): HubState {
@@ -83,8 +107,58 @@ export class Hub {
     });
   }
 
+  /**
+   * Flashes the lamp of a table: a hardware check from the screen, and the
+   * "time is ending" warning for prepaid games (stage 2 calls it).
+   */
+  blink(tableId: string, actor: string, times = DEFAULT_BLINK_TIMES): { commandId: string; tableId: string; times: number } {
+    if (!Number.isInteger(times) || times < 1 || times > MAX_BLINK_TIMES) {
+      throw new HubError(422, 'BLINK_TIMES', `Число миганий — от 1 до ${MAX_BLINK_TIMES}`);
+    }
+    const now = this.clock.now();
+    return transaction(this.db, () => {
+      const table = one<{ id: string; name: string }>(
+        this.db,
+        'SELECT id, name FROM billiard_tables WHERE id = ? AND is_active = 1',
+        tableId,
+      );
+      if (!table) throw new HubError(404, 'TABLE_NOT_FOUND', 'Стол не найден');
+      const live = one<{ id: string }>(
+        this.db,
+        "SELECT id FROM table_sessions WHERE table_id = ? AND status IN ('OPENING', 'ACTIVE')",
+        tableId,
+      );
+      record(this.db, now, {
+        actor,
+        action: 'lamp.blink_requested',
+        entityType: 'table',
+        entityId: tableId,
+        data: { times, sessionId: live?.id ?? null },
+      });
+      const commandId = this.lamps.blink(tableId, live?.id ?? null, times);
+      afterCommit(this.db, () => this.events.changed({ kind: 'lamp', tableId }));
+      return { commandId, tableId, times };
+    });
+  }
+
+  manualMode(): ManualMode {
+    return getManualMode(this.db);
+  }
+
+  /** Switches the emergency manual mode. Only a manager may switch it off. */
+  setManualMode(input: { enabled: boolean; reason?: string | undefined; actor: string }): ManualMode {
+    const mode = setManualMode(this.db, this.clock.now(), this.events, { ...input, isManager: this.#isManager });
+    // Leaving manual mode: the controller is back — resync lamps right away.
+    if (!input.enabled) {
+      this.lamps.reconcile();
+      this.lamps.kick();
+    }
+    return mode;
+  }
+
   close(): void {
     clearInterval(this.#reconcileTimer);
+    this.monitor.close();
     this.lamps.close();
     this.events.removeAllListeners();
   }
