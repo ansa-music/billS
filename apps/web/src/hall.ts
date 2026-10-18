@@ -1,10 +1,11 @@
 import type { AlertView, TableView } from '@bills/domain';
 
-export type TablePhase = 'free' | 'opening' | 'playing';
+export type TablePhase = 'free' | 'opening' | 'playing' | 'paused';
 export type HallFilter = 'all' | 'free' | 'playing' | 'problem';
 
 export function tablePhase(table: TableView): TablePhase {
   if (table.session?.status === 'ACTIVE') return 'playing';
+  if (table.session?.status === 'PAUSED') return 'paused';
   if (table.session?.status === 'OPENING') return 'opening';
   return 'free';
 }
@@ -21,6 +22,7 @@ export function matchesFilter(table: TableView, filter: HallFilter, alert: Alert
     case 'free':
       return tablePhase(table) === 'free';
     case 'playing':
+      // Paused and opening games occupy the table too.
       return tablePhase(table) !== 'free';
     case 'problem':
       return hasProblem(table, alert);

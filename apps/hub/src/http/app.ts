@@ -13,6 +13,7 @@ import { collectHealth, renderMetrics } from '../ops.ts';
 import type { VersionInfo } from '../version.ts';
 import { versionInfo } from '../version.ts';
 import { registerMoneyRoutes } from './money-routes.ts';
+import { registerStatic } from './static.ts';
 
 export interface AppOptions {
   /** Exposes /api/dev/lamps to control the simulator. Never in production. */
@@ -23,6 +24,8 @@ export interface AppOptions {
   /** When the process started; defaults to app creation time. */
   startedAt?: number;
   version?: VersionInfo;
+  /** Built hall screen (apps/web/dist) to serve on `/` with an SPA fallback; skipped when the folder is missing. */
+  staticDir?: string;
 }
 
 function actorOf(req: FastifyRequest): string {
@@ -109,6 +112,45 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
       })),
   );
 
+  app.post<{ Params: { sessionId: string } }>(
+    '/api/sessions/:sessionId/pause',
+    { schema: { body: emptyBody } },
+    async (req, reply) =>
+      runCommand(req, reply, hub, (actor) => ({
+        status: 200,
+        body: hub.sessions.pause({ sessionId: req.params.sessionId, actor }),
+      })),
+  );
+
+  app.post<{ Params: { sessionId: string } }>(
+    '/api/sessions/:sessionId/resume',
+    { schema: { body: emptyBody } },
+    async (req, reply) =>
+      runCommand(req, reply, hub, (actor) => ({
+        status: 200,
+        body: hub.sessions.resume({ sessionId: req.params.sessionId, actor }),
+      })),
+  );
+
+  app.post<{ Params: { sessionId: string }; Body: { toTableId: string } }>(
+    '/api/sessions/:sessionId/transfer',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['toTableId'],
+          properties: { toTableId: { type: 'string', minLength: 1 } },
+        },
+      },
+    },
+    async (req, reply) =>
+      runCommand(req, reply, hub, (actor) => ({
+        status: 200,
+        body: hub.sessions.transfer({ sessionId: req.params.sessionId, toTableId: req.body.toTableId, actor }),
+      })),
+  );
+
   app.post<{ Params: { alertId: string } }>(
     '/api/alerts/:alertId/resolve',
     { schema: { body: emptyBody } },
@@ -172,6 +214,8 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
       },
     );
   }
+
+  if (options.staticDir) registerStatic(app, options.staticDir);
 
   return app;
 }

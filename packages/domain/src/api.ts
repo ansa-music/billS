@@ -1,7 +1,7 @@
 import type { DiscountKind, PaymentMethod } from './billing.ts';
 import type { Minor } from './money.ts';
+import type { PauseSpan } from './pause.ts';
 import type { CashMovementKind, ShiftTotals } from './shift.ts';
-
 import type { SessionStatus } from './session.ts';
 import type { TariffConfig } from './tariff.ts';
 
@@ -22,10 +22,19 @@ export interface SessionView {
   requestedAt: number;
   startedAt: number | null;
   stoppedAt: number | null;
+  /** Seconds of play: pauses excluded. Final for stopped games; for a live game — as of `serverNow`. */
   playedSeconds: number | null;
   billedSeconds: number | null;
   /** Final for stopped games; for a running game — the amount if stopped at `serverNow`. */
   amount: number | null;
+  /** Unpaid pause time in seconds (staff pauses within the tariff budget + transfers). */
+  pausedSeconds: number | null;
+  /** All pauses of the game, oldest first; the last one is open while the game is PAUSED. */
+  pauses: PauseSpan[];
+  /** When the current pause started (PAUSED only). */
+  pausedAt: number | null;
+  /** «Продолжить» pressed (or a transfer requested): the lamp is being switched on; time resumes when it confirms. */
+  resumeRequestedAt: number | null;
   failureReason: string | null;
   openedBy: string;
   stoppedBy: string | null;
@@ -36,7 +45,8 @@ export interface TableView {
   name: string;
   kind: TableKind;
   defaultTariffId: string;
-  lamp: { desired: LampDesired; reported: LampReported };
+  /** `blink`: the lamp was asked to blink (paused game with `pauseLamp: 'blink'`). */
+  lamp: { desired: LampDesired; reported: LampReported; blink: boolean };
   session: SessionView | null;
 }
 
@@ -55,6 +65,10 @@ export interface HubState {
   tables: TableView[];
   unpaid: SessionView[];
   alerts: AlertView[];
+}
+
+export interface TransferRequest {
+  toTableId: string;
 }
 
 export interface ApiError {
