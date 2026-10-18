@@ -1,4 +1,13 @@
-import type { ApiError, HubState } from '@bills/domain';
+import type {
+  ApiError,
+  HallLayout,
+  HallLayoutView,
+  HubState,
+  JournalCategory,
+  JournalPage,
+  LampDetail,
+  SessionView,
+} from '@bills/domain';
 
 export class HubRequestError extends Error {
   readonly code: string;
@@ -42,7 +51,7 @@ export async function fetchState(): Promise<HubState> {
  * Sends a command. On a lost connection or a server error it retries with the
  * same idempotency key, so a command that did reach the HUB is not repeated.
  */
-export async function command<T>(path: string, actor: string, body: object = {}): Promise<T> {
+export async function command<T>(path: string, actor: string, body: object = {}, method = 'POST'): Promise<T> {
   const key = newKey();
   let lastError: Error = new HubRequestError(0, 'OFFLINE', 'Нет связи с HUB');
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -50,7 +59,7 @@ export async function command<T>(path: string, actor: string, body: object = {})
     let res: Response;
     try {
       res = await fetch(path, {
-        method: 'POST',
+        method,
         headers: {
           'content-type': 'application/json',
           'idempotency-key': key,
@@ -71,6 +80,36 @@ export async function command<T>(path: string, actor: string, body: object = {})
   }
   throw lastError;
 }
+
+async function getJson<T>(path: string): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, { cache: 'no-store' });
+  } catch {
+    throw new HubRequestError(0, 'OFFLINE', 'Нет связи с HUB');
+  }
+  if (!res.ok) throw await toError(res);
+  return (await res.json()) as T;
+}
+
+export const fetchHall = () => getJson<HallLayoutView>('/api/hall');
+
+export const saveHall = (layout: HallLayout, actor: string) =>
+  command<HallLayoutView>('/api/hall', actor, layout, 'PUT');
+
+export function fetchJournal(q: { before?: number; limit?: number; category?: JournalCategory; tableId?: string }) {
+  const params = new URLSearchParams();
+  if (q.before !== undefined) params.set('before', String(q.before));
+  if (q.limit !== undefined) params.set('limit', String(q.limit));
+  if (q.category) params.set('category', q.category);
+  if (q.tableId) params.set('tableId', q.tableId);
+  return getJson<JournalPage>(`/api/journal?${params}`);
+}
+
+export const fetchSessions = (from: number, to: number) =>
+  getJson<SessionView[]>(`/api/sessions?from=${Math.floor(from)}&to=${Math.ceil(to)}`);
+
+export const fetchLamps = () => getJson<LampDetail[]>('/api/lamps');
 
 export interface SimulatorStatus {
   latencyMs: number;

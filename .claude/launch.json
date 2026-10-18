@@ -12,6 +12,18 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:web"],
       "port": 5173
+    },
+    {
+      "name": "local",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "local"],
+      "port": 5400
+    },
+    {
+      "name": "ui-check",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/local.mjs", "--hub-port=4610", "--web-port=5610", "--db=ui-check"],
+      "port": 5610
     }
   ]
 }

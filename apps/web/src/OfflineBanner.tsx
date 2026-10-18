@@ -1,5 +1,3 @@
-import './hall.css';
-
 /** Shown while the screen cannot reach the HUB. The HUB itself keeps running games and lamps. */
 export function OfflineBanner({ online }: { online: boolean }) {
   if (online) return null;

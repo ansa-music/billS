@@ -1,14 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { HubState } from '@bills/domain';
-import { command, fetchState } from './api.ts';
-import { CardBoundary } from './CardBoundary.tsx';
-import { formatClock } from './format.ts';
-import { alertsByTable, matchesFilter } from './hall.ts';
-import { HallToolbar, useHallFilter } from './HallToolbar.tsx';
+import { useCallback, useEffect, useState } from 'react';
 import { useWakeLock } from './kiosk.ts';
 import { OfflineBanner } from './OfflineBanner.tsx';
-import { AlertsBar, SimulatorPanel, UnpaidPanel } from './Panels.tsx';
-import { TableCard } from './TableCard.tsx';
+import { SECTION_TITLE, useRoute } from './router.ts';
+import { BottomNav, Sidebar, Toast, Topbar } from './Shell.tsx';
+import type { NavBadges } from './Shell.tsx';
+import { useTheme } from './theme.ts';
+import { HubContext, useCommands, useHubConnection, useNow } from './useHub.ts';
+import type { HubContextValue } from './useHub.ts';
+import { HallSection } from './sections/Hall.tsx';
+import { ChecksSection } from './sections/Checks.tsx';
+import { StatsSection } from './sections/Stats.tsx';
+import { TariffsSection } from './sections/Tariffs.tsx';
+import { JournalSection } from './sections/Journal.tsx';
+import { EquipmentSection } from './sections/Equipment.tsx';
 
 const ACTOR_KEY = 'bills.actor';
 
@@ -20,67 +24,14 @@ function readActor(): string {
   }
 }
 
-function useHubState() {
-  const [state, setState] = useState<HubState | null>(null);
-  const [offset, setOffset] = useState(0);
-  const [online, setOnline] = useState(false);
-  const inFlight = useRef(false);
-  const again = useRef(false);
-
-  // Coalesces bursts of change events into one request at a time.
-  const refresh = useCallback(async () => {
-    if (inFlight.current) {
-      again.current = true;
-      return;
-    }
-    inFlight.current = true;
-    try {
-      do {
-        again.current = false;
-        const s = await fetchState();
-        setState(s);
-        setOffset(s.serverNow - Date.now());
-        setOnline(true);
-      } while (again.current);
-    } catch {
-      setOnline(false);
-    } finally {
-      inFlight.current = false;
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-    const events = new EventSource('/api/events');
-    events.onopen = () => void refresh();
-    events.addEventListener('changed', () => void refresh());
-    events.onerror = () => setOnline(false);
-    const poll = setInterval(() => void refresh(), 15_000);
-    return () => {
-      events.close();
-      clearInterval(poll);
-    };
-  }, [refresh]);
-
-  return { state, offset, online, refresh };
-}
-
-function useNow(intervalMs = 1000): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(t);
-  }, [intervalMs]);
-  return now;
-}
-
 export function App() {
-  const { state, offset, online, refresh } = useHubState();
+  const hub = useHubConnection();
+  const route = useRoute();
   const now = useNow();
+  const { theme, cycle } = useTheme();
   const [actor, setActor] = useState(readActor);
-  const [busy, setBusy] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
-  const [filter, setFilter] = useHallFilter();
+  const commands = useCommands(actor, hub.refresh, setToast);
   useWakeLock();
 
   useEffect(() => {
@@ -92,110 +43,74 @@ export function App() {
   }, [actor]);
 
   useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 5000);
-    return () => clearTimeout(t);
-  }, [toast]);
+    document.title = `${SECTION_TITLE[route.section]} — Billiard Control`;
+  }, [route.section]);
 
-  const run = useCallback(
-    async (key: string, fn: () => Promise<unknown>) => {
-      setBusy((b) => new Set(b).add(key));
-      try {
-        await fn();
-      } catch (e) {
-        setToast((e as Error).message);
-      } finally {
-        setBusy((b) => {
-          const next = new Set(b);
-          next.delete(key);
-          return next;
-        });
-        void refresh();
-      }
-    },
-    [refresh],
-  );
+  const closeToast = useCallback(() => setToast(null), []);
+  const state = hub.state;
 
   if (!state) {
     return (
       <main className="boot">
-        <p>{online ? 'Загрузка…' : 'Подключаемся к HUB клуба…'}</p>
+        <span className="ball boot-ball" aria-hidden="true">
+          8
+        </span>
+        <p>{hub.online ? 'Загрузка…' : 'Подключаемся к HUB клуба…'}</p>
       </main>
     );
   }
 
-  const serverNow = now + offset;
-  const tableAlerts = alertsByTable(state.alerts);
-  const shown = state.tables.filter((t) => matchesFilter(t, filter, tableAlerts.get(t.id)));
+  const ctx: HubContextValue = {
+    state,
+    serverNow: now + hub.offset,
+    online: hub.online,
+    version: hub.version,
+    layoutVersion: hub.layoutVersion,
+    actor,
+    run: commands.run,
+    isBusy: commands.isBusy,
+    notify: setToast,
+    openTable: commands.openTable,
+    stopSession: commands.stopSession,
+    resolveAlert: commands.resolveAlert,
+  };
+
+  const lampProblems = state.tables.filter((t) => t.lamp.reported === 'UNKNOWN').length;
+  const badges: NavBadges = {
+    checks: { count: state.unpaid.length, tone: 'info' },
+    equipment: { count: lampProblems, tone: 'danger' },
+  };
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <span className="ball" aria-hidden="true">
-            8
-          </span>
-          <div>
-            <h1>{state.club.name}</h1>
-            <p className="muted">Экран зала</p>
-          </div>
-        </div>
-        <div className="topbar-right">
-          <label className="actor">
-            <span className="muted">Сотрудник</span>
-            <input value={actor} onChange={(e) => setActor(e.target.value)} maxLength={60} />
-          </label>
-          <span className="clock">{formatClock(serverNow, state.club.timezone)}</span>
-          <span className="conn" data-online={online || undefined}>
-            {online ? 'HUB на связи' : 'Нет связи с HUB'}
-          </span>
-        </div>
-      </header>
-
-      <OfflineBanner online={online} />
-
-      <AlertsBar
-        alerts={state.alerts}
-        timezone={state.club.timezone}
-        busy={busy.size > 0}
-        onResolve={(id) => run(`alert:${id}`, () => command(`/api/alerts/${id}/resolve`, actor))}
-      />
-
-      <div className="layout">
-        <div className="hall">
-          <HallToolbar tables={state.tables} alerts={tableAlerts} filter={filter} onFilter={setFilter} />
-          {shown.length === 0 && <p className="empty">В этом фильтре столов нет</p>}
-          <main className="tables" aria-label="Столы">
-            {shown.map((table) => (
-              <CardBoundary key={table.id} name={table.name} resetKey={table}>
-                <TableCard
-                  table={table}
-                  tariffs={state.tariffs}
-                  timezone={state.club.timezone}
-                  alert={tableAlerts.get(table.id)}
-                  currency={state.club.currency}
-                  serverNow={serverNow}
-                  busy={busy.has(table.id) || !online}
-                  onOpen={(tariffId) =>
-                    run(table.id, () => command(`/api/tables/${table.id}/open`, actor, { tariffId }))
-                  }
-                  onStop={(sessionId) => run(table.id, () => command(`/api/sessions/${sessionId}/stop`, actor))}
-                />
-              </CardBoundary>
-            ))}
+    <HubContext.Provider value={ctx}>
+      <div className="shell" data-section={route.section}>
+        <Sidebar club={state.club.name} active={route.section} badges={badges} online={hub.online} />
+        <div className="shell-main">
+          <Topbar
+            title={SECTION_TITLE[route.section]}
+            state={state}
+            serverNow={ctx.serverNow}
+            online={hub.online}
+            actor={actor}
+            onActor={setActor}
+            theme={theme}
+            onTheme={cycle}
+            onResolveAlert={(id) => void commands.resolveAlert(id)}
+            busy={commands.anyBusy}
+          />
+          <OfflineBanner online={hub.online} />
+          <main className="content" id="content">
+            {route.section === 'hall' && <HallSection />}
+            {route.section === 'checks' && <ChecksSection />}
+            {route.section === 'stats' && <StatsSection />}
+            {route.section === 'tariffs' && <TariffsSection />}
+            {route.section === 'journal' && <JournalSection params={route.params} />}
+            {route.section === 'equipment' && <EquipmentSection />}
           </main>
         </div>
-        <aside className="side">
-          <UnpaidPanel state={state} />
-          <SimulatorPanel onError={setToast} />
-        </aside>
+        <BottomNav active={route.section} badges={badges} />
+        {toast && <Toast message={toast} onClose={closeToast} />}
       </div>
-
-      {toast && (
-        <div className="toast" role="status" onClick={() => setToast(null)}>
-          {toast}
-        </div>
-      )}
-    </div>
+    </HubContext.Provider>
   );
 }

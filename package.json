@@ -14,7 +14,8 @@
     "typecheck": "tsc -p packages/domain && tsc -p apps/hub && tsc -p apps/web",
     "dev:hub": "npm run dev -w @bills/hub",
     "dev:web": "npm run dev -w @bills/web",
-    "start:hub": "npm run start -w @bills/hub"
+    "start:hub": "npm run start -w @bills/hub",
+    "local": "node scripts/local.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

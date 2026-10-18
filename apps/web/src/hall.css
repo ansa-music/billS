@@ -1,18 +1,4 @@
-/* Hall toolbar (filter chips, fullscreen) and the offline banner.
-   Only design tokens from styles.css, so both themes work. Note: this file can load
-   before styles.css, so overrides of shared classes (.btn) use two-class selectors. */
-
-/* Toolbar */
-
-.hall-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  min-width: 0;
-  max-width: 100%;
-}
+/* Hall filter chips and the offline banner. Only design tokens, so both themes work. */
 
 .hall-chips {
   display: flex;
@@ -97,25 +83,8 @@
   }
 }
 
-.btn.hall-fullscreen {
-  flex: none;
-  margin-left: auto;
-  max-width: 100%;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 14px;
-  white-space: nowrap;
-  touch-action: manipulation;
-}
-
-.hall-fullscreen-icon {
-  flex: none;
-}
-
 @media (pointer: coarse) {
-  .hall-chip,
-  .btn.hall-fullscreen {
+  .hall-chip {
     min-height: 52px;
   }
 

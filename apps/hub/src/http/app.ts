@@ -8,6 +8,7 @@ import { idempotent } from '../idempotency.ts';
 import type { ChangeEvent } from '../events.ts';
 import type { SimulatorFault, SimulatorLampDriver } from '../lamps/simulator.ts';
 import { SIMULATOR_FAULTS } from '../lamps/simulator.ts';
+import { registerHallRoutes } from './hall-routes.ts';
 
 export interface AppOptions {
   /** Exposes /api/dev/lamps to control the simulator. Never in production. */
@@ -26,7 +27,12 @@ function actorOf(req: FastifyRequest): string {
   }
 }
 
-function runCommand(req: FastifyRequest, reply: FastifyReply, hub: Hub, command: (actor: string) => CommandResult) {
+export function runCommand(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  hub: Hub,
+  command: (actor: string) => CommandResult,
+) {
   const key = req.headers['idempotency-key'];
   if (typeof key !== 'string' || key.length < 8 || key.length > 200) {
     throw new HubError(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Нужен заголовок Idempotency-Key (8–200 символов)');
@@ -57,6 +63,8 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   });
 
   app.get('/api/health', async () => ({ ok: true, now: hub.clock.now() }));
+
+  registerHallRoutes(app, hub, runCommand);
 
   app.get('/api/state', async () => hub.state());
 
@@ -103,7 +111,8 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
     res.write('retry: 2000\n\n');
     const onChange = (e: ChangeEvent) => res.write(`event: changed\ndata: ${JSON.stringify(e)}\n\n`);
     hub.events.on('changed', onChange);
-    const ping = setInterval(() => res.write(': ping\n\n'), 15_000);
+    // A named event, not a comment: screens reconnect when pings stop (a dead proxy or Wi-Fi).
+    const ping = setInterval(() => res.write('event: ping\ndata: {}\n\n'), 15_000);
     req.raw.on('close', () => {
       clearInterval(ping);
       hub.events.off('changed', onChange);

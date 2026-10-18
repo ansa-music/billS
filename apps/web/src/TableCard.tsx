@@ -18,11 +18,13 @@ interface Props {
   alert: AlertView | undefined;
   onOpen: (tariffId: string) => void;
   onStop: (sessionId: string) => void;
+  /** Opens the table's details panel. */
+  onDetails?: () => void;
 }
 
-const PHASE_LABEL = { free: 'Свободен', opening: 'Включаем свет', playing: 'Идёт игра' } as const;
+export const PHASE_LABEL = { free: 'Свободен', opening: 'Включаем свет', playing: 'Идёт игра' } as const;
 
-function LampBadge({ lamp }: { lamp: TableView['lamp'] }) {
+export function LampBadge({ lamp }: { lamp: TableView['lamp'] }) {
   const switching = lamp.reported !== lamp.desired;
   const label =
     lamp.reported === 'UNKNOWN' ? 'Свет: нет ответа' : lamp.reported === 'ON' ? 'Свет включён' : 'Свет выключен';
@@ -35,7 +37,7 @@ function LampBadge({ lamp }: { lamp: TableView['lamp'] }) {
 }
 
 /** Rate now and, if it changes within the hour, when and to what. Recomputed once a minute. */
-function useRate(tariff: TariffConfig | undefined, timezone: string, at: number) {
+export function useRate(tariff: TariffConfig | undefined, timezone: string, at: number) {
   const minute = Math.floor(at / 60_000);
   return useMemo(() => {
     if (!tariff) return null;
@@ -44,7 +46,7 @@ function useRate(tariff: TariffConfig | undefined, timezone: string, at: number)
   }, [tariff, timezone, minute]);
 }
 
-function RateLine(props: {
+export function RateLine(props: {
   tariffName: string;
   tariff: TariffConfig | undefined;
   timezone: string;
@@ -83,6 +85,11 @@ export function TableCard(props: Props) {
         <div className="felt-title">
           <h2>{table.name}</h2>
           <span className="kind">{KIND_LABEL[table.kind]}</span>
+          {props.onDetails && (
+            <button type="button" className="felt-more" onClick={props.onDetails} aria-label={`${table.name}: подробнее`}>
+              Подробнее
+            </button>
+          )}
         </div>
         <div className="felt-foot">
           <LampBadge lamp={table.lamp} />
