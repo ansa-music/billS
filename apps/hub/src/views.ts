@@ -15,7 +15,7 @@ import { HubError } from './errors.ts';
 
 export type { AlertView, HubState, SessionView, TableView };
 
-/** Status as stored: PAUSED is ACTIVE plus an open pause (see migration 004). */
+/** Status as stored: PAUSED is ACTIVE plus an open pause (see migration 007). */
 export type StoredSessionStatus = Exclude<SessionStatus, 'PAUSED'>;
 
 export interface SessionRow {
