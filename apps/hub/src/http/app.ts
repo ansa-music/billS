@@ -8,11 +8,19 @@ import { idempotent } from '../idempotency.ts';
 import type { ChangeEvent } from '../events.ts';
 import type { SimulatorFault, SimulatorLampDriver } from '../lamps/simulator.ts';
 import { SIMULATOR_FAULTS } from '../lamps/simulator.ts';
+import { collectHealth, renderMetrics } from '../ops.ts';
+import type { VersionInfo } from '../version.ts';
+import { versionInfo } from '../version.ts';
 
 export interface AppOptions {
   /** Exposes /api/dev/lamps to control the simulator. Never in production. */
   simulator?: SimulatorLampDriver;
   logger?: boolean;
+  /** Database file reported by /api/health (size, free disk, last backup). */
+  dbPath?: string;
+  /** When the process started; defaults to app creation time. */
+  startedAt?: number;
+  version?: VersionInfo;
 }
 
 function actorOf(req: FastifyRequest): string {
@@ -56,7 +64,19 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
     return reply.status(500).send({ error: { code: 'INTERNAL', message: 'Внутренняя ошибка HUB' } });
   });
 
-  app.get('/api/health', async () => ({ ok: true, now: hub.clock.now() }));
+  const healthCtx = {
+    db: hub.db,
+    dbPath: options.dbPath ?? ':memory:',
+    startedAt: options.startedAt ?? Date.now(),
+    version: options.version ?? versionInfo(),
+  };
+  // Health for operators and monitoring; `now` stays the HUB clock, the rest is wall time.
+  app.get('/api/health', async () => ({ ...collectHealth(healthCtx), now: hub.clock.now() }));
+
+  // Prometheus / Uptime Kuma scrape target.
+  app.get('/metrics', async (_req, reply) =>
+    reply.header('content-type', 'text/plain; version=0.0.4; charset=utf-8').send(renderMetrics(collectHealth(healthCtx))),
+  );
 
   app.get('/api/state', async () => hub.state());
 
