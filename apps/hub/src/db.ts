@@ -6,9 +6,14 @@ import { dirname } from 'node:path';
 export type Db = DatabaseSync;
 export type Param = SQLInputValue;
 
-const MIGRATIONS_DIR = new URL('./migrations/', import.meta.url);
+export const MIGRATIONS_DIR = new URL('./migrations/', import.meta.url);
 
-export function openDb(path: string, now = Date.now()): Db {
+export interface OpenDbOptions {
+  /** Where the `NNN_name.sql` files live. Tests point this at a copy with extra migrations. */
+  migrationsDir?: URL;
+}
+
+export function openDb(path: string, now = Date.now(), options: OpenDbOptions = {}): Db {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
   db.exec(`
@@ -17,24 +22,34 @@ export function openDb(path: string, now = Date.now()): Db {
     PRAGMA foreign_keys = ON;
     PRAGMA busy_timeout = 5000;
   `);
-  migrate(db, now);
+  try {
+    migrate(db, now, options.migrationsDir ?? MIGRATIONS_DIR);
+  } catch (err) {
+    db.close();
+    throw err;
+  }
   return db;
 }
 
-function migrate(db: Db, now: number): void {
+/**
+ * Applies every migration file that is not yet recorded in `schema_migrations`.
+ * Each file runs in its own transaction: a failing migration leaves the database
+ * exactly as it was, and a second run applies nothing twice.
+ */
+export function migrate(db: Db, now: number, migrationsDir: URL = MIGRATIONS_DIR): void {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     applied_at INTEGER NOT NULL
   )`);
   const applied = new Set(all<{ version: number }>(db, 'SELECT version FROM schema_migrations').map((r) => r.version));
-  const files = readdirSync(MIGRATIONS_DIR)
+  const files = readdirSync(migrationsDir)
     .filter((f) => /^\d+_.+\.sql$/.test(f))
     .sort();
   for (const file of files) {
     const version = Number.parseInt(file, 10);
     if (applied.has(version)) continue;
-    const sql = readFileSync(new URL(file, MIGRATIONS_DIR), 'utf8');
+    const sql = readFileSync(new URL(file, migrationsDir), 'utf8');
     transaction(db, () => {
       db.exec(sql);
       run(db, 'INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)', version, file, now);

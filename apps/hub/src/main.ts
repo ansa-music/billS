@@ -6,6 +6,7 @@ import { Hub } from './hub.ts';
 import { createLampDriver } from './lamps/factory.ts';
 import { seedDemo } from './seed.ts';
 import { managerMatcher } from './settings.ts';
+import { versionInfo, versionString } from './version.ts';
 
 const config = loadConfig();
 const db = openDb(config.dbPath);
@@ -19,7 +20,13 @@ const hub = new Hub({
   monitorOptions: { intervalMs: config.lampPollMs, alertAfterMs: config.lampAlertAfterMs },
   isManager: managerMatcher(config.managerActors),
 });
-const app = buildApp(hub, { simulator: lamps.simulator, logger: true });
+const app = buildApp(hub, {
+  simulator: lamps.simulator,
+  logger: true,
+  dbPath: config.dbPath,
+  startedAt: Date.now(),
+  version: versionInfo(),
+});
 
 hub.start();
 await app.listen({ host: config.host, port: config.port });
@@ -27,6 +34,7 @@ app.log.info(
   {
     dbPath: config.dbPath,
     seeded,
+    version: versionString(),
     lampDriver: config.lampDriver,
     lampPollMs: hub.monitor.supported ? config.lampPollMs : 'unsupported',
   },

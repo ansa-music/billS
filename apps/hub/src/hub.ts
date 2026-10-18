@@ -13,6 +13,8 @@ import { LampMonitor } from './lamps/monitor.ts';
 import { SessionService } from './sessions.ts';
 import type { ManualMode } from './settings.ts';
 import { getManualMode, isManualMode, managerMatcher, setManualMode } from './settings.ts';
+import { CheckService } from './checks.ts';
+import { ShiftService } from './shifts.ts';
 import type { HubState } from './views.ts';
 import { buildState } from './views.ts';
 
@@ -40,6 +42,8 @@ export class Hub {
   readonly lamps: LampController;
   readonly monitor: LampMonitor;
   readonly sessions: SessionService;
+  readonly checks: CheckService;
+  readonly shifts: ShiftService;
   readonly #reconcileIntervalMs: number;
   readonly #isManager: (actor: string) => boolean;
   #reconcileTimer: NodeJS.Timeout | undefined;
@@ -69,6 +73,8 @@ export class Hub {
       ...(deps.monitorOptions ? { options: deps.monitorOptions } : {}),
     });
     this.sessions = new SessionService({ db: deps.db, clock: deps.clock, lamps: this.lamps, events: this.events });
+    this.checks = new CheckService({ db: deps.db, clock: deps.clock, events: this.events, sessions: this.sessions });
+    this.shifts = new ShiftService({ db: deps.db, clock: deps.clock, events: this.events });
   }
 
   /** Restores lamps and pending commands after a (re)start. */

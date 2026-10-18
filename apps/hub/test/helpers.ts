@@ -31,14 +31,16 @@ export class Harness {
   readonly dir = mkdtempSync(join(tmpdir(), 'bills-hub-'));
   readonly dbPath = join(this.dir, 'hub.db');
   readonly clock = new ManualClock(MONDAY_NOON);
+  /** Migrations to apply on start; tests of upgrades point this at a temporary copy. */
+  migrationsDir: URL | undefined;
   current: TestHub | undefined;
 
   /**
    * Starts a HUB on the same database file, like a process (re)start. The
-   * monitor does not poll by itself: tests call `hub.monitor.poll()`.
+   * lamp monitor does not poll by itself: tests call `hub.monitor.poll()`.
    */
   async start(driver = new SimulatorLampDriver({ latencyMs: 5 }), deps: Partial<HubDeps> = {}): Promise<TestHub> {
-    const db = openDb(this.dbPath, this.clock.now());
+    const db = openDb(this.dbPath, this.clock.now(), this.migrationsDir ? { migrationsDir: this.migrationsDir } : {});
     seedDemo(db, this.clock.now());
     const hub = new Hub({
       db,
@@ -48,7 +50,7 @@ export class Harness {
       monitorOptions: { intervalMs: 0, alertAfterMs: 60_000 },
       ...deps,
     });
-    const app = buildApp(hub, { simulator: driver });
+    const app = buildApp(hub, { simulator: driver, dbPath: this.dbPath });
     await app.ready();
     hub.start();
     this.current = { dbPath: this.dbPath, db, clock: this.clock, driver, hub, app };

@@ -117,3 +117,15 @@ export async function updateSimulator(patch: SimulatorPatch): Promise<SimulatorS
   if (!res.ok) throw await toError(res);
   return (await res.json()) as SimulatorStatus;
 }
+
+/** Typed GET for reports and lists; errors come back as HubRequestError. */
+export async function getJson<T>(path: string): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, { cache: 'no-store' });
+  } catch {
+    throw new HubRequestError(0, 'OFFLINE', 'Нет связи с HUB');
+  }
+  if (!res.ok) throw await toError(res);
+  return (await res.json()) as T;
+}

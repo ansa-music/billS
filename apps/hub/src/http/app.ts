@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import Fastify from 'fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { BillingError } from '@bills/domain';
 import { HubError } from '../errors.ts';
 import type { Hub } from '../hub.ts';
 import type { CommandResult } from '../idempotency.ts';
@@ -8,11 +9,20 @@ import { idempotent } from '../idempotency.ts';
 import type { ChangeEvent } from '../events.ts';
 import type { SimulatorFault, SimulatorLampDriver } from '../lamps/simulator.ts';
 import { SIMULATOR_FAULTS } from '../lamps/simulator.ts';
+import { collectHealth, renderMetrics } from '../ops.ts';
+import type { VersionInfo } from '../version.ts';
+import { versionInfo } from '../version.ts';
+import { registerMoneyRoutes } from './money-routes.ts';
 
 export interface AppOptions {
   /** Exposes /api/dev/lamps to control the simulator. Never in production. */
   simulator?: SimulatorLampDriver;
   logger?: boolean;
+  /** Database file reported by /api/health (size, free disk, last backup). */
+  dbPath?: string;
+  /** When the process started; defaults to app creation time. */
+  startedAt?: number;
+  version?: VersionInfo;
 }
 
 function actorOf(req: FastifyRequest): string {
@@ -26,7 +36,7 @@ function actorOf(req: FastifyRequest): string {
   }
 }
 
-function runCommand(req: FastifyRequest, reply: FastifyReply, hub: Hub, command: (actor: string) => CommandResult) {
+export function runCommand(req: FastifyRequest, reply: FastifyReply, hub: Hub, command: (actor: string) => CommandResult) {
   const key = req.headers['idempotency-key'];
   if (typeof key !== 'string' || key.length < 8 || key.length > 200) {
     throw new HubError(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Нужен заголовок Idempotency-Key (8–200 символов)');
@@ -48,6 +58,9 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
     if (err instanceof HubError) {
       return reply.status(err.status).send({ error: { code: err.code, message: err.message } });
     }
+    if (err instanceof BillingError) {
+      return reply.status(422).send({ error: { code: err.code, message: err.message } });
+    }
     const status = (err as { statusCode?: number }).statusCode;
     if (status !== undefined && status >= 400 && status < 500) {
       return reply.status(status).send({ error: { code: 'BAD_REQUEST', message: (err as Error).message } });
@@ -56,7 +69,19 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
     return reply.status(500).send({ error: { code: 'INTERNAL', message: 'Внутренняя ошибка HUB' } });
   });
 
-  app.get('/api/health', async () => ({ ok: true, now: hub.clock.now() }));
+  const healthCtx = {
+    db: hub.db,
+    dbPath: options.dbPath ?? ':memory:',
+    startedAt: options.startedAt ?? Date.now(),
+    version: options.version ?? versionInfo(),
+  };
+  // Health for operators and monitoring; `now` stays the HUB clock, the rest is wall time.
+  app.get('/api/health', async () => ({ ...collectHealth(healthCtx), now: hub.clock.now() }));
+
+  // Prometheus / Uptime Kuma scrape target.
+  app.get('/metrics', async (_req, reply) =>
+    reply.header('content-type', 'text/plain; version=0.0.4; charset=utf-8').send(renderMetrics(collectHealth(healthCtx))),
+  );
 
   app.get('/api/state', async () => hub.state());
 
@@ -127,6 +152,8 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
     async (req, reply) =>
       runCommand(req, reply, hub, (actor) => ({ status: 200, body: hub.resolveAlert(req.params.alertId, actor) })),
   );
+
+  registerMoneyRoutes(app, hub);
 
   // Server-sent events: screens refetch /api/state when something changes.
   app.get('/api/events', (req, reply) => {
