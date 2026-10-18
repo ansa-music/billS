@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.log
+.env
+apps/hub/data/
+*.db
+*.db-wal
+*.db-shm

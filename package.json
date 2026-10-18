@@ -1,0 +1,23 @@
+{
+  "name": "bills",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "npm run test -w @bills/domain -w @bills/hub",
+    "typecheck": "tsc -p packages/domain && tsc -p apps/hub && tsc -p apps/web",
+    "dev:hub": "npm run dev -w @bills/hub",
+    "dev:web": "npm run dev -w @bills/web",
+    "start:hub": "npm run start -w @bills/hub"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2"
+  }
+}
