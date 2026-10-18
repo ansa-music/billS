@@ -1,8 +1,9 @@
-import type { ClubSummary } from '@bills/domain';
+import type { ClubSummary, CloudShiftView } from '@bills/domain';
 import { fetchOverview } from './api.ts';
-import { formatClock } from './format.ts';
+import { formatClock, formatDateTime, localDay } from './format.ts';
 import { clubHref, usePoll } from './hooks.ts';
-import { AlertList, HubBadge, Section, StatTile, gamesLabel, loadingText } from './shared.tsx';
+import { AlertList, Difference, HubBadge, Section, StatTile, gamesLabel, loadingText } from './shared.tsx';
+import { ShiftsTable } from './Shifts.tsx';
 
 function tablesLabel(n: number): string {
   const mod10 = n % 10;
@@ -28,6 +29,38 @@ function alertsLabel(n: number): string {
   return `${n} ${word}`;
 }
 
+/** «Смена №12 открыта с 10:05, Айгерим» / «Смена закрыта · №11: недостача −300 ₸». */
+function ShiftStatus({ club, now }: { club: ClubSummary; now: number }) {
+  const open = club.openShift;
+  if (open) {
+    // A shift opened on another local day shows its date, not only the time.
+    const sameDay = localDay(open.openedAt, club.timezone) === localDay(now, club.timezone);
+    const since = sameDay ? formatClock(open.openedAt, club.timezone) : formatDateTime(open.openedAt, club.timezone);
+    return (
+      <p className="shift-status" data-open="">
+        <span className="shift-dot" aria-hidden="true" />
+        Смена №{open.number} открыта с {since}, {open.openedBy}
+      </p>
+    );
+  }
+  const last = club.lastClosedShift;
+  if (!last) {
+    return <p className="shift-status muted">Смен ещё не было</p>;
+  }
+  return (
+    <p className="shift-status">
+      <span className="shift-dot" aria-hidden="true" />
+      Смена закрыта
+      <span className="muted">
+        {' '}
+        · №{last.number}
+        {last.closedAt !== null ? `, ${formatDateTime(last.closedAt, club.timezone)}` : ''}:
+      </span>{' '}
+      <Difference value={last.difference} currency={club.currency} />
+    </p>
+  );
+}
+
 function ClubCard({ club, now }: { club: ClubSummary; now: number }) {
   return (
     <a className="club-card" href={clubHref(club.id)} data-problem={club.openAlerts > 0 || undefined}>
@@ -41,10 +74,11 @@ function ClubCard({ club, now }: { club: ClubSummary; now: number }) {
         <HubBadge hub={club.hub} now={now} />
       </header>
       <div className="stats">
-        <StatTile label="Сегодня" stats={club.today} currency={club.currency} />
-        <StatTile label="7 дней" stats={club.week} currency={club.currency} />
-        <StatTile label="Месяц" stats={club.month} currency={club.currency} />
+        <StatTile label="Сегодня" stats={club.today} currency={club.currency} compact />
+        <StatTile label="7 дней" stats={club.week} currency={club.currency} compact />
+        <StatTile label="Месяц" stats={club.month} currency={club.currency} compact />
       </div>
+      <ShiftStatus club={club} now={now} />
       <footer className="club-foot">
         <span>{tablesLabel(club.tablesCount)}</span>
         <span data-live={club.liveGames > 0 || undefined}>
@@ -68,6 +102,9 @@ export function Overview() {
   const now = data.serverNow;
   const currency = data.clubs[0]?.currency ?? 'KZT';
   const mixedCurrency = data.clubs.some((c) => c.currency !== currency);
+  const zones = new Map(data.clubs.map((c) => [c.id, c.timezone]));
+  const zoneOf = (s: CloudShiftView) => zones.get(s.clubId) ?? 'UTC';
+  const mismatched = data.recentShifts.filter((s) => (s.difference ?? 0) !== 0).length;
 
   return (
     <>
@@ -92,6 +129,22 @@ export function Overview() {
           <ClubCard key={club.id} club={club} now={now} />
         ))}
       </section>
+
+      <Section
+        title="Смены за 7 дней"
+        aside={
+          <span className="panel-aside">
+            {mismatched > 0 && (
+              <span className="tag tag-danger" title="Смены, где посчитанная наличность не сошлась с ожидаемой">
+                расхождений: {mismatched}
+              </span>
+            )}
+            <span className="panel-total">{data.recentShifts.length}</span>
+          </span>
+        }
+      >
+        <ShiftsTable shifts={data.recentShifts} currency={currency} zoneOf={zoneOf} now={now} brief />
+      </Section>
 
       <Section title="Открытые тревоги" aside={<span className="panel-total">{data.alerts.length}</span>}>
         <AlertList alerts={data.alerts} showClub emptyText="Во всех клубах спокойно — открытых тревог нет" />
