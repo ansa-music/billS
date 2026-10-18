@@ -8,7 +8,9 @@ import { record } from './journal.ts';
 import type { LampOptions } from './lamps/controller.ts';
 import { LampController } from './lamps/controller.ts';
 import type { LampDriver } from './lamps/driver.ts';
+import { CheckService } from './checks.ts';
 import { SessionService } from './sessions.ts';
+import { ShiftService } from './shifts.ts';
 import type { HubState } from './views.ts';
 import { buildState } from './views.ts';
 
@@ -30,6 +32,8 @@ export class Hub {
   readonly events = new HubEvents();
   readonly lamps: LampController;
   readonly sessions: SessionService;
+  readonly checks: CheckService;
+  readonly shifts: ShiftService;
   readonly #reconcileIntervalMs: number;
   #reconcileTimer: NodeJS.Timeout | undefined;
 
@@ -46,6 +50,8 @@ export class Hub {
       ...(deps.lampOptions ? { options: deps.lampOptions } : {}),
     });
     this.sessions = new SessionService({ db: deps.db, clock: deps.clock, lamps: this.lamps, events: this.events });
+    this.checks = new CheckService({ db: deps.db, clock: deps.clock, events: this.events, sessions: this.sessions });
+    this.shifts = new ShiftService({ db: deps.db, clock: deps.clock, events: this.events });
   }
 
   /** Restores lamps and pending commands after a (re)start. */

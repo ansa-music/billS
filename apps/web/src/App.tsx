@@ -7,7 +7,9 @@ import { alertsByTable, matchesFilter } from './hall.ts';
 import { HallToolbar, useHallFilter } from './HallToolbar.tsx';
 import { useWakeLock } from './kiosk.ts';
 import { OfflineBanner } from './OfflineBanner.tsx';
-import { AlertsBar, SimulatorPanel, UnpaidPanel } from './Panels.tsx';
+import { ShiftPanel } from './cash/ShiftPanel.tsx';
+import { UnpaidPanel } from './cash/UnpaidPanel.tsx';
+import { AlertsBar, SimulatorPanel } from './Panels.tsx';
 import { TableCard } from './TableCard.tsx';
 
 const ACTOR_KEY = 'bills.actor';
@@ -186,7 +188,8 @@ export function App() {
           </main>
         </div>
         <aside className="side">
-          <UnpaidPanel state={state} />
+          <ShiftPanel state={state} actor={actor} refresh={refresh} notify={setToast} />
+          <UnpaidPanel state={state} actor={actor} refresh={refresh} notify={setToast} />
           <SimulatorPanel onError={setToast} />
         </aside>
       </div>
