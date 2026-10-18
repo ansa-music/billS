@@ -1,8 +1,18 @@
 import type { FastifyInstance } from 'fastify';
 import type { Hub } from '../../hub.ts';
 
-/** Routes for owner summary: see api.ts (OwnerSummary). */
+/** Routes for the owner summary: see api.ts (OwnerSummary). Read-only, no idempotency. */
 export function registerReportRoutes(app: FastifyInstance, hub: Hub): void {
-  void app;
-  void hub;
+  app.get<{ Querystring: { date?: string } }>(
+    '/api/reports/summary',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          properties: { date: { type: 'string' } },
+        },
+      },
+    },
+    async (req) => hub.reports.summary(req.query.date),
+  );
 }
