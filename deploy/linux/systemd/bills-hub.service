@@ -1,0 +1,39 @@
+# billS HUB — сервер контроля бильярдного клуба.
+# Устанавливается скриптом deploy/linux/install.sh в /etc/systemd/system/.
+# Настройки HUB — в /etc/bills/hub.env. Логи: journalctl -u bills-hub -f
+
+[Unit]
+Description=billS HUB (сервер бильярдного клуба)
+Documentation=https://github.com/ansa-music/billS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bills
+Group=bills
+WorkingDirectory=/opt/bills/current
+EnvironmentFile=/etc/bills/hub.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node apps/hub/src/main.ts
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+KillSignal=SIGTERM
+
+# Состояние (база, бэкапы): /var/lib/bills
+StateDirectory=bills
+StateDirectoryMode=0750
+
+# Ограничения безопасности
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/bills
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

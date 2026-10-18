@@ -1,0 +1,14 @@
+# billS — расписание ночного бэкапа (каждый день в 03:30 по локальному времени сервера).
+# Проверить: systemctl list-timers bills-backup.timer
+
+[Unit]
+Description=billS: ежедневный бэкап базы HUB в 03:30
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=10min
+Unit=bills-backup.service
+
+[Install]
+WantedBy=timers.target
