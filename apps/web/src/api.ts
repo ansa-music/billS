@@ -41,10 +41,20 @@ async function toError(res: Response): Promise<HubRequestError> {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function fetchState(): Promise<HubState> {
-  const res = await fetch('/api/state', { cache: 'no-store' });
+/** GET a JSON resource from the HUB. */
+export async function fetchJson<T>(path: string): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, { cache: 'no-store' });
+  } catch {
+    throw new HubRequestError(0, 'OFFLINE', 'Нет связи с HUB');
+  }
   if (!res.ok) throw await toError(res);
-  return (await res.json()) as HubState;
+  return (await res.json()) as T;
+}
+
+export async function fetchState(): Promise<HubState> {
+  return fetchJson<HubState>('/api/state');
 }
 
 /**

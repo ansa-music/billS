@@ -1,7 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import type { HubState } from '@bills/domain';
+import type { Action, HubState, Role } from '@bills/domain';
 import { command, fetchState } from './api.ts';
+import { actorName } from './auth.ts';
 
+/**
+ * One live connection to the HUB for the whole app: SSE for change events,
+ * refetch of /api/state on each, a 15 s poll as backup, and a watchdog that
+ * reconnects when the HUB's pings stop (restart behind a proxy, dropped Wi-Fi).
+ */
 export interface HubConnection {
   state: HubState | null;
   /** serverNow − Date.now(): timers run on the HUB clock, tablets may be off. */
@@ -115,14 +121,21 @@ export function useNow(intervalMs = 1000): number {
   return now;
 }
 
-/** Everything a screen needs; provided once by App. */
+/** Everything a page needs; provided once by App after the first state arrived. */
 export interface HubContextValue {
   state: HubState;
   serverNow: number;
+  /** serverNow − Date.now(). */
+  offset: number;
   online: boolean;
   version: number;
   layoutVersion: number;
+  refresh: () => Promise<void>;
+  /** Who is logged in on this screen; goes to the HUB as X-Actor. */
   actor: string;
+  role: Role | null;
+  /** Permission check for the current role (see packages/domain permissions.ts). */
+  can: (action: Action) => boolean;
   /** Runs a command with a busy flag under `key`; errors go to the toast. */
   run: (key: string, fn: () => Promise<unknown>) => Promise<boolean>;
   isBusy: (key: string) => boolean;
@@ -140,7 +153,14 @@ export function useHub(): HubContextValue {
   return ctx;
 }
 
-export function useCommands(actor: string, refresh: () => Promise<void>, notify: (m: string) => void) {
+/** The HUB clock, ticking once a second. */
+export function useServerNow(intervalMs = 1000): number {
+  const { offset } = useHub();
+  return useNow(intervalMs) + offset;
+}
+
+/** Hall commands with per-table busy flags; App builds the context from them. */
+export function useHallCommands(actor: string, refresh: () => Promise<void>, notify: (m: string) => void) {
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
 
   const run = useCallback(
@@ -174,6 +194,42 @@ export function useCommands(actor: string, refresh: () => Promise<void>, notify:
       run(tableId, () => command(`/api/sessions/${sessionId}/stop`, actor)),
     resolveAlert: (alertId: string) => run(`alert:${alertId}`, () => command(`/api/alerts/${alertId}/resolve`, actor)),
   };
+}
+
+/**
+ * Generic commands for the pages beyond the hall (settings, bar, staff): runs
+ * a POST with the current staff as actor, tracks which keys are busy and
+ * reports errors through `onError`. After every command the state is refetched.
+ */
+export function useCommands(onError: (message: string) => void): {
+  busy: Set<string>;
+  isBusy: (key: string) => boolean;
+  run: <T>(key: string, path: string, body?: object) => Promise<T | undefined>;
+} {
+  const { refresh } = useHub();
+  const [busy, setBusy] = useState<Set<string>>(new Set());
+
+  const run = useCallback(
+    async <T,>(key: string, path: string, body: object = {}): Promise<T | undefined> => {
+      setBusy((b) => new Set(b).add(key));
+      try {
+        return await command<T>(path, actorName(), body);
+      } catch (e) {
+        onError((e as Error).message);
+        return undefined;
+      } finally {
+        setBusy((b) => {
+          const next = new Set(b);
+          next.delete(key);
+          return next;
+        });
+        void refresh();
+      }
+    },
+    [onError, refresh],
+  );
+
+  return { busy, isBusy: (key) => busy.has(key), run };
 }
 
 /**

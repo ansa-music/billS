@@ -5,9 +5,9 @@ import { Drawer, StatusBadge } from '../components.tsx';
 import { formatClock, formatDuration, formatSpan, KIND_LABEL } from '../format.ts';
 import { tablePhase } from '../hall.ts';
 import { Icon } from '../icons.tsx';
-import { href } from '../router.ts';
+import { hrefFor } from '../router.tsx';
 import { LampBadge, PHASE_LABEL } from '../TableCard.tsx';
-import { useHub } from '../useHub.ts';
+import { useHub } from '../useHub.tsx';
 
 const HOUR = 60 * 60 * 1000;
 const SLOW_LAMP_MS = 4000;
@@ -328,7 +328,7 @@ export function TableDrawer({
 
       <DayHistory sessions={daySessions} timezone={timezone} currency={currency} />
 
-      <a className="drawer-link" href={href('journal', { table: table.id })}>
+      <a className="drawer-link" href={hrefFor('/journal', { table: table.id })}>
         <Icon name="journal" size={18} />
         Журнал действий этого стола
         <Icon name="chevron" size={16} />

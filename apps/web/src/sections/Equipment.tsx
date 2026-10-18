@@ -5,7 +5,7 @@ import { fetchLamps, fetchSimulator, updateSimulator } from '../api.ts';
 import { EmptyState, SectionCard, StatTile } from '../components.tsx';
 import { formatAgo, lampErrorText } from '../format.ts';
 import { Icon } from '../icons.tsx';
-import { useHub, useLive } from '../useHub.ts';
+import { useHub, useLive } from '../useHub.tsx';
 
 const COMMAND_STATUS: Record<NonNullable<LampDetail['lastCommand']>['status'], string> = {
   PENDING: 'отправляется',

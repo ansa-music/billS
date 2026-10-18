@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.log
 .env
+!.env.alt
 apps/hub/data/
 *.db
 *.db-wal

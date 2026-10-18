@@ -24,6 +24,18 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["scripts/local.mjs", "--hub-port=4610", "--web-port=5610", "--db=ui-check"],
       "port": 5610
+    },
+    {
+      "name": "hub-alt",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--env-file=.env.alt", "--watch", "apps/hub/src/main.ts"],
+      "port": 4320
+    },
+    {
+      "name": "web-alt",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--env-file=.env.alt", "node_modules/vite/bin/vite.js", "apps/web"],
+      "port": 5180
     }
   ]
 }

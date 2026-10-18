@@ -4,7 +4,7 @@ import { calculateCharge, formatMoney } from '@bills/domain';
 import { fetchSessions } from '../api.ts';
 import { EmptyState, SectionCard, Segmented, StatTile } from '../components.tsx';
 import { DAY_MS, DAY_START_HOUR, formatDay, formatSpan, workdayStart } from '../format.ts';
-import { useHub, useLive } from '../useHub.ts';
+import { useHub, useLive } from '../useHub.tsx';
 
 type Period = 'today' | 'yesterday' | 'week';
 const HOUR = 60 * 60 * 1000;

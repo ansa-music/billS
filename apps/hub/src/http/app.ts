@@ -1,50 +1,22 @@
-import { createHash } from 'node:crypto';
 import Fastify from 'fastify';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { HubError } from '../errors.ts';
 import type { Hub } from '../hub.ts';
-import type { CommandResult } from '../idempotency.ts';
-import { idempotent } from '../idempotency.ts';
 import type { ChangeEvent } from '../events.ts';
 import type { SimulatorFault, SimulatorLampDriver } from '../lamps/simulator.ts';
 import { SIMULATOR_FAULTS } from '../lamps/simulator.ts';
 import { registerHallRoutes } from './hall-routes.ts';
+import { emptyBody, runCommand } from './command.ts';
+import { registerBarRoutes } from './routes/bar.ts';
+import { registerReportRoutes } from './routes/reports.ts';
+import { registerSettingsRoutes } from './routes/settings.ts';
+import { registerStaffRoutes } from './routes/staff.ts';
 
 export interface AppOptions {
   /** Exposes /api/dev/lamps to control the simulator. Never in production. */
   simulator?: SimulatorLampDriver;
   logger?: boolean;
 }
-
-function actorOf(req: FastifyRequest): string {
-  // Temporary until staff log in with a PIN (stage 3).
-  const raw = req.headers['x-actor'];
-  if (typeof raw !== 'string' || raw.length === 0) return 'unknown';
-  try {
-    return decodeURIComponent(raw).slice(0, 100);
-  } catch {
-    return 'unknown';
-  }
-}
-
-export function runCommand(
-  req: FastifyRequest,
-  reply: FastifyReply,
-  hub: Hub,
-  command: (actor: string) => CommandResult,
-) {
-  const key = req.headers['idempotency-key'];
-  if (typeof key !== 'string' || key.length < 8 || key.length > 200) {
-    throw new HubError(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Нужен заголовок Idempotency-Key (8–200 символов)');
-  }
-  const hash = createHash('sha256')
-    .update(`${req.method} ${req.url}\n${JSON.stringify(req.body ?? null)}`)
-    .digest('hex');
-  const result = idempotent(hub.db, hub.clock.now(), key, hash, () => command(actorOf(req)));
-  return reply.status(result.status).header('idempotent-replayed', String(result.replayed)).send(result.body);
-}
-
-const emptyBody = { type: 'object', additionalProperties: false, properties: {} } as const;
 
 export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   // Screens poll /api/state on every change: per-request logs would drown real events.
@@ -98,6 +70,12 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
     async (req, reply) =>
       runCommand(req, reply, hub, (actor) => ({ status: 200, body: hub.resolveAlert(req.params.alertId, actor) })),
   );
+
+  // Pages beyond the hall screen: each module owns its routes.
+  registerSettingsRoutes(app, hub);
+  registerBarRoutes(app, hub);
+  registerStaffRoutes(app, hub);
+  registerReportRoutes(app, hub);
 
   // Server-sent events: screens refetch /api/state when something changes.
   app.get('/api/events', (req, reply) => {

@@ -1,0 +1,248 @@
+/* Club settings page (#/settings): tabs, tables editor, tariff editor, display and rules.
+   Tokens only (styles.css / app.css), so both themes and the forced theme work. */
+
+.settings-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+.settings-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.settings-tabs .chip {
+  flex: none;
+  min-height: 44px;
+}
+
+.settings-offline {
+  color: var(--warn);
+  font-size: 14px;
+}
+
+.settings-save {
+  padding-top: 4px;
+}
+
+.errors {
+  margin: 0;
+  padding: 10px 12px 10px 28px;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 14px;
+  display: grid;
+  gap: 4px;
+}
+
+/* Tables editor */
+
+.tables-editor td {
+  white-space: nowrap;
+}
+
+.tables-editor select {
+  min-height: 44px;
+  max-width: 220px;
+}
+
+.tables-editor code {
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.tables-tag {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.reorder {
+  display: flex;
+  gap: 4px;
+}
+
+.reorder .btn {
+  min-width: 44px;
+  padding: 0;
+}
+
+.tables-editor .actions .btn,
+.tariff-list .actions .btn {
+  min-height: 44px;
+}
+
+/* Tariffs */
+
+.tariff-list li[data-inactive] {
+  opacity: 0.65;
+}
+
+.tariff-list .actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tariff-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.tariff-now,
+.tariff-meta {
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.tariff-form .windows {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  margin: 0;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.tariff-form legend {
+  font-weight: 600;
+  padding: 0 6px;
+}
+
+.window {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip.day {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+}
+
+.window-time {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.window-time .btn {
+  min-height: 44px;
+}
+
+.preview {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--accent) 50%, var(--border));
+  background: color-mix(in oklab, var(--accent) 10%, var(--surface));
+  display: grid;
+  gap: 2px;
+  font-size: 14px;
+}
+
+.preview-now strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Display settings */
+
+.logo-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo-row .btn {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.logo-row .btn.is-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.logo-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 6px 14px 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-weight: 650;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.logo-preview img {
+  height: 32px;
+  max-width: 120px;
+  object-fit: contain;
+}
+
+.logo-preview .ball {
+  width: 32px;
+  height: 32px;
+  font-size: 11px;
+}
+
+.logo-preview .ball::before {
+  width: 16px;
+  height: 16px;
+}
+
+.logo-preview span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Rules */
+
+.rules-sub {
+  margin: 8px 0 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+/* Phones: everything stacks, dialogs fill the screen width. */
+@media (max-width: 480px) {
+  .window-time {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .window-time .btn {
+    grid-column: 1 / -1;
+  }
+
+  .tariff-list .actions {
+    width: 100%;
+  }
+
+  .tariff-list .actions .btn {
+    flex: 1;
+  }
+}

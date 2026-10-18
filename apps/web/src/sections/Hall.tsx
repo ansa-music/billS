@@ -21,10 +21,10 @@ import { PlanView } from '../hall/PlanView.tsx';
 import type { PlanSelection } from '../hall/PlanView.tsx';
 import { TableDrawer } from '../hall/TableDrawer.tsx';
 import { Icon } from '../icons.tsx';
-import { href } from '../router.ts';
+import { hrefFor } from '../router.tsx';
 import { Popover } from '../Shell.tsx';
 import { TableCard } from '../TableCard.tsx';
-import { useHub, useLive } from '../useHub.ts';
+import { useHub, useLive } from '../useHub.tsx';
 
 type HallView = 'plan' | 'cards';
 const VIEW_KEY = 'bills.hallView';
@@ -95,7 +95,7 @@ function HallSummary({ dayRevenue }: { dayRevenue: number | null }) {
         value={formatMoney(unpaid, currency)}
         detail={state.unpaid.length ? `${state.unpaid.length} ${state.unpaid.length === 1 ? 'игра' : 'игр'} · открыть счета` : 'неоплаченных нет'}
         tone={state.unpaid.length ? 'info' : undefined}
-        href={href('checks')}
+        href={hrefFor('/checks')}
       />
     </div>
   );
@@ -443,7 +443,7 @@ export function HallSection() {
               ]}
             />
           )}
-          {!editing && view === 'plan' && (
+          {!editing && view === 'plan' && hub.can('hall.edit') && (
             <button type="button" className="btn btn-small" onClick={startEditing} disabled={!layoutView}>
               <Icon name="edit" size={16} /> Расставить столы
             </button>

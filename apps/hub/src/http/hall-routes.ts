@@ -3,7 +3,7 @@ import type { JournalCategory } from '@bills/domain';
 import { JOURNAL_CATEGORIES } from '@bills/domain';
 import { getHallLayout, journalPage, lampDetails, saveHallLayout, sessionsBetween } from '../hall.ts';
 import type { Hub } from '../hub.ts';
-import type { runCommand } from './app.ts';
+import type { runCommand } from './command.ts';
 
 /** Floor plan, journal, game history and lamp details for the hall screens. */
 export function registerHallRoutes(app: FastifyInstance, hub: Hub, command: typeof runCommand): void {

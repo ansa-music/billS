@@ -5,7 +5,7 @@ import { fetchSessions } from '../api.ts';
 import { EmptyState, SectionCard, StatTile, StatusBadge } from '../components.tsx';
 import { DAY_MS, formatClock, formatSpan, workdayStart } from '../format.ts';
 import { Icon } from '../icons.tsx';
-import { useHub, useLive } from '../useHub.ts';
+import { useHub, useLive } from '../useHub.tsx';
 
 type HistoryFilter = 'all' | 'live' | 'unpaid' | 'paid' | 'cancelled' | 'failed';
 

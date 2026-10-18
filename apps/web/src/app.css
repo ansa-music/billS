@@ -1,0 +1,399 @@
+/* Pages beyond the hall screen (settings, bar, staff, owner, platform, login):
+   page layout, forms, data tables, dialogs. Only tokens from styles.css, so both
+   themes work. The shell (sidebar, top bar, phone tabs) is in shell.css; the
+   theme tokens for data-theme live in styles.css. Page-specific styles sit next
+   to each page (pages/*.css). */
+
+/* Card size from club settings (App sets data-cards on <html>). */
+:root[data-cards='compact'] .tables {
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+}
+
+:root[data-cards='compact'] .card {
+  min-height: 200px;
+}
+
+:root[data-cards='large'] .tables {
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+}
+
+/* A waiter sees only time when the club says so. */
+:root[data-hide-amounts] .card .amount,
+:root[data-hide-amounts] .card .price-next,
+:root[data-hide-amounts] .unpaid-amount,
+:root[data-hide-amounts] .panel-total {
+  display: none;
+}
+
+/* Shell additions */
+
+.sidebar-logo {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  border-radius: 8px;
+  flex: none;
+}
+
+.sidebar-links {
+  overflow-y: auto;
+  min-height: 0;
+  scrollbar-width: thin;
+}
+
+.actor-who {
+  display: grid;
+  line-height: 1.25;
+}
+
+.actor-who .muted {
+  font-size: 13px;
+}
+
+/* Twelve sections do not fit six fixed columns: the phone tab bar scrolls sideways. */
+@media (max-width: 767px) {
+  .bottom-nav {
+    display: flex;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .bottom-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .bottom-nav .nav-link {
+    flex: 1 0 64px;
+  }
+}
+
+/* Login: the only screen outside the shell. */
+
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  align-content: start;
+  padding: 24px 16px;
+}
+
+.login-shell .page {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.login-shell .page-title {
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+/* Page frame: inside the shell the top bar already shows the title. */
+
+.shell .page-title {
+  display: none;
+}
+
+.shell .page-head[data-empty] {
+  display: none;
+}
+
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.section h2 {
+  font-size: 17px;
+}
+
+.grid-2 {
+  display: grid;
+  gap: 16px;
+}
+
+@media (min-width: 900px) {
+  .grid-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Forms */
+
+.form {
+  display: grid;
+  gap: 12px;
+}
+
+.form-row {
+  display: grid;
+  gap: 12px;
+}
+
+@media (min-width: 640px) {
+  .form-row {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+}
+
+.field > span:first-child {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  min-height: 44px;
+}
+
+textarea {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font: inherit;
+  color: inherit;
+  resize: vertical;
+}
+
+.field-error {
+  color: var(--danger);
+  font-size: 13px;
+}
+
+/* Toggle chips (ui.tsx Segmented); the hall's pill switch is .segmented in sections.css. */
+.seg-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.form-actions .btn-primary {
+  flex: none;
+}
+
+.btn-primary.btn-wide {
+  flex: 1;
+}
+
+/* Data tables: scroll inside, never the page. */
+
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 10px 8px;
+  border-top: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.table th {
+  border-top: none;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.table td.num,
+.table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.table tr[data-inactive] td {
+  color: var(--muted);
+}
+
+.table .actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+/* List rows (phone-friendly alternative to a table). */
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.list > li:first-child {
+  border-top: none;
+}
+
+.list .grow {
+  flex: 1;
+  min-width: 160px;
+}
+
+/* Stat tiles of the owner cabinet (the hall's tiles are .stat-tile in sections.css). */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: grid;
+  gap: 4px;
+}
+
+.stats .stat-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.stats .stat-value {
+  font-size: 24px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.stat-note {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Dialogs */
+
+.modal {
+  border: none;
+  padding: 0;
+  background: transparent;
+  max-width: min(560px, calc(100vw - 32px));
+  width: 100%;
+}
+
+.modal::backdrop {
+  background: rgb(0 0 0 / 0.55);
+}
+
+.modal-body {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.modal-head h2 {
+  font-size: 18px;
+}
+
+.modal-actions {
+  justify-content: flex-end;
+}
+
+.modal-actions .btn {
+  flex: none;
+}
+
+/* Login */
+
+.login-groups {
+  display: grid;
+  gap: 20px;
+}
+
+.login-group h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+
+.login-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.btn.login-btn {
+  justify-content: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  text-align: left;
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: color-mix(in oklab, var(--accent) 25%, var(--surface-2));
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  flex: none;
+}
+
+/* Tags */
+
+.tag-ok {
+  background: color-mix(in oklab, var(--accent) 20%, transparent);
+  color: var(--accent);
+}
+
+.tag-muted {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.tag-warn {
+  background: color-mix(in oklab, var(--warn) 20%, transparent);
+  color: var(--warn);
+}

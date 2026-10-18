@@ -1,47 +1,51 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { HubState } from '@bills/domain';
+import { ROLE_LABEL } from '@bills/domain';
+import type { CurrentStaff } from './auth.ts';
 import { formatClock } from './format.ts';
 import { Icon } from './icons.tsx';
 import type { IconName } from './icons.tsx';
 import { useFullscreen } from './kiosk.ts';
-import { href, SECTION_TITLE, SECTIONS } from './router.ts';
-import type { Section } from './router.ts';
+import { hrefFor } from './router.tsx';
+import type { RouteDef } from './router.tsx';
 import type { ThemePreference } from './theme.ts';
 
-const SECTION_ICON: Record<Section, IconName> = {
-  hall: 'hall',
-  checks: 'checks',
-  stats: 'stats',
-  tariffs: 'tariffs',
-  journal: 'journal',
-  equipment: 'equipment',
-};
+/** Badge counts by route path (unpaid checks, lamp problems …). */
+export type NavBadges = Record<string, { count: number; tone: 'info' | 'danger' }>;
 
-export type NavBadges = Partial<Record<Section, { count: number; tone: 'info' | 'danger' }>>;
-
-function NavLinks({ active, badges, compact }: { active: Section; badges: NavBadges; compact?: boolean }) {
+function NavLinks({
+  routes,
+  active,
+  badges,
+  compact,
+}: {
+  routes: RouteDef[];
+  active: string;
+  badges: NavBadges;
+  compact?: boolean;
+}) {
   return (
     <>
-      {SECTIONS.map((s) => {
-        const badge = badges[s];
+      {routes.map((r) => {
+        const badge = badges[r.path];
         return (
           <a
-            key={s}
-            href={href(s)}
+            key={r.path}
+            href={hrefFor(r.path)}
             className="nav-link"
-            title={SECTION_TITLE[s]}
-            aria-current={s === active ? 'page' : undefined}
+            title={r.title}
+            aria-current={r.path === active ? 'page' : undefined}
           >
             <span className="nav-icon">
-              <Icon name={SECTION_ICON[s]} size={compact ? 22 : 20} />
+              <Icon name={r.icon} size={compact ? 22 : 20} />
               {badge && badge.count > 0 && (
                 <span className="nav-badge" data-tone={badge.tone}>
                   {badge.count > 99 ? '99+' : badge.count}
                 </span>
               )}
             </span>
-            <span className="nav-label">{SECTION_TITLE[s]}</span>
+            <span className="nav-label">{compact ? (r.short ?? r.title) : r.title}</span>
           </a>
         );
       })}
@@ -49,20 +53,39 @@ function NavLinks({ active, badges, compact }: { active: Section; badges: NavBad
   );
 }
 
-export function Sidebar({ club, active, badges, online }: { club: string; active: Section; badges: NavBadges; online: boolean }) {
+export function Sidebar({
+  title,
+  logoUrl,
+  routes,
+  active,
+  badges,
+  online,
+}: {
+  /** Club name or the title from the hall screen settings. */
+  title: string;
+  logoUrl: string | null;
+  routes: RouteDef[];
+  active: string;
+  badges: NavBadges;
+  online: boolean;
+}) {
   return (
     <nav className="sidebar" aria-label="Разделы">
       <div className="sidebar-brand">
-        <span className="ball" aria-hidden="true">
-          8
-        </span>
+        {logoUrl ? (
+          <img className="sidebar-logo" src={logoUrl} alt="" />
+        ) : (
+          <span className="ball" aria-hidden="true">
+            8
+          </span>
+        )}
         <div className="sidebar-brand-text">
           <strong>Billiard Control</strong>
-          <span>{club}</span>
+          <span>{title}</span>
         </div>
       </div>
       <div className="sidebar-links">
-        <NavLinks active={active} badges={badges} />
+        <NavLinks routes={routes} active={active} badges={badges} />
       </div>
       <div className="sidebar-foot" data-online={online || undefined}>
         <span className="conn-dot" aria-hidden="true" />
@@ -72,10 +95,10 @@ export function Sidebar({ club, active, badges, online }: { club: string; active
   );
 }
 
-export function BottomNav({ active, badges }: { active: Section; badges: NavBadges }) {
+export function BottomNav({ routes, active, badges }: { routes: RouteDef[]; active: string; badges: NavBadges }) {
   return (
     <nav className="bottom-nav" aria-label="Разделы">
-      <NavLinks active={active} badges={badges} compact />
+      <NavLinks routes={routes} active={active} badges={badges} compact />
     </nav>
   );
 }
@@ -130,7 +153,11 @@ export function Popover({
   );
 }
 
-const THEME_LABEL: Record<ThemePreference, string> = { auto: 'Тема: как на устройстве', dark: 'Тема: тёмная', light: 'Тема: светлая' };
+const THEME_LABEL: Record<ThemePreference, string> = {
+  auto: 'Тема: как в настройках клуба',
+  dark: 'Тема: тёмная',
+  light: 'Тема: светлая',
+};
 const THEME_ICON: Record<ThemePreference, IconName> = { auto: 'auto', dark: 'moon', light: 'sun' };
 
 export function Topbar(props: {
@@ -138,14 +165,15 @@ export function Topbar(props: {
   state: HubState;
   serverNow: number;
   online: boolean;
-  actor: string;
-  onActor: (name: string) => void;
+  staff: CurrentStaff;
+  onLogout: () => void;
   theme: ThemePreference;
   onTheme: () => void;
   onResolveAlert: (id: string) => void;
+  canResolveAlerts: boolean;
   busy: boolean;
 }) {
-  const { state } = props;
+  const { state, staff } = props;
   const fullscreen = useFullscreen();
   const alerts = state.alerts;
   return (
@@ -191,9 +219,11 @@ export function Topbar(props: {
                       <p>{a.message}</p>
                       <span className="muted">{formatClock(a.at, state.club.timezone)}</span>
                     </div>
-                    <button type="button" className="btn btn-small" disabled={props.busy} onClick={() => props.onResolveAlert(a.id)}>
-                      Принято
-                    </button>
+                    {props.canResolveAlerts && (
+                      <button type="button" className="btn btn-small" disabled={props.busy} onClick={() => props.onResolveAlert(a.id)}>
+                        Принято
+                      </button>
+                    )}
                   </div>
                 ))
               )}
@@ -202,37 +232,32 @@ export function Topbar(props: {
         </Popover>
 
         <Popover
-          label={`Сотрудник: ${props.actor}`}
+          label={`Сотрудник: ${staff.name}`}
           button={
             <span className="actor-pill">
               <Icon name="user" size={18} />
-              <span className="actor-name">{props.actor}</span>
+              <span className="actor-name">{staff.name}</span>
             </span>
           }
         >
           {(close) => (
-            <form
-              className="actor-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                close();
-              }}
-            >
-              <label className="field">
-                Кто работает за этим экраном
-                <input
-                  className="actor-input"
-                  value={props.actor}
-                  onChange={(e) => props.onActor(e.target.value)}
-                  maxLength={60}
-                  autoFocus
-                />
-              </label>
-              <p className="hint">Имя попадает в журнал действий. С этапа 3 — вход по PIN.</p>
-              <button type="submit" className="btn btn-primary">
-                Готово
+            <div className="actor-form">
+              <p className="actor-who">
+                <strong>{staff.name}</strong>
+                <span className="muted">{ROLE_LABEL[staff.role]}</span>
+              </p>
+              <p className="hint">Имя попадает в журнал действий. Вход по PIN — на этапе 3.</p>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  close();
+                  props.onLogout();
+                }}
+              >
+                <Icon name="logout" size={18} /> Сменить сотрудника
               </button>
-            </form>
+            </div>
           )}
         </Popover>
 

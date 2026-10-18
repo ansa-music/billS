@@ -1,0 +1,332 @@
+/* Staff page and audit journal. Tokens only (styles.css / app.css), both themes. */
+
+/* ── Staff ──────────────────────────────────────────────────────────────── */
+
+.staff-hint {
+  font-size: 14px;
+  color: var(--muted);
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+}
+
+.staff-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+/* Phone: a card per employee. */
+.staff-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    'avatar who'
+    'avatar tags'
+    'tables tables'
+    'actions actions';
+  gap: 6px 12px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  min-width: 0;
+}
+
+.staff-row[data-inactive] {
+  opacity: 0.75;
+}
+
+.staff-row[data-inactive] .staff-name {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklab, var(--muted) 50%, transparent);
+}
+
+.staff-row .avatar {
+  grid-area: avatar;
+}
+
+.staff-who {
+  grid-area: who;
+  display: grid;
+  min-width: 0;
+}
+
+.staff-name {
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.staff-role {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.staff-tags {
+  grid-area: tags;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.staff-tables {
+  grid-area: tables;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.staff-tables .chip {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: default;
+}
+
+.staff-actions {
+  grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.staff-actions .btn {
+  flex: 1 1 auto;
+  min-height: 44px;
+}
+
+/* Desktop: one row per employee. */
+@media (min-width: 820px) {
+  .staff-list {
+    gap: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .staff-row {
+    grid-template-columns: 36px minmax(180px, 1.4fr) minmax(140px, 1fr) minmax(0, 1.6fr) auto;
+    grid-template-areas: 'avatar who tags tables actions';
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 0;
+    border-top: 1px solid var(--border);
+    background: transparent;
+  }
+
+  .staff-row:first-child {
+    border-top: none;
+  }
+
+  .staff-row:hover {
+    background: color-mix(in oklab, var(--surface-2) 60%, transparent);
+  }
+
+  .staff-actions {
+    margin-top: 0;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+  }
+
+  .staff-actions .btn {
+    flex: none;
+  }
+}
+
+/* Toggle chips for assigning tables in the form. */
+.table-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.table-picker .chip {
+  min-height: 44px;
+}
+
+.pin-input {
+  letter-spacing: 0.3em;
+  font-variant-numeric: tabular-nums;
+  max-width: 200px;
+}
+
+/* ── Audit journal ───────────────────────────────────────────────────────── */
+
+.audit-filters {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  align-items: end;
+}
+
+.audit-filters .field select,
+.audit-filters .field input {
+  min-height: 44px;
+}
+
+.audit-filters .field-reset {
+  display: flex;
+  align-items: end;
+}
+
+.audit-filters .field-reset .btn {
+  width: 100%;
+}
+
+.audit-count {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.audit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.audit-entry {
+  border-top: 1px solid var(--border);
+}
+
+.audit-entry:first-child {
+  border-top: none;
+}
+
+.audit-entry > summary {
+  list-style: none;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'main time'
+    'meta meta';
+  gap: 2px 12px;
+  padding: 10px 4px;
+  min-height: 44px;
+  align-items: start;
+}
+
+.audit-entry > summary::-webkit-details-marker {
+  display: none;
+}
+
+.audit-entry > summary:hover {
+  background: color-mix(in oklab, var(--surface-2) 60%, transparent);
+}
+
+.audit-main {
+  grid-area: main;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.audit-actor {
+  font-weight: 650;
+}
+
+.audit-actor[data-system] {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.audit-action {
+  overflow-wrap: anywhere;
+}
+
+.audit-action[data-raw] {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.audit-time {
+  grid-area: time;
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.audit-meta {
+  grid-area: meta;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.audit-meta .tag {
+  font-size: 12px;
+}
+
+.audit-entity {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.audit-more {
+  color: var(--accent);
+}
+
+.audit-entry[open] .audit-more::after {
+  content: ' ▴';
+}
+
+.audit-entry:not([open]) .audit-more::after {
+  content: ' ▾';
+}
+
+.audit-data {
+  margin: 0 4px 12px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.audit-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.audit-foot .btn {
+  flex: none;
+}
+
+@media (max-width: 480px) {
+  .audit-entry > summary {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'time'
+      'main'
+      'meta';
+  }
+}

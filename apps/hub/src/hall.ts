@@ -84,6 +84,8 @@ const CATEGORY_FILTER: Record<JournalCategory, string> = {
   games: "a.action LIKE 'session.%'",
   lamps: "a.action LIKE 'lamp.%'",
   alerts: "a.action LIKE 'alert.%'",
+  bar: "(a.action LIKE 'order.%' OR a.action LIKE 'product.%' OR a.action LIKE 'category.%')",
+  club: "(a.action LIKE 'club.%' OR a.action LIKE 'table.%' OR a.action LIKE 'tables.%' OR a.action LIKE 'tariff.%' OR a.action LIKE 'staff.%')",
   system: "(a.action LIKE 'hub.%' OR a.action LIKE 'hall.%')",
 };
 

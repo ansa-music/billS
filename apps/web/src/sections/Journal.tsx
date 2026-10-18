@@ -6,8 +6,8 @@ import { EmptyState, SectionCard } from '../components.tsx';
 import { formatClock, formatDay, formatSpan, lampErrorText } from '../format.ts';
 import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';
-import { navigate } from '../router.ts';
-import { useHub, useLive } from '../useHub.ts';
+import { navigate } from '../router.tsx';
+import { useHub, useLive } from '../useHub.tsx';
 
 type Filter = 'all' | JournalCategory;
 
@@ -16,6 +16,8 @@ const FILTERS: Array<{ value: Filter; label: string }> = [
   { value: 'games', label: 'Игры' },
   { value: 'lamps', label: 'Свет' },
   { value: 'alerts', label: 'Тревоги' },
+  { value: 'bar', label: 'Бар' },
+  { value: 'club', label: 'Клуб' },
   { value: 'system', label: 'Система' },
 ];
 
@@ -83,6 +85,41 @@ function describe(e: JournalEntry, state: HubState): Described {
         icon: 'plan',
         cat: 'system',
       };
+    // Bar and orders
+    case 'order.created': {
+      const items = Array.isArray(d.items) ? (d.items as Array<{ title?: unknown; qty?: unknown }>) : [];
+      const list = items.map((i) => `${str(i.title)} ×${num(i.qty)}`).join(', ');
+      return { title: `${table}: заказ из бара`, detail: `${list}${list ? ' · ' : ''}${money(d.total)}`, icon: 'orders', cat: 'bar' };
+    }
+    case 'order.cancelled':
+      return { title: `${table}: заказ отменён`, detail: `${money(d.total)}${str(d.reason) ? ` · ${str(d.reason)}` : ''}`, icon: 'close', cat: 'bar' };
+    case 'product.created':
+      return { title: `Меню: добавлен товар «${str(d.name)}»`, detail: d.price !== undefined ? money(d.price) : undefined, icon: 'bar', cat: 'bar' };
+    case 'product.updated':
+      return { title: `Меню: изменён товар «${str(d.name) || str((d.was as Record<string, unknown> | undefined)?.name)}»`, icon: 'bar', cat: 'bar' };
+    case 'category.created':
+      return { title: `Меню: новая категория «${str(d.name)}»`, icon: 'bar', cat: 'bar' };
+    case 'category.updated':
+      return { title: `Меню: изменена категория «${str(d.name) || str((d.was as Record<string, unknown> | undefined)?.name)}»`, icon: 'bar', cat: 'bar' };
+    // Club settings and staff
+    case 'club.updated':
+      return { title: 'Настройки клуба изменены', detail: Object.keys(d).join(', '), icon: 'settings', cat: 'club' };
+    case 'table.created':
+      return { title: `Добавлен стол «${str(d.name)}»`, detail: str(d.kind) ? `тип: ${str(d.kind)}` : undefined, icon: 'hall', cat: 'club' };
+    case 'table.updated':
+      return { title: `${table}: настройки стола изменены`, detail: Object.keys(d).join(', '), icon: 'hall', cat: 'club' };
+    case 'tables.reordered':
+      return { title: 'Порядок столов изменён', icon: 'hall', cat: 'club' };
+    case 'tariff.created':
+      return { title: `Новый тариф «${str(d.name)}»`, icon: 'tariffs', cat: 'club' };
+    case 'tariff.updated':
+      return { title: `Тариф изменён${str(d.name) ? `: «${str(d.name)}»` : ''}`, detail: Object.keys(d).join(', '), icon: 'tariffs', cat: 'club' };
+    case 'staff.created':
+      return { title: `Новый сотрудник: ${str(d.name)}`, detail: str(d.role) ? `роль: ${str(d.role)}` : undefined, icon: 'staff', cat: 'club' };
+    case 'staff.updated':
+      return { title: 'Сотрудник изменён', detail: Object.keys(d).join(', '), icon: 'staff', cat: 'club' };
+    case 'staff.pin_checked':
+      return { title: d.ok === false ? 'Неверный PIN' : 'Вход по PIN', icon: 'user', cat: 'club', bad: d.ok === false };
     default:
       return { title: e.action, icon: 'journal', cat: 'system' };
   }
@@ -149,7 +186,7 @@ export function JournalSection({ params }: { params: URLSearchParams }) {
             className="select"
             aria-label="Стол"
             value={tableId}
-            onChange={(e) => navigate('journal', e.target.value ? { table: e.target.value } : undefined)}
+            onChange={(e) => navigate('/journal', e.target.value ? { table: e.target.value } : undefined)}
           >
             <option value="">Все столы</option>
             {state.tables.map((t) => (

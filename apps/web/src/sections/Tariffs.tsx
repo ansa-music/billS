@@ -4,7 +4,8 @@ import { calculateCharge, formatMoney, priceAt, zonedParts } from '@bills/domain
 import { SectionCard } from '../components.tsx';
 import { formatClock, formatSpan } from '../format.ts';
 import { Icon } from '../icons.tsx';
-import { useHub } from '../useHub.ts';
+import { hrefFor } from '../router.tsx';
+import { useHub } from '../useHub.tsx';
 
 const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const SEQ = ['var(--seq-1)', 'var(--seq-2)', 'var(--seq-3)', 'var(--seq-4)', 'var(--seq-5)'];
@@ -215,7 +216,7 @@ function rules(t: TariffConfig, currency: string): string[] {
 }
 
 export function TariffsSection() {
-  const { state, serverNow } = useHub();
+  const { state, serverNow, can } = useHub();
   const { timezone, currency } = state.club;
   const minute = Math.floor(serverNow / MIN);
   // One price scale for every tariff, so the same colour means the same price.
@@ -235,6 +236,12 @@ export function TariffsSection() {
       <p className="page-lead">
         Цена зависит от дня и часа. Игра, которая переходит границу (например, с дневного тарифа на вечерний), считается по
         частям. Тариф фиксируется при открытии стола — изменения не касаются уже идущих игр.
+        {can('tariffs.edit') && (
+          <>
+            {' '}
+            <a href={hrefFor('/settings', { tab: 'tariffs' })}>Изменить тарифы и окна цен — в настройках клуба.</a>
+          </>
+        )}
       </p>
       <div className="two-col">
         <div className="page">
