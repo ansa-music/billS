@@ -202,6 +202,36 @@ summary:focus-visible {
   color: var(--accent);
 }
 
+/* Cloud sync indicator (stage 6); shown only when the HUB has a cloud configured. */
+.cloud {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: default;
+}
+
+.cloud::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.cloud[data-state='ok'] {
+  color: var(--accent);
+}
+
+.cloud[data-state='queue'] {
+  color: var(--warn);
+}
+
+.cloud[data-state='error'] {
+  color: var(--danger);
+}
+
 /* Alerts */
 
 .alerts {

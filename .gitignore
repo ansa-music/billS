@@ -3,6 +3,7 @@ dist/
 *.log
 .env
 apps/hub/data/
+apps/cloud/data/
 *.db
 *.db-wal
 *.db-shm

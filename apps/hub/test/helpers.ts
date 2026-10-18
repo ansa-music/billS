@@ -10,6 +10,7 @@ import { buildApp } from '../src/http/app.ts';
 import { Hub } from '../src/hub.ts';
 import { SimulatorLampDriver } from '../src/lamps/simulator.ts';
 import { seedDemo } from '../src/seed.ts';
+import type { SyncOptions } from '../src/sync.ts';
 import type { HubState, SessionView } from '../src/views.ts';
 
 /** Monday 2026-10-12, 12:00 in Almaty (UTC+5): the base rate of the demo tariff applies. */
@@ -33,10 +34,10 @@ export class Harness {
   current: TestHub | undefined;
 
   /** Starts a HUB on the same database file, like a process (re)start. */
-  async start(driver = new SimulatorLampDriver({ latencyMs: 5 })): Promise<TestHub> {
+  async start(driver = new SimulatorLampDriver({ latencyMs: 5 }), options: { sync?: SyncOptions } = {}): Promise<TestHub> {
     const db = openDb(this.dbPath, this.clock.now());
     seedDemo(db, this.clock.now());
-    const hub = new Hub({ db, clock: this.clock, lampDriver: driver, lampOptions: FAST_LAMPS });
+    const hub = new Hub({ db, clock: this.clock, lampDriver: driver, lampOptions: FAST_LAMPS, ...options });
     const app = buildApp(hub, { simulator: driver });
     await app.ready();
     hub.start();

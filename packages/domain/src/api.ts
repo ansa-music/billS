@@ -1,3 +1,4 @@
+import type { SyncStatus } from './cloud.ts';
 import type { SessionStatus } from './session.ts';
 import type { TariffConfig } from './tariff.ts';
 
@@ -51,6 +52,8 @@ export interface HubState {
   tables: TableView[];
   unpaid: SessionView[];
   alerts: AlertView[];
+  /** Cloud sync status (stage 6); enabled=false when the club runs without a cloud. */
+  sync: SyncStatus;
 }
 
 export interface ApiError {

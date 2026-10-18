@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { HubState } from '@bills/domain';
+import type { HubState, SyncStatus } from '@bills/domain';
 import { command, fetchState } from './api.ts';
 import { CardBoundary } from './CardBoundary.tsx';
 import { formatClock } from './format.ts';
@@ -63,6 +63,35 @@ function useHubState() {
   }, [refresh]);
 
   return { state, offset, online, refresh };
+}
+
+/** «Облако: …» next to the HUB link status; hidden when the club runs without a cloud. */
+function CloudStatus({ sync, timezone }: { sync: SyncStatus; timezone: string }) {
+  if (!sync.enabled) return null;
+  let state: 'ok' | 'queue' | 'error' | 'wait';
+  let text: string;
+  let title: string | undefined;
+  if (sync.lastError) {
+    state = 'error';
+    text = 'Облако: нет связи';
+    title = sync.lastErrorAt ? `${sync.lastError} (${formatClock(sync.lastErrorAt, timezone)})` : sync.lastError;
+  } else if (sync.pending > 0) {
+    state = 'queue';
+    text = `Облако: ${sync.pending} в очереди`;
+    title = sync.lastSentAt ? `Последняя отправка ${formatClock(sync.lastSentAt, timezone)}` : undefined;
+  } else if (sync.lastSentAt) {
+    state = 'ok';
+    text = 'Облако: синхронизировано';
+    title = `Последняя отправка ${formatClock(sync.lastSentAt, timezone)}`;
+  } else {
+    state = 'wait';
+    text = 'Облако: подключение…';
+  }
+  return (
+    <span className="cloud" data-state={state} title={title}>
+      {text}
+    </span>
+  );
 }
 
 function useNow(intervalMs = 1000): number {
@@ -149,6 +178,7 @@ export function App() {
           <span className="conn" data-online={online || undefined}>
             {online ? 'HUB на связи' : 'Нет связи с HUB'}
           </span>
+          <CloudStatus sync={state.sync} timezone={state.club.timezone} />
         </div>
       </header>
 

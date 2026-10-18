@@ -4,14 +4,38 @@
     {
       "name": "hub",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:hub"],
+      "runtimeArgs": [
+        "run",
+        "dev:hub"
+      ],
       "port": 4310
     },
     {
       "name": "web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:web"],
+      "runtimeArgs": [
+        "run",
+        "dev:web"
+      ],
       "port": 5173
+    },
+    {
+      "name": "cloud",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:cloud"
+      ],
+      "port": 4320
+    },
+    {
+      "name": "cloud-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:cloud-web"
+      ],
+      "port": 5180
     }
   ]
 }

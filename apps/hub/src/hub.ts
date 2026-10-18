@@ -9,6 +9,8 @@ import type { LampOptions } from './lamps/controller.ts';
 import { LampController } from './lamps/controller.ts';
 import type { LampDriver } from './lamps/driver.ts';
 import { SessionService } from './sessions.ts';
+import type { SyncOptions } from './sync.ts';
+import { SyncWorker, syncStatus } from './sync.ts';
 import type { HubState } from './views.ts';
 import { buildState } from './views.ts';
 
@@ -21,6 +23,8 @@ export interface HubDeps {
   lampOptions?: LampOptions;
   /** How often lamps in an unknown state are retried. */
   reconcileIntervalMs?: number;
+  /** Cloud sync (stage 6); omitted = standalone club, the outbox just accumulates. */
+  sync?: SyncOptions;
 }
 
 /** The club server: wires storage, lamps and game rules together. */
@@ -30,6 +34,7 @@ export class Hub {
   readonly events = new HubEvents();
   readonly lamps: LampController;
   readonly sessions: SessionService;
+  readonly sync: SyncWorker | undefined;
   readonly #reconcileIntervalMs: number;
   #reconcileTimer: NodeJS.Timeout | undefined;
 
@@ -46,6 +51,7 @@ export class Hub {
       ...(deps.lampOptions ? { options: deps.lampOptions } : {}),
     });
     this.sessions = new SessionService({ db: deps.db, clock: deps.clock, lamps: this.lamps, events: this.events });
+    this.sync = deps.sync ? new SyncWorker({ db: deps.db, clock: deps.clock, events: this.events, ...deps.sync }) : undefined;
   }
 
   /** Restores lamps and pending commands after a (re)start. */
@@ -54,10 +60,11 @@ export class Hub {
     this.lamps.recover();
     this.#reconcileTimer = setInterval(() => this.lamps.reconcile(), this.#reconcileIntervalMs);
     this.#reconcileTimer.unref();
+    this.sync?.start();
   }
 
   state(): HubState {
-    return buildState(this.db, this.clock.now());
+    return { ...buildState(this.db, this.clock.now()), sync: this.sync ? this.sync.status() : syncStatus(this.db, false) };
   }
 
   resolveAlert(alertId: string, actor: string): { id: string } {
@@ -79,6 +86,7 @@ export class Hub {
 
   close(): void {
     clearInterval(this.#reconcileTimer);
+    this.sync?.stop();
     this.lamps.close();
     this.events.removeAllListeners();
   }

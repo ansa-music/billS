@@ -58,7 +58,8 @@ export function loadSession(db: Db, id: string, now: number): SessionView {
   return toSessionView(row, now);
 }
 
-export function buildState(db: Db, now: number): HubState {
+/** Everything but `sync`, which `Hub.state()` adds from the sync worker. */
+export function buildState(db: Db, now: number): Omit<HubState, 'sync'> {
   const club = one<HubState['club']>(db, 'SELECT id, name, timezone, currency FROM clubs ORDER BY created_at LIMIT 1');
   if (!club) throw new HubError(503, 'CLUB_NOT_CONFIGURED', 'Клуб не настроен');
 
