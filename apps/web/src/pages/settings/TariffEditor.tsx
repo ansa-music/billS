@@ -143,7 +143,7 @@ function toDraft(t: TariffAdminView | null, club: ClubAdminView): TariffDraft {
     return {
       name: t.name,
       basePrice: toMajor(t.config.basePricePerHour, cur),
-      windows: t.config.windows.map((w) => ({ label: w.label, days: [...w.days], from: w.from, to: w.to, price: toMajor(w.pricePerHour, cur) })),
+      windows: t.config.windows.map((w) => ({ label: w.label, days: [...w.days], from: w.from, to: w.to === '24:00' ? '00:00' : w.to, price: toMajor(w.pricePerHour, cur) })),
       stepMinutes: String(t.config.stepMinutes),
       minimumMinutes: String(t.config.minimumMinutes),
       freeMinutes: String(t.config.freeMinutes),
@@ -183,7 +183,8 @@ function toConfig(d: TariffDraft, club: ClubAdminView): { config: TariffConfig |
     if (!/^\d{2}:\d{2}$/.test(w.from) || !/^\d{2}:\d{2}$/.test(w.to)) errors.push(`Окно ${n}: время в формате ЧЧ:ММ`);
     const pricePerHour = fromMajor(w.price, cur);
     if (pricePerHour === null) errors.push(`Окно ${n}: укажите цену за час`);
-    return { label: w.label.trim(), days: w.days, from: w.from, to: w.to, pricePerHour: pricePerHour ?? 0 };
+    // <input type=time> cannot hold 24:00; "00:00" as an end means the end of the day (domain: to === 0 → 24:00).
+    return { label: w.label.trim(), days: w.days, from: w.from, to: w.to === '00:00' ? '24:00' : w.to, pricePerHour: pricePerHour ?? 0 };
   });
   if (minimumMinutes !== null && freeMinutes !== null && minimumMinutes > 0 && minimumMinutes < freeMinutes) {
     errors.push('Минимальное время не может быть меньше бесплатных минут');
@@ -284,7 +285,7 @@ function TariffDialog({
                 <Field label="С">
                   <input type="time" value={w.from} step={60} onChange={(e) => setWindow(i, { from: e.target.value })} />
                 </Field>
-                <Field label="До" hint={w.to <= w.from ? 'через полночь' : undefined}>
+                <Field label="До" hint={w.to === '00:00' ? 'до конца дня' : w.to <= w.from ? 'через полночь' : undefined}>
                   <input type="time" value={w.to} step={60} onChange={(e) => setWindow(i, { to: e.target.value })} />
                 </Field>
                 <button

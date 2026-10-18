@@ -47,6 +47,7 @@ function Router() {
     );
   }
   if (!staff) return <LoginPage onLogin={login} next={path} />;
+  if (path === '/') document.title = 'Зал — billS';
   if (route.action && !can(route.action)) {
     return (
       <Page title="Нет доступа" subtitle={`Раздел «${route.title}» недоступен для вашей роли.`}>
