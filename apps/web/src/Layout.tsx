@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { ROLE_LABEL } from '@bills/domain';
 import { useAuth } from './auth.ts';
-import { Link, ROUTES, useLocation } from './router.tsx';
+import { Link, ROUTES, navigate, useLocation } from './router.tsx';
 import { useHub } from './useHub.tsx';
 
 /**
@@ -29,6 +29,12 @@ export function Layout({ children }: { children: ReactNode }) {
   }, [display?.theme, display?.cardSize, display?.waiterSees, role]);
 
   const title = display?.title ?? state?.club.name ?? 'billS';
+
+  /** Drops the session on the HUB (best effort) and shows the login page. */
+  const onLogout = async () => {
+    await logout();
+    navigate('/login');
+  };
   const pages = ROUTES.filter((r) => !r.hidden && r.action && can(r.action));
 
   return (
@@ -53,7 +59,7 @@ export function Layout({ children }: { children: ReactNode }) {
           ))}
         </div>
         <div className="nav-user">
-          {!online && (
+          {staff && !online && (
             <span className="conn" title="Нет связи с HUB">
               HUB
             </span>
@@ -64,7 +70,7 @@ export function Layout({ children }: { children: ReactNode }) {
                 <strong>{staff.name}</strong>
                 <span className="muted">{ROLE_LABEL[staff.role]}</span>
               </span>
-              <button type="button" className="btn btn-small btn-ghost" onClick={logout}>
+              <button type="button" className="btn btn-small btn-ghost" onClick={() => void onLogout()}>
                 Выйти
               </button>
             </>

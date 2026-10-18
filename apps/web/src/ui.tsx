@@ -239,3 +239,8 @@ export function formatDateTime(epochMs: number, timeZone: string): string {
     hourCycle: 'h23',
   }).format(epochMs);
 }
+
+/** 18 окт. 2027 in the club's time zone — for dates far enough away that the year matters. */
+export function formatDate(epochMs: number, timeZone: string): string {
+  return new Intl.DateTimeFormat('ru-RU', { timeZone, day: 'numeric', month: 'short', year: 'numeric' }).format(epochMs);
+}

@@ -9,7 +9,7 @@ import type {
 } from '@bills/domain';
 import { ORDER_MAX_LINES, ORDER_NOTE_MAX } from '@bills/domain';
 import type { Hub } from '../../hub.ts';
-import { runCommand } from '../command.ts';
+import { guard, runCommand } from '../command.ts';
 
 const name = { type: 'string', maxLength: 200 } as const;
 const id = { type: 'string', minLength: 1, maxLength: 100 } as const;
@@ -18,7 +18,7 @@ const stock = { type: ['number', 'null'] } as const;
 
 /** Routes for catalog and orders: see api.ts (CatalogView, CreateOrderRequest, …). */
 export function registerBarRoutes(app: FastifyInstance, hub: Hub): void {
-  app.get('/api/bar/catalog', async () => hub.bar.catalog());
+  app.get('/api/bar/catalog', { preHandler: guard('catalog.view') }, async () => hub.bar.catalog());
 
   app.post<{ Body: CreateCategoryRequest }>(
     '/api/bar/categories',
@@ -28,7 +28,7 @@ export function registerBarRoutes(app: FastifyInstance, hub: Hub): void {
       },
     },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => ({ status: 201, body: hub.bar.createCategory({ ...req.body, actor }) })),
+      runCommand(req, reply, hub, (actor) => ({ status: 201, body: hub.bar.createCategory({ ...req.body, actor }) }), 'catalog.edit'),
   );
 
   app.post<{ Params: { id: string }; Body: UpdateCategoryRequest }>(
@@ -46,7 +46,7 @@ export function registerBarRoutes(app: FastifyInstance, hub: Hub): void {
       runCommand(req, reply, hub, (actor) => ({
         status: 200,
         body: hub.bar.updateCategory({ ...req.body, id: req.params.id, actor }),
-      })),
+      }), 'catalog.edit'),
   );
 
   app.post<{ Body: CreateProductRequest }>(
@@ -62,7 +62,7 @@ export function registerBarRoutes(app: FastifyInstance, hub: Hub): void {
       },
     },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => ({ status: 201, body: hub.bar.createProduct({ ...req.body, actor }) })),
+      runCommand(req, reply, hub, (actor) => ({ status: 201, body: hub.bar.createProduct({ ...req.body, actor }) }), 'catalog.edit'),
   );
 
   app.post<{ Params: { id: string }; Body: UpdateProductRequest }>(
@@ -87,12 +87,14 @@ export function registerBarRoutes(app: FastifyInstance, hub: Hub): void {
       runCommand(req, reply, hub, (actor) => ({
         status: 200,
         body: hub.bar.updateProduct({ ...req.body, id: req.params.id, actor }),
-      })),
+      }), 'catalog.edit'),
   );
 
-  app.get<{ Params: { sessionId: string } }>('/api/sessions/:sessionId/orders', async (req) => ({
-    orders: hub.bar.ordersOfSession(req.params.sessionId),
-  }));
+  app.get<{ Params: { sessionId: string } }>(
+    '/api/sessions/:sessionId/orders',
+    { preHandler: guard('catalog.view') },
+    async (req) => ({ orders: hub.bar.ordersOfSession(req.params.sessionId) }),
+  );
 
   app.post<{ Params: { sessionId: string }; Body: CreateOrderRequest }>(
     '/api/sessions/:sessionId/orders',
@@ -124,7 +126,7 @@ export function registerBarRoutes(app: FastifyInstance, hub: Hub): void {
       runCommand(req, reply, hub, (actor) => ({
         status: 201,
         body: hub.bar.createOrder({ ...req.body, sessionId: req.params.sessionId, actor }),
-      })),
+      }), 'order.create'),
   );
 
   app.post<{ Params: { orderId: string }; Body: CancelOrderRequest }>(
@@ -143,6 +145,6 @@ export function registerBarRoutes(app: FastifyInstance, hub: Hub): void {
       runCommand(req, reply, hub, (actor) => ({
         status: 200,
         body: hub.bar.cancelOrder({ orderId: req.params.orderId, reason: req.body.reason, actor }),
-      })),
+      }), 'order.cancel'),
   );
 }

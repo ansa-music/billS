@@ -31,9 +31,9 @@ const PAGES: Record<string, () => ReactNode> = {
 
 function Router() {
   const { path, query } = useLocation();
-  const { staff, can, login } = useAuth();
+  const { staff, can } = useAuth();
 
-  if (path === '/login') return <LoginPage onLogin={login} next={query.get('next') ?? '/'} />;
+  if (path === '/login') return <LoginPage next={query.get('next') ?? '/'} />;
 
   const route = routeFor(path);
   const render = PAGES[path];
@@ -46,7 +46,7 @@ function Router() {
       </Page>
     );
   }
-  if (!staff) return <LoginPage onLogin={login} next={path} />;
+  if (!staff) return <LoginPage next={path} />;
   if (path === '/') document.title = 'Зал — billS';
   if (route.action && !can(route.action)) {
     return (
