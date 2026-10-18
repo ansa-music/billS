@@ -3,7 +3,9 @@ import type { HubState } from '@bills/domain';
 import { command, fetchState } from './api.ts';
 import { CardBoundary } from './CardBoundary.tsx';
 import { formatClock } from './format.ts';
-import { AlertsBar, SimulatorPanel, UnpaidPanel } from './Panels.tsx';
+import { ShiftPanel } from './cash/ShiftPanel.tsx';
+import { UnpaidPanel } from './cash/UnpaidPanel.tsx';
+import { AlertsBar, SimulatorPanel } from './Panels.tsx';
 import { TableCard } from './TableCard.tsx';
 
 const ACTOR_KEY = 'bills.actor';
@@ -173,7 +175,8 @@ export function App() {
           ))}
         </main>
         <aside className="side">
-          <UnpaidPanel state={state} />
+          <ShiftPanel state={state} actor={actor} refresh={refresh} notify={setToast} />
+          <UnpaidPanel state={state} actor={actor} refresh={refresh} notify={setToast} />
           <SimulatorPanel onError={setToast} />
         </aside>
       </div>

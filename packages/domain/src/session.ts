@@ -6,13 +6,14 @@ export type SessionStatus = (typeof SESSION_STATUSES)[number];
  * ACTIVE            lamp confirmed ON, time is running
  * AWAITING_PAYMENT  stopped, the bill is fixed, the table is free again
  * CLOSED            paid
- * CANCELLED         stopped before the lamp confirmed — nothing to pay
+ * CANCELLED         stopped before the lamp confirmed, or an unpaid game voided
+ *                   with a reason and a manager's approval — nothing to pay
  * FAILED            the lamp never confirmed — nothing to pay
  */
 const TRANSITIONS: Record<SessionStatus, readonly SessionStatus[]> = {
   OPENING: ['ACTIVE', 'CANCELLED', 'FAILED'],
   ACTIVE: ['AWAITING_PAYMENT'],
-  AWAITING_PAYMENT: ['CLOSED'],
+  AWAITING_PAYMENT: ['CLOSED', 'CANCELLED'],
   CLOSED: [],
   CANCELLED: [],
   FAILED: [],

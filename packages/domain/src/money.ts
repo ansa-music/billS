@@ -10,6 +10,11 @@ function digitsFor(currency: string): number {
   return new Intl.NumberFormat('en', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits ?? 2;
 }
 
+/** Minor units in one major unit: 100 for KZT (tiyn), 1 for JPY. */
+export function minorPerMajor(currency: string): Minor {
+  return 10 ** digitsFor(currency);
+}
+
 export function formatMoney(amount: Minor, currency: string, locale = 'ru-RU'): string {
   const digits = digitsFor(currency);
   const major = amount / 10 ** digits;
@@ -33,4 +38,20 @@ export function formatMoney(amount: Minor, currency: string, locale = 'ru-RU'): 
 export function roundToStep(amount: number, step: number): Minor {
   if (step <= 1) return Math.round(amount);
   return Math.round(amount / step) * step;
+}
+
+/**
+ * Parses what staff type into a money field ("2 070", "2070,5", "2070.50")
+ * into minor units. Returns null for anything that is not a non-negative amount
+ * with at most the currency's number of decimals.
+ */
+export function parseMoney(text: string, currency: string): Minor | null {
+  const digits = digitsFor(currency);
+  const clean = text.replace(/[\s\u00a0\u202f]/g, '').replace(',', '.');
+  const m = /^(\d+)(?:\.(\d*))?$/.exec(clean);
+  if (!m) return null;
+  const fraction = m[2] ?? '';
+  if (fraction.length > digits) return null;
+  const minor = Number(m[1]) * 10 ** digits + Number(fraction.padEnd(digits, '0') || '0');
+  return Number.isSafeInteger(minor) ? minor : null;
 }
