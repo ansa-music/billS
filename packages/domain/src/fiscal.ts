@@ -14,9 +14,9 @@ import type { Minor } from './money.ts';
 export type FiscalOperation = 'sale' | 'refund';
 
 /** How the guest paid. `mixed` means several lines in `payments`. */
-export type PaymentMethod = 'cash' | 'card' | 'qr' | 'mixed';
+export type FiscalPaymentMethod = 'cash' | 'card' | 'qr' | 'mixed';
 
-export type SinglePaymentMethod = Exclude<PaymentMethod, 'mixed'>;
+export type SinglePaymentMethod = Exclude<FiscalPaymentMethod, 'mixed'>;
 
 /** 0 — товар, 1 — работа, 2 — услуга. Table time is a service. */
 export type FiscalItemKind = 'goods' | 'work' | 'service';
@@ -55,7 +55,7 @@ export interface FiscalReceipt {
   items: FiscalItem[];
   payments: FiscalPayment[];
   /** Derived from `payments`, kept explicit for storage and display. */
-  paymentMethod: PaymentMethod;
+  paymentMethod: FiscalPaymentMethod;
   /** Sum of item totals. */
   totalMinor: Minor;
   /** Cash handed back to the guest (cash received − total), 0 when none. */
@@ -149,7 +149,7 @@ export const MAX_OFFLINE_MS = 72 * 60 * 60 * 1000;
 /** Maximum shift length before a Z-report is required: 24 hours (п. 29 Правил). */
 export const MAX_SHIFT_MS = 24 * 60 * 60 * 1000;
 
-export function paymentMethodOf(payments: readonly FiscalPayment[]): PaymentMethod {
+export function paymentMethodOf(payments: readonly FiscalPayment[]): FiscalPaymentMethod {
   const used = new Set(payments.filter((p) => p.amountMinor > 0).map((p) => p.method));
   if (used.size === 0) return payments[0]?.method ?? 'cash';
   if (used.size > 1) return 'mixed';
