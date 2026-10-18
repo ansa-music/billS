@@ -1,12 +1,16 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import type { Action, HubState, Role } from '@bills/domain';
-import { command, fetchState } from './api.ts';
-import { actorName } from './auth.ts';
+import type { Action, HubState, MeResponse, Role } from '@bills/domain';
+import { HubRequestError, UNAUTHORIZED_EVENT, command, fetchJson, fetchState, getAuthToken } from './api.ts';
+import { AUTH_CHANGED_EVENT, actorName, readAuth, writeAuth } from './auth.ts';
 
 /**
  * One live connection to the HUB for the whole app: SSE for change events,
  * refetch of /api/state on each, a 15 s poll as backup, and a watchdog that
  * reconnects when the HUB's pings stop (restart behind a proxy, dropped Wi-Fi).
+ *
+ * Without a session /api/state answers 401. The connection then stops asking
+ * (the SSE stream is public and stays open) until the session changes —
+ * login, logout or another tab signing in — and refetches at once.
  */
 export interface HubConnection {
   state: HubState | null;
@@ -28,9 +32,12 @@ export function useHubConnection(): HubConnection {
   const [layoutVersion, setLayoutVersion] = useState(0);
   const inFlight = useRef(false);
   const again = useRef(false);
+  /** Set after a 401; cleared when the session changes. */
+  const unauthorized = useRef(getAuthToken() === null);
 
   // Coalesces bursts of change events into one request at a time.
   const refresh = useCallback(async () => {
+    if (unauthorized.current) return;
     if (inFlight.current) {
       again.current = true;
       return;
@@ -44,8 +51,14 @@ export function useHubConnection(): HubConnection {
         setOffset(s.serverNow - Date.now());
         setOnline(true);
       } while (again.current);
-    } catch {
-      setOnline(false);
+    } catch (e) {
+      if (e instanceof HubRequestError && e.status === 401) {
+        // The HUB is reachable, we just are not signed in. api.ts has already told auth.ts.
+        unauthorized.current = true;
+        setOnline(true);
+      } else {
+        setOnline(false);
+      }
     } finally {
       inFlight.current = false;
     }
@@ -101,13 +114,46 @@ export function useHubConnection(): HubConnection {
       }
     }, 10_000);
     const poll = setInterval(() => void refresh(), 15_000);
+    const onAuthChanged = () => {
+      unauthorized.current = getAuthToken() === null;
+      if (!unauthorized.current) void refresh();
+    };
+    const onUnauthorized = () => {
+      unauthorized.current = true;
+    };
+    window.addEventListener(AUTH_CHANGED_EVENT, onAuthChanged);
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
     return () => {
       events.close();
       clearTimeout(retry);
       clearInterval(watchdog);
       clearInterval(poll);
+      window.removeEventListener(AUTH_CHANGED_EVENT, onAuthChanged);
+      window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
     };
   }, [refresh]);
+
+  // Once per app start: make sure the stored session is still alive and pick up a renamed
+  // or re-roled employee (the role for `can()` comes from the HUB, not from what was typed).
+  // A 401 fires UNAUTHORIZED_EVENT inside fetchJson; auth.ts clears the session.
+  useEffect(() => {
+    const session = readAuth();
+    if (!session) return;
+    let alive = true;
+    fetchJson<MeResponse>('/api/auth/me')
+      .then((me) => {
+        if (!alive) return;
+        const changed =
+          JSON.stringify(me.staff) !== JSON.stringify(session.staff) || me.expiresAt !== session.expiresAt;
+        if (changed) writeAuth({ token: session.token, staff: me.staff, expiresAt: me.expiresAt });
+      })
+      .catch(() => {
+        // Offline or 401 (handled by the event); nothing more to do here.
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   return { state, offset, online, version, layoutVersion, refresh };
 }

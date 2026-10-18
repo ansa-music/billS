@@ -5,6 +5,8 @@ import { buildApp } from './http/app.ts';
 import { Hub } from './hub.ts';
 import { SimulatorLampDriver } from './lamps/simulator.ts';
 import { seedDemo } from './seed.ts';
+import { writeBootstrapKeys } from './auth.ts';
+import { dirname, join } from 'node:path';
 
 const config = loadConfig();
 const db = openDb(config.dbPath);
@@ -16,6 +18,17 @@ const hub = new Hub({ db, clock: systemClock, lampDriver: simulator });
 const app = buildApp(hub, { simulator, logger: true });
 
 hub.start();
+
+// Nobody must be locked out: owners and tech without a working key get one,
+// written next to the database. On a fresh demo club every employee gets one.
+const bootstrap = hub.auth.bootstrapKeys(seeded);
+if (bootstrap.length) {
+  const file = join(dirname(config.dbPath), 'first-run-keys.txt');
+  writeBootstrapKeys(file, bootstrap, Date.now());
+  for (const k of bootstrap) app.log.warn({ role: k.role, name: k.name, key: k.key }, 'Ключ доступа выдан при старте');
+  app.log.warn({ file }, 'Ключи сохранены в файл — передайте их и удалите файл');
+}
+
 await app.listen({ host: config.host, port: config.port });
 app.log.info({ dbPath: config.dbPath, seeded }, 'HUB started');
 

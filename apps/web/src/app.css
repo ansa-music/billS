@@ -397,3 +397,61 @@ textarea {
   background: color-mix(in oklab, var(--warn) 20%, transparent);
   color: var(--warn);
 }
+
+/* Login by access key */
+
+.login-form {
+  max-width: 560px;
+}
+
+.login-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 20px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  min-height: 56px;
+}
+
+.login-key::placeholder {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.45;
+}
+
+.login-key[aria-invalid='true'] {
+  border-color: color-mix(in oklab, var(--warn) 60%, var(--border));
+}
+
+.login-submit {
+  min-width: 160px;
+  min-height: 52px;
+  font-size: 17px;
+}
+
+.login-help {
+  max-width: 560px;
+  margin-top: 20px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.login-help p {
+  margin: 0;
+}
+
+.login-help code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: var(--text);
+}
+
+@media (max-width: 480px) {
+  .login-key {
+    font-size: 16px;
+    letter-spacing: 0.04em;
+  }
+}

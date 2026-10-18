@@ -5,7 +5,8 @@ import { ASSIGNABLE_ROLES, ROLE_LABEL, canAssignRole } from '@bills/domain';
 import { fetchJson } from '../api.ts';
 import { useAuth } from '../auth.ts';
 import { Confirm, Empty, Field, Loading, Modal, Page, Section, Toast, useToast } from '../ui.tsx';
-import { useCommands, useHub } from '../useHub.tsx';
+import { useCommands, useHub, useServerNow } from '../useHub.tsx';
+import { KeysModal } from './staff/KeysModal.tsx';
 import './staff.css';
 
 const PIN_RE = /^\d{4,6}$/;
@@ -17,18 +18,20 @@ interface FormState {
   tableIds: string[];
 }
 
-/** Staff of the club: roles, PINs, assigned tables. Editing needs staff.edit. */
+/** Staff of the club: roles, access keys, PINs, assigned tables. Editing needs staff.edit. */
 export function StaffPage() {
   const { state } = useHub();
   const { staff: me, role: myRole, can } = useAuth();
   const { toast, show, clear } = useToast();
   const { run, isBusy } = useCommands(show);
+  const now = useServerNow();
 
   const [staff, setStaff] = useState<StaffView[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editing, setEditing] = useState<StaffView | 'new' | null>(null);
   const [pinFor, setPinFor] = useState<StaffView | null>(null);
   const [toggling, setToggling] = useState<StaffView | null>(null);
+  const [keysFor, setKeysFor] = useState<StaffView | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -51,6 +54,8 @@ export function StaffPage() {
   const assignable = myRole ? ASSIGNABLE_ROLES[myRole] : [];
   /** May the current user touch this row? The platform row is for the platform only. */
   const rowEditable = (s: StaffView) => canEdit && canAssignRole(myRole, s.role);
+  /** Keys are issued top-down: only to roles the viewer may assign. One's own row is always visible. */
+  const rowKeysVisible = (s: StaffView) => rowEditable(s) || me?.id === s.id;
 
   const submitForm = async (form: FormState): Promise<boolean> => {
     const tableIds = form.role === 'waiter' ? form.tableIds : [];
@@ -103,7 +108,8 @@ export function StaffPage() {
       }
     >
       <p className="staff-hint">
-        Вход по PIN появится на этапе 3; пока сотрудник выбирается из списка на экране входа.
+        Вход — по ключу доступа. Техподдержка выдаёт ключи владельцу, владелец — управляющим, управляющий — кассирам
+        и официантам. PIN остаётся для быстрой разблокировки планшета (этап 3).
       </p>
 
       <Section>
@@ -115,6 +121,7 @@ export function StaffPage() {
             {staff.map((s) => {
               const editable = rowEditable(s);
               const self = me?.id === s.id;
+              const keysVisible = rowKeysVisible(s);
               return (
                 <li key={s.id} className="staff-row" data-inactive={s.isActive ? undefined : ''}>
                   <span className="avatar" aria-hidden="true">
@@ -129,7 +136,10 @@ export function StaffPage() {
                   </div>
                   <div className="staff-tags">
                     <span className={`tag ${s.role === 'superadmin' ? 'tag-warn' : 'tag-muted'}`}>{ROLE_LABEL[s.role]}</span>
-                    <span className={`tag ${s.hasPin ? 'tag-ok' : 'tag-warn'}`}>{s.hasPin ? 'PIN задан' : 'нет PIN'}</span>
+                    <span className={`tag ${s.activeKeys > 0 ? 'tag-ok' : 'tag-warn'}`}>
+                      {s.activeKeys > 0 ? `ключей: ${s.activeKeys}` : 'нет ключа'}
+                    </span>
+                    <span className={`tag ${s.hasPin ? 'tag-ok' : 'tag-muted'}`}>{s.hasPin ? 'PIN задан' : 'нет PIN'}</span>
                     <span className={`tag ${s.isActive ? 'tag-ok' : 'tag-muted'}`}>{s.isActive ? 'работает' : 'уволен'}</span>
                   </div>
                   <div className="staff-tables">
@@ -147,23 +157,37 @@ export function StaffPage() {
                       <span className="muted">—</span>
                     )}
                   </div>
-                  {editable && (
+                  {(editable || keysVisible) && (
                     <div className="staff-actions">
-                      <button type="button" className="btn btn-small" onClick={() => setEditing(s)}>
-                        Изменить
-                      </button>
-                      <button type="button" className="btn btn-small" onClick={() => setPinFor(s)} disabled={!s.isActive}>
-                        Сменить PIN
-                      </button>
-                      <button
-                        type="button"
-                        className={s.isActive ? 'btn btn-small btn-ghost' : 'btn btn-small'}
-                        onClick={() => setToggling(s)}
-                        disabled={self || isBusy(`active:${s.id}`)}
-                        title={self ? 'Нельзя уволить самого себя' : undefined}
-                      >
-                        {s.isActive ? 'Уволить' : 'Вернуть'}
-                      </button>
+                      {keysVisible && (
+                        <button type="button" className="btn btn-small" onClick={() => setKeysFor(s)}>
+                          Ключи
+                        </button>
+                      )}
+                      {editable && (
+                        <>
+                          <button type="button" className="btn btn-small" onClick={() => setEditing(s)}>
+                            Изменить
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-small"
+                            onClick={() => setPinFor(s)}
+                            disabled={!s.isActive}
+                          >
+                            Сменить PIN
+                          </button>
+                          <button
+                            type="button"
+                            className={s.isActive ? 'btn btn-small btn-ghost' : 'btn btn-small'}
+                            onClick={() => setToggling(s)}
+                            disabled={self || isBusy(`active:${s.id}`)}
+                            title={self ? 'Нельзя уволить самого себя' : undefined}
+                          >
+                            {s.isActive ? 'Уволить' : 'Вернуть'}
+                          </button>
+                        </>
+                      )}
                     </div>
                   )}
                 </li>
@@ -195,13 +219,27 @@ export function StaffPage() {
         />
       )}
 
+      {keysFor && (
+        <KeysModal
+          key={keysFor.id}
+          staff={staff?.find((s) => s.id === keysFor.id) ?? keysFor}
+          canIssue={rowEditable(keysFor)}
+          timeZone={state?.club.timezone ?? 'UTC'}
+          now={now}
+          run={run}
+          isBusy={isBusy}
+          onChanged={() => void load()}
+          onClose={() => setKeysFor(null)}
+        />
+      )}
+
       <Confirm
         open={toggling !== null}
         title={toggling?.isActive ? 'Уволить сотрудника?' : 'Вернуть сотрудника?'}
         text={
           toggling?.isActive
-            ? `«${toggling.name}» больше не сможет входить и действовать в системе. История действий сохранится.`
-            : `«${toggling?.name ?? ''}» снова появится на экране входа.`
+            ? `«${toggling.name}» больше не сможет входить по ключу и действовать в системе. История действий сохранится.`
+            : `«${toggling?.name ?? ''}» снова сможет входить по своим ключам.`
         }
         confirmLabel={toggling?.isActive ? 'Уволить' : 'Вернуть'}
         danger={toggling?.isActive ?? false}

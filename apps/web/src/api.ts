@@ -6,6 +6,8 @@ import type {
   JournalCategory,
   JournalPage,
   LampDetail,
+  LoginRequest,
+  LoginResponse,
   SessionView,
 } from '@bills/domain';
 
@@ -18,6 +20,38 @@ export class HubRequestError extends Error {
     this.status = status;
     this.code = code;
   }
+}
+
+/** Fired on window when the HUB answers 401 to a request made with the current token. */
+export const UNAUTHORIZED_EVENT = 'bills:unauthorized';
+
+/**
+ * Session token, kept in memory by auth.ts (which owns localStorage). Every
+ * request below sends it as a Bearer header, the hall screen included.
+ */
+let authToken: string | null = null;
+
+export function setAuthToken(token: string | null): void {
+  authToken = token;
+}
+
+export function getAuthToken(): string | null {
+  return authToken;
+}
+
+function withAuth(headers: Record<string, string>, token: string | null): Record<string, string> {
+  if (token) headers.authorization = `Bearer ${token}`;
+  return headers;
+}
+
+/**
+ * A 401 means the session is gone (expired, revoked, never existed). Tell the
+ * app so it shows the login page — but only if the token that failed is still
+ * the current one, so a late reply cannot sign out a session opened meanwhile.
+ */
+function notifyUnauthorized(sentWith: string | null): void {
+  if (sentWith !== authToken) return;
+  window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
 }
 
 /** crypto.randomUUID needs a secure context; tablets reach the HUB over plain http on the LAN. */
@@ -43,12 +77,14 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** GET a JSON resource from the HUB. */
 export async function fetchJson<T>(path: string): Promise<T> {
+  const token = authToken;
   let res: Response;
   try {
-    res = await fetch(path, { cache: 'no-store' });
+    res = await fetch(path, { cache: 'no-store', headers: withAuth({}, token) });
   } catch {
     throw new HubRequestError(0, 'OFFLINE', 'Нет связи с HUB');
   }
+  if (res.status === 401) notifyUnauthorized(token);
   if (!res.ok) throw await toError(res);
   return (await res.json()) as T;
 }
@@ -63,6 +99,7 @@ export async function fetchState(): Promise<HubState> {
  */
 export async function command<T>(path: string, actor: string, body: object = {}, method = 'POST'): Promise<T> {
   const key = newKey();
+  const token = authToken;
   let lastError: Error = new HubRequestError(0, 'OFFLINE', 'Нет связи с HUB');
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) await sleep(500 * attempt);
@@ -70,11 +107,14 @@ export async function command<T>(path: string, actor: string, body: object = {},
     try {
       res = await fetch(path, {
         method,
-        headers: {
-          'content-type': 'application/json',
-          'idempotency-key': key,
-          'x-actor': encodeURIComponent(actor.trim() || 'unknown'),
-        },
+        headers: withAuth(
+          {
+            'content-type': 'application/json',
+            'idempotency-key': key,
+            'x-actor': encodeURIComponent(actor.trim() || 'unknown'),
+          },
+          token,
+        ),
         body: JSON.stringify(body),
       });
     } catch {
@@ -85,24 +125,34 @@ export async function command<T>(path: string, actor: string, body: object = {},
       lastError = await toError(res);
       continue;
     }
+    if (res.status === 401) notifyUnauthorized(token);
     if (!res.ok) throw await toError(res);
     return (await res.json()) as T;
   }
   throw lastError;
 }
 
-async function getJson<T>(path: string): Promise<T> {
+/**
+ * Signs in with an access key. No token is sent and a 401 here does not fire
+ * UNAUTHORIZED_EVENT: it just means the key is wrong.
+ */
+export async function loginWithKey(body: LoginRequest): Promise<LoginResponse> {
   let res: Response;
   try {
-    res = await fetch(path, { cache: 'no-store' });
+    res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': newKey() },
+      body: JSON.stringify(body),
+    });
   } catch {
     throw new HubRequestError(0, 'OFFLINE', 'Нет связи с HUB');
   }
   if (!res.ok) throw await toError(res);
-  return (await res.json()) as T;
+  return (await res.json()) as LoginResponse;
 }
 
-export const fetchHall = () => getJson<HallLayoutView>('/api/hall');
+// Hall screens: all GETs go through fetchJson, so they carry the Bearer token too.
+export const fetchHall = () => fetchJson<HallLayoutView>('/api/hall');
 
 export const saveHall = (layout: HallLayout, actor: string) =>
   command<HallLayoutView>('/api/hall', actor, layout, 'PUT');
@@ -113,13 +163,13 @@ export function fetchJournal(q: { before?: number; limit?: number; category?: Jo
   if (q.limit !== undefined) params.set('limit', String(q.limit));
   if (q.category) params.set('category', q.category);
   if (q.tableId) params.set('tableId', q.tableId);
-  return getJson<JournalPage>(`/api/journal?${params}`);
+  return fetchJson<JournalPage>(`/api/journal?${params}`);
 }
 
 export const fetchSessions = (from: number, to: number) =>
-  getJson<SessionView[]>(`/api/sessions?from=${Math.floor(from)}&to=${Math.ceil(to)}`);
+  fetchJson<SessionView[]>(`/api/sessions?from=${Math.floor(from)}&to=${Math.ceil(to)}`);
 
-export const fetchLamps = () => getJson<LampDetail[]>('/api/lamps');
+export const fetchLamps = () => fetchJson<LampDetail[]>('/api/lamps');
 
 export interface SimulatorStatus {
   latencyMs: number;

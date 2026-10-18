@@ -330,3 +330,153 @@
       'meta';
   }
 }
+
+/* ── Access keys modal ───────────────────────────────────────────────────── */
+
+.keys-modal {
+  display: grid;
+  gap: 16px;
+}
+
+.keys-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.key-row {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.key-row[data-status='revoked'],
+.key-row[data-status='expired'] {
+  opacity: 0.7;
+}
+
+.key-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.key-prefix {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.key-label {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.key-meta {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 4px 12px;
+  font-size: 13px;
+}
+
+.key-meta > div {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.key-meta dt {
+  color: var(--muted);
+}
+
+.key-meta dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.key-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.keys-issue {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.keys-issue h3,
+.key-issued h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+/* The one-time reveal. */
+.key-issued {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in oklab, var(--accent) 50%, var(--border));
+  background: color-mix(in oklab, var(--accent) 8%, var(--surface));
+  border-radius: 12px;
+}
+
+.key-warning {
+  margin: 0;
+  color: var(--warn);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.copy-box {
+  display: grid;
+  gap: 4px;
+}
+
+.copy-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.copy-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.copy-value {
+  flex: 1 1 220px;
+  min-width: 0;
+  min-height: 44px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  user-select: all;
+}
+
+.copy-row .btn {
+  flex: none;
+  min-height: 44px;
+}
+
+.copy-box[data-big] .copy-value {
+  font-size: 22px;
+  letter-spacing: 0.08em;
+  min-height: 56px;
+  font-weight: 650;
+}
+
+@media (max-width: 480px) {
+  .copy-box[data-big] .copy-value {
+    font-size: 17px;
+    letter-spacing: 0.04em;
+  }
+}

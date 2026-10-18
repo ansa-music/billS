@@ -33,11 +33,12 @@ export class Harness {
   current: TestHub | undefined;
 
   /** Starts a HUB on the same database file, like a process (re)start. */
-  async start(driver = new SimulatorLampDriver({ latencyMs: 5 })): Promise<TestHub> {
+  /** `secure` builds the app like main.ts does: tokens only, no X-Actor fallback. */
+  async start(driver = new SimulatorLampDriver({ latencyMs: 5 }), options: { secure?: boolean } = {}): Promise<TestHub> {
     const db = openDb(this.dbPath, this.clock.now());
     seedDemo(db, this.clock.now());
     const hub = new Hub({ db, clock: this.clock, lampDriver: driver, lampOptions: FAST_LAMPS });
-    const app = buildApp(hub, { simulator: driver });
+    const app = buildApp(hub, { simulator: driver, trustActorHeader: !options.secure });
     await app.ready();
     hub.start();
     this.current = { dbPath: this.dbPath, db, clock: this.clock, driver, hub, app };

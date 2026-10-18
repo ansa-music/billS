@@ -9,7 +9,7 @@ import type {
 } from '@bills/domain';
 import { CARD_SIZES, FREE_TABLE_RULES, THEMES, WAITER_VIEWS } from '@bills/domain';
 import type { Hub } from '../../hub.ts';
-import { runCommand } from '../command.ts';
+import { guard, runCommand } from '../command.ts';
 
 const TABLE_KINDS = ['pool', 'russian', 'snooker'] as const;
 
@@ -97,11 +97,16 @@ const tableFields = {
 
 /** Routes for club, tables, tariffs: see api.ts (ClubAdminView, UpdateClubRequest, CreateTableRequest, …). */
 export function registerSettingsRoutes(app: FastifyInstance, hub: Hub): void {
-  app.get('/api/club', async () => hub.settings.club());
+  app.get('/api/club', { preHandler: guard('settings.view') }, async () => hub.settings.club());
 
-  app.post<{ Body: UpdateClubRequest }>('/api/club', { schema: { body: updateClubSchema } }, async (req, reply) =>
-    runCommand(req, reply, hub, (actor) => ({ status: 200, body: hub.settings.updateClub({ ...req.body, actor }) })),
-  );
+  app.post<{ Body: UpdateClubRequest }>('/api/club', { schema: { body: updateClubSchema } }, async (req, reply) => {
+    // Name, time zone and currency belong to the owner; the hall look and
+    // game rules (`settings`) may be changed by a manager too.
+    const b = req.body ?? {};
+    const hasClubFields = b.name !== undefined || b.timezone !== undefined || b.currency !== undefined;
+    const action = hasClubFields ? 'club.edit' : 'display.edit';
+    return runCommand(req, reply, hub, (actor) => ({ status: 200, body: hub.settings.updateClub({ ...req.body, actor }) }), action);
+  });
 
   app.post<{ Body: CreateTableRequest }>(
     '/api/tables',
@@ -116,7 +121,7 @@ export function registerSettingsRoutes(app: FastifyInstance, hub: Hub): void {
       },
     },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => ({ status: 201, body: hub.settings.createTable({ ...req.body, actor }) })),
+      runCommand(req, reply, hub, (actor) => ({ status: 201, body: hub.settings.createTable({ ...req.body, actor }) }), 'tables.edit'),
   );
 
   app.post<{ Body: ReorderTablesRequest }>(
@@ -135,7 +140,7 @@ export function registerSettingsRoutes(app: FastifyInstance, hub: Hub): void {
       runCommand(req, reply, hub, (actor) => ({
         status: 200,
         body: hub.settings.reorderTables({ tableIds: req.body.tableIds, actor }),
-      })),
+      }), 'tables.edit'),
   );
 
   app.post<{ Params: { tableId: string }; Body: UpdateTableRequest }>(
@@ -153,7 +158,7 @@ export function registerSettingsRoutes(app: FastifyInstance, hub: Hub): void {
       runCommand(req, reply, hub, (actor) => ({
         status: 200,
         body: hub.settings.updateTable({ ...req.body, tableId: req.params.tableId, actor }),
-      })),
+      }), 'tables.edit'),
   );
 
   app.post<{ Body: CreateTariffRequest }>(
@@ -169,7 +174,7 @@ export function registerSettingsRoutes(app: FastifyInstance, hub: Hub): void {
       },
     },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => ({ status: 201, body: hub.settings.createTariff({ ...req.body, actor }) })),
+      runCommand(req, reply, hub, (actor) => ({ status: 201, body: hub.settings.createTariff({ ...req.body, actor }) }), 'tariffs.edit'),
   );
 
   app.post<{ Params: { tariffId: string }; Body: UpdateTariffRequest }>(
@@ -191,6 +196,6 @@ export function registerSettingsRoutes(app: FastifyInstance, hub: Hub): void {
       runCommand(req, reply, hub, (actor) => ({
         status: 200,
         body: hub.settings.updateTariff({ ...req.body, tariffId: req.params.tariffId, actor }),
-      })),
+      }), 'tariffs.edit'),
   );
 }

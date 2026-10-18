@@ -48,7 +48,7 @@ const PAGES: Record<string, (query: URLSearchParams) => ReactNode> = {
 export function App() {
   const hub = useHubConnection();
   const { path, query } = useLocation();
-  const { staff, role, can, login, logout } = useAuth();
+  const { staff, role, can, logout } = useAuth();
   const now = useNow();
   const { theme, cycle } = useTheme();
   const [toast, setToast] = useState<string | null>(null);
@@ -85,6 +85,17 @@ export function App() {
 
   const closeToast = useCallback(() => setToast(null), []);
 
+  // Without a session the HUB answers 401 to /api/state, so the login page comes
+  // before the boot screen; LoginPage signs in through useAuth and stores the token.
+  if (path === '/login' || !staff) {
+    const next = path === '/login' ? (query.get('next') ?? '/') : path;
+    return (
+      <div className="login-shell">
+        <LoginPage next={next} />
+      </div>
+    );
+  }
+
   if (!state) {
     return (
       <main className="boot">
@@ -93,15 +104,6 @@ export function App() {
         </span>
         <p>{hub.online ? 'Загрузка…' : 'Подключаемся к HUB клуба…'}</p>
       </main>
-    );
-  }
-
-  if (path === '/login' || !staff) {
-    const next = path === '/login' ? (query.get('next') ?? '/') : path;
-    return (
-      <div className="login-shell">
-        <LoginPage onLogin={login} next={next} />
-      </div>
     );
   }
 
@@ -172,8 +174,8 @@ export function App() {
             online={hub.online}
             staff={staff}
             onLogout={() => {
-              logout();
-              navigate('/login');
+              // Drops the session on the HUB (best effort), then shows the login page.
+              void logout().finally(() => navigate('/login'));
             }}
             theme={theme}
             onTheme={cycle}

@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { HubState } from '@bills/domain';
+import type { AuthStaff, HubState } from '@bills/domain';
 import { ROLE_LABEL } from '@bills/domain';
-import type { CurrentStaff } from './auth.ts';
 import { formatClock } from './format.ts';
 import { Icon } from './icons.tsx';
 import type { IconName } from './icons.tsx';
@@ -165,7 +164,7 @@ export function Topbar(props: {
   state: HubState;
   serverNow: number;
   online: boolean;
-  staff: CurrentStaff;
+  staff: AuthStaff;
   onLogout: () => void;
   theme: ThemePreference;
   onTheme: () => void;
@@ -246,7 +245,7 @@ export function Topbar(props: {
                 <strong>{staff.name}</strong>
                 <span className="muted">{ROLE_LABEL[staff.role]}</span>
               </p>
-              <p className="hint">Имя попадает в журнал действий. Вход по PIN — на этапе 3.</p>
+              <p className="hint">Вход по ключу доступа; имя попадает в журнал действий. Другой сотрудник — выйти и войти своим ключом.</p>
               <button
                 type="button"
                 className="btn"
@@ -255,7 +254,7 @@ export function Topbar(props: {
                   props.onLogout();
                 }}
               >
-                <Icon name="logout" size={18} /> Сменить сотрудника
+                <Icon name="logout" size={18} /> Выйти
               </button>
             </div>
           )}
