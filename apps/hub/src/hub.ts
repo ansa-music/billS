@@ -1,3 +1,4 @@
+import { BarService } from './bar.ts';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
 import { afterCommit, run, transaction } from './db.ts';
@@ -8,7 +9,10 @@ import { record } from './journal.ts';
 import type { LampOptions } from './lamps/controller.ts';
 import { LampController } from './lamps/controller.ts';
 import type { LampDriver } from './lamps/driver.ts';
+import { ReportService } from './reports.ts';
 import { SessionService } from './sessions.ts';
+import { SettingsService } from './settings.ts';
+import { StaffService } from './staff.ts';
 import type { HubState } from './views.ts';
 import { buildState } from './views.ts';
 
@@ -30,6 +34,14 @@ export class Hub {
   readonly events = new HubEvents();
   readonly lamps: LampController;
   readonly sessions: SessionService;
+  /** Club, tables, tariffs, display and rules. */
+  readonly settings: SettingsService;
+  /** Bar catalog and orders on games. */
+  readonly bar: BarService;
+  /** Staff, roles, PINs, audit log. */
+  readonly staff: StaffService;
+  /** Owner summary. */
+  readonly reports: ReportService;
   readonly #reconcileIntervalMs: number;
   #reconcileTimer: NodeJS.Timeout | undefined;
 
@@ -46,6 +58,11 @@ export class Hub {
       ...(deps.lampOptions ? { options: deps.lampOptions } : {}),
     });
     this.sessions = new SessionService({ db: deps.db, clock: deps.clock, lamps: this.lamps, events: this.events });
+    const common = { db: deps.db, clock: deps.clock, events: this.events };
+    this.settings = new SettingsService(common);
+    this.bar = new BarService(common);
+    this.staff = new StaffService(common);
+    this.reports = new ReportService(common);
   }
 
   /** Restores lamps and pending commands after a (re)start. */
