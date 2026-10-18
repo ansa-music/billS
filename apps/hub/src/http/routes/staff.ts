@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { CreateStaffRequest, StaffListResponse, UpdateStaffRequest, VerifyPinRequest } from '@bills/domain';
 import { ROLES } from '@bills/domain';
 import type { Hub } from '../../hub.ts';
-import { runCommand } from '../command.ts';
+import { guard, runCommand } from '../command.ts';
 
 const roleSchema = { type: 'string', enum: [...ROLES] } as const;
 const tableIdsSchema = { type: 'array', maxItems: 200, items: { type: 'string', minLength: 1, maxLength: 100 } } as const;
@@ -23,7 +23,7 @@ interface AuditQueryString {
  * only until PIN login makes the actor trustworthy (stage 3).
  */
 export function registerStaffRoutes(app: FastifyInstance, hub: Hub): void {
-  app.get('/api/staff', async (): Promise<StaffListResponse> => ({ staff: hub.staff.list() }));
+  app.get('/api/staff', { preHandler: guard('staff.view') }, async (): Promise<StaffListResponse> => ({ staff: hub.staff.list() }));
 
   app.post<{ Body: CreateStaffRequest }>(
     '/api/staff',
@@ -43,7 +43,7 @@ export function registerStaffRoutes(app: FastifyInstance, hub: Hub): void {
       },
     },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => ({
+      runCommand(req, reply, hub, (actor, by) => ({
         status: 201,
         body: hub.staff.create({
           name: req.body.name,
@@ -51,8 +51,9 @@ export function registerStaffRoutes(app: FastifyInstance, hub: Hub): void {
           pin: req.body.pin,
           tableIds: req.body.tableIds,
           actor,
+          by: by.id ? by : undefined,
         }),
-      })),
+      }), 'staff.edit'),
   );
 
   app.post<{ Params: { staffId: string }; Body: UpdateStaffRequest }>(
@@ -73,10 +74,11 @@ export function registerStaffRoutes(app: FastifyInstance, hub: Hub): void {
       },
     },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => ({
+      runCommand(req, reply, hub, (actor, by) => ({
         status: 200,
         body: hub.staff.update({
           staffId: req.params.staffId,
+          by: by.id ? by : undefined,
           name: req.body.name,
           role: req.body.role,
           pin: req.body.pin,
@@ -84,7 +86,7 @@ export function registerStaffRoutes(app: FastifyInstance, hub: Hub): void {
           tableIds: req.body.tableIds,
           actor,
         }),
-      })),
+      }), 'staff.edit'),
   );
 
   app.post<{ Params: { staffId: string }; Body: VerifyPinRequest }>(
@@ -109,6 +111,7 @@ export function registerStaffRoutes(app: FastifyInstance, hub: Hub): void {
   app.get<{ Querystring: AuditQueryString }>(
     '/api/audit',
     {
+      preHandler: guard('audit.view'),
       schema: {
         querystring: {
           type: 'object',

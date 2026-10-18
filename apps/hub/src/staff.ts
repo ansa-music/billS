@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import type { AuditEntryView, AuditListResponse, Role, StaffView } from '@bills/domain';
-import { ROLES } from '@bills/domain';
+import { canAssignRole, ROLES } from '@bills/domain';
+import type { Actor } from './auth.ts';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
 import { afterCommit, all, one, run, transaction } from './db.ts';
@@ -39,6 +40,8 @@ export interface CreateStaffInput {
   pin?: string | undefined;
   tableIds?: string[] | undefined;
   actor: string;
+  /** The signed-in employee; limits which roles may be assigned (ASSIGNABLE_ROLES). */
+  by?: Actor | undefined;
 }
 
 export interface UpdateStaffInput {
@@ -50,6 +53,7 @@ export interface UpdateStaffInput {
   isActive?: boolean | undefined;
   tableIds?: string[] | undefined;
   actor: string;
+  by?: Actor | undefined;
 }
 
 export interface AuditQuery {
@@ -73,6 +77,7 @@ interface StaffRow {
   table_ids: string;
   created_at: number;
   updated_at: number;
+  active_keys?: number;
 }
 
 interface AuditRow {
@@ -103,6 +108,7 @@ function toStaffView(row: StaffRow): StaffView {
     role: row.role,
     isActive: row.is_active === 1,
     hasPin: row.pin_hash !== null,
+    activeKeys: row.active_keys ?? 0,
     tableIds,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -130,9 +136,9 @@ function toAuditView(row: AuditRow): AuditEntryView {
 
 /**
  * Staff, PINs and the audit log. Every command is one transaction with an
- * audit record. Who may assign which role is not enforced here yet: until PIN
- * login (stage 3) the actor is only a name, so the UI limits the choice with
- * `canAssignRole` and the HUB validates shape and uniqueness only.
+ * audit record. The hierarchy (ASSIGNABLE_ROLES): when the signed-in actor is
+ * known (`by`), they may create and edit only roles they could assign, never
+ * change their own role or dismiss themselves.
  */
 export class StaffService {
   readonly deps: StaffServiceDeps;
@@ -146,13 +152,16 @@ export class StaffService {
     const db = this.deps.db;
     return all<StaffRow>(
       db,
-      'SELECT * FROM staff WHERE club_id = ? ORDER BY is_active DESC, name COLLATE NOCASE, created_at',
+      `SELECT s.*, (SELECT COUNT(*) FROM access_keys k WHERE k.staff_id = s.id AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > ?)) AS active_keys FROM staff s WHERE s.club_id = ? ORDER BY s.is_active DESC, s.name COLLATE NOCASE, s.created_at`,
+      this.deps.clock.now(),
       clubId(db),
     ).map(toStaffView);
   }
 
   get(staffId: string): StaffView {
-    return toStaffView(this.#row(staffId));
+    const row = one<StaffRow>(this.deps.db, `SELECT s.*, (SELECT COUNT(*) FROM access_keys k WHERE k.staff_id = s.id AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > ?)) AS active_keys FROM staff s WHERE s.id = ?`, this.deps.clock.now(), staffId);
+    if (!row) throw new HubError(404, 'STAFF_NOT_FOUND', 'Сотрудник не найден');
+    return toStaffView(row);
   }
 
   create(input: CreateStaffInput): StaffView {
@@ -162,6 +171,7 @@ export class StaffService {
       const club = clubId(db);
       const name = cleanName(input.name);
       if (!ROLES.includes(input.role)) throw new HubError(422, 'ROLE_INVALID', 'Неизвестная роль');
+      if (input.by) assertMayAssign(input.by, input.role);
       this.#assertNameFree(club, name, null);
       const pinHash = input.pin === undefined ? null : hashPin(checkPin(input.pin));
       const tableIds = this.#checkTables(club, input.tableIds ?? []);
@@ -198,6 +208,17 @@ export class StaffService {
     const now = this.deps.clock.now();
     return transaction(db, () => {
       const row = this.#row(input.staffId);
+      if (input.by) {
+        // You may edit only people whose role you could assign; your own role and employment are not yours to change.
+        if (input.by.id !== row.id) assertMayAssign(input.by, row.role);
+        if (input.role !== undefined && input.role !== row.role) {
+          if (input.by.id === row.id) throw new HubError(403, 'ROLE_NOT_ALLOWED', 'Свою роль изменить нельзя');
+          assertMayAssign(input.by, input.role);
+        }
+        if (input.by.id === row.id && input.isActive === false) {
+          throw new HubError(403, 'ROLE_NOT_ALLOWED', 'Нельзя уволить самого себя');
+        }
+      }
       const changed: Record<string, unknown> = {};
       const sets: string[] = [];
       const params: Array<string | number | null> = [];
@@ -378,6 +399,12 @@ export class StaffService {
     const missing = unique.find((id) => !known.has(id));
     if (missing !== undefined) throw new HubError(422, 'TABLE_NOT_FOUND', 'Стол не найден');
     return unique;
+  }
+}
+
+function assertMayAssign(by: Actor, role: Role): void {
+  if (!canAssignRole(by.role, role)) {
+    throw new HubError(403, 'ROLE_NOT_ALLOWED', 'Ваша роль не позволяет управлять этим сотрудником');
   }
 }
 

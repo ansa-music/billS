@@ -5,13 +5,15 @@ import type { Hub } from '../hub.ts';
 import type { ChangeEvent } from '../events.ts';
 import type { SimulatorFault, SimulatorLampDriver } from '../lamps/simulator.ts';
 import { SIMULATOR_FAULTS } from '../lamps/simulator.ts';
+import { registerAuth } from './auth.ts';
+import type { AuthHookOptions } from './auth.ts';
 import { emptyBody, runCommand } from './command.ts';
 import { registerBarRoutes } from './routes/bar.ts';
 import { registerReportRoutes } from './routes/reports.ts';
 import { registerSettingsRoutes } from './routes/settings.ts';
 import { registerStaffRoutes } from './routes/staff.ts';
 
-export interface AppOptions {
+export interface AppOptions extends AuthHookOptions {
   /** Exposes /api/dev/lamps to control the simulator. Never in production. */
   simulator?: SimulatorLampDriver;
   logger?: boolean;
@@ -33,6 +35,8 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
     return reply.status(500).send({ error: { code: 'INTERNAL', message: 'Внутренняя ошибка HUB' } });
   });
 
+  registerAuth(app, hub, { trustActorHeader: options.trustActorHeader ?? false });
+
   app.get('/api/health', async () => ({ ok: true, now: hub.clock.now() }));
 
   app.get('/api/state', async () => hub.state());
@@ -48,7 +52,7 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
       runCommand(req, reply, hub, (actor) => ({
         status: 201,
         body: hub.sessions.open({ tableId: req.params.tableId, tariffId: req.body?.tariffId, actor }),
-      })),
+      }), 'table.open'),
   );
 
   app.post<{ Params: { sessionId: string } }>(
@@ -58,14 +62,14 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
       runCommand(req, reply, hub, (actor) => ({
         status: 200,
         body: hub.sessions.stop({ sessionId: req.params.sessionId, actor }),
-      })),
+      }), 'table.stop'),
   );
 
   app.post<{ Params: { alertId: string } }>(
     '/api/alerts/:alertId/resolve',
     { schema: { body: emptyBody } },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => ({ status: 200, body: hub.resolveAlert(req.params.alertId, actor) })),
+      runCommand(req, reply, hub, (actor) => ({ status: 200, body: hub.resolveAlert(req.params.alertId, actor) }), 'alert.resolve'),
   );
 
   // Pages beyond the hall screen: each module owns its routes.

@@ -240,6 +240,69 @@ export interface CancelOrderRequest {
   reason: string;
 }
 
+// ── Access keys and sessions (stage 3) ──────────────────────────────────────
+
+/** Who is signed in on this screen. */
+export interface AuthStaff {
+  id: string;
+  name: string;
+  role: Role;
+  clubId: string;
+  clubName: string;
+}
+
+/** POST /api/auth/login — no token needed. 401 KEY_INVALID for anything that does not work. */
+export interface LoginRequest {
+  key: string;
+  /** Free text for the sessions list: "планшет у бара", browser name… */
+  device?: string;
+}
+
+export interface LoginResponse {
+  /** Send as "Authorization: Bearer <token>". */
+  token: string;
+  staff: AuthStaff;
+  expiresAt: number;
+}
+
+/** GET /api/auth/me */
+export interface MeResponse {
+  staff: AuthStaff;
+  expiresAt: number;
+}
+
+export interface AccessKeyView {
+  id: string;
+  staffId: string;
+  /** "OWNER-7K3Q" — the key itself is never returned after issue. */
+  prefix: string;
+  label: string | null;
+  createdAt: number;
+  createdBy: string;
+  expiresAt: number | null;
+  revokedAt: number | null;
+  revokedBy: string | null;
+  lastUsedAt: number | null;
+}
+
+/** POST /api/staff/:staffId/keys (201). The caller must be allowed to assign the staff member's role. */
+export interface IssueKeyRequest {
+  label?: string;
+  /** Omit for a key that does not expire. */
+  expiresInDays?: number;
+}
+
+export interface IssueKeyResponse {
+  /** Shown once. */
+  key: string;
+  view: AccessKeyView;
+}
+
+/** GET /api/staff/:staffId/keys */
+export interface KeyListResponse {
+  keys: AccessKeyView[];
+}
+
 // ── Staff, roles, audit (stage 3) ───────────────────────────────────────────
 
 export interface StaffView {
@@ -247,6 +310,8 @@ export interface StaffView {
   name: string;
   role: Role;
   isActive: boolean;
+  /** Active (not revoked, not expired) access keys. */
+  activeKeys: number;
   /** A PIN is set (the PIN itself is never returned). */
   hasPin: boolean;
   /** Tables a waiter is assigned to; empty = all. */

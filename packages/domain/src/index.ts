@@ -4,5 +4,6 @@ export * from './tariff.ts';
 export * from './session.ts';
 export * from './permissions.ts';
 export * from './settings.ts';
+export * from './auth.ts';
 export * from './orders.ts';
 export type * from './api.ts';

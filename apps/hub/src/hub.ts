@@ -1,3 +1,4 @@
+import { AuthService } from './auth.ts';
 import { BarService } from './bar.ts';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
@@ -42,6 +43,8 @@ export class Hub {
   readonly staff: StaffService;
   /** Owner summary. */
   readonly reports: ReportService;
+  /** Access keys and login sessions. */
+  readonly auth: AuthService;
   readonly #reconcileIntervalMs: number;
   #reconcileTimer: NodeJS.Timeout | undefined;
 
@@ -63,6 +66,7 @@ export class Hub {
     this.bar = new BarService(common);
     this.staff = new StaffService(common);
     this.reports = new ReportService(common);
+    this.auth = new AuthService(common);
   }
 
   /** Restores lamps and pending commands after a (re)start. */

@@ -5,6 +5,8 @@ import { buildApp } from './http/app.ts';
 import { Hub } from './hub.ts';
 import { SimulatorLampDriver } from './lamps/simulator.ts';
 import { seedDemo } from './seed.ts';
+import { writeBootstrapKeys } from './auth.ts';
+import { dirname, join } from 'node:path';
 
 const config = loadConfig();
 const db = openDb(config.dbPath);
