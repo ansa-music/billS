@@ -10,6 +10,7 @@ import { buildApp } from '../src/http/app.ts';
 import type { HubDeps } from '../src/hub.ts';
 import { Hub } from '../src/hub.ts';
 import { SimulatorLampDriver } from '../src/lamps/simulator.ts';
+import { SimulatorUps } from '../src/power/ups.ts';
 import { seedDemo } from '../src/seed.ts';
 import type { HubState, SessionView } from '../src/views.ts';
 
@@ -37,7 +38,7 @@ export class Harness {
 
   /**
    * Starts a HUB on the same database file, like a process (re)start. The
-   * monitor does not poll by itself: tests call `hub.monitor.poll()`.
+   * lamp monitor does not poll by itself: tests call `hub.monitor.poll()`.
    */
   async start(driver = new SimulatorLampDriver({ latencyMs: 5 }), deps: Partial<HubDeps> = {}): Promise<TestHub> {
     const db = openDb(this.dbPath, this.clock.now(), this.migrationsDir ? { migrationsDir: this.migrationsDir } : {});
@@ -50,7 +51,11 @@ export class Harness {
       monitorOptions: { intervalMs: 0, alertAfterMs: 60_000 },
       ...deps,
     });
-    const app = buildApp(hub, { simulator: driver, dbPath: this.dbPath });
+    const app = buildApp(hub, {
+      simulator: driver,
+      dbPath: this.dbPath,
+      upsSimulator: deps.ups instanceof SimulatorUps ? deps.ups : undefined,
+    });
     await app.ready();
     hub.start();
     this.current = { dbPath: this.dbPath, db, clock: this.clock, driver, hub, app };

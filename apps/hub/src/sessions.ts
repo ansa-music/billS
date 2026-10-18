@@ -3,15 +3,15 @@ import type { TariffConfig } from '@bills/domain';
 import { calculateChargeWithPauses, pauseLimits, pauseRefusal, unpaidSpans } from '@bills/domain';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
-import { afterCommit, one, run, transaction } from './db.ts';
+import { afterCommit, all, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import type { HubEvents } from './events.ts';
-import { record } from './journal.ts';
+import { record, SYSTEM } from './journal.ts';
 import { isManualMode } from './settings.ts';
 import type { LampController } from './lamps/controller.ts';
 import { desiredLampFor } from './lamps/controller.ts';
 import type { SessionRow, SessionView } from './views.ts';
-import { effectiveStatus, loadPauseSpans, loadSession, loadSessionRow } from './views.ts';
+import { effectiveStatus, loadPauseSpans, loadSession, loadSessionRow, SESSION_SQL } from './views.ts';
 
 export interface OpenTableInput {
   tableId: string;
@@ -26,6 +26,12 @@ export interface SessionCommandInput {
 
 export interface TransferSessionInput extends SessionCommandInput {
   toTableId: string;
+}
+
+/** A pause of every running game by the HUB itself (power loss), not by staff. */
+export interface SystemPauseInput {
+  reason: 'power';
+  now: number;
 }
 
 interface TableRow {
@@ -297,6 +303,102 @@ export class SessionService {
       }
       afterCommit(db, () => this.#events.changed({ kind: 'session', tableId: s.table_id }));
       return loadSession(db, s.id, now);
+    });
+  }
+
+  /**
+   * Power loss: every running game is paused with reason `power` (never billed,
+   * not counted against the staff pause budget). Lamps are told OFF so the
+   * desired state matches. Returns the ids paused. Called by PowerMonitor
+   * inside its transaction.
+   */
+  pauseAll(input: SystemPauseInput): string[] {
+    const db = this.#db;
+    const now = input.now;
+    return transaction(db, () => {
+      const running = all<SessionRow>(
+        db,
+        `${SESSION_SQL} WHERE s.status = 'ACTIVE' AND s.started_at IS NOT NULL AND p.id IS NULL ORDER BY s.started_at, s.rowid`,
+      );
+      for (const s of running) {
+        const pauseId = randomUUID();
+        run(
+          db,
+          'INSERT INTO session_pauses (id, session_id, reason, paused_at, paused_by) VALUES (?, ?, ?, ?, ?)',
+          pauseId,
+          s.id,
+          input.reason,
+          now,
+          SYSTEM,
+        );
+        run(db, 'UPDATE table_sessions SET updated_at = ? WHERE id = ?', now, s.id);
+        this.#lamps.request(s.table_id, 'OFF', s.id);
+        record(db, now, {
+          actor: SYSTEM,
+          action: 'session.paused',
+          entityType: 'session',
+          entityId: s.id,
+          data: { tableId: s.table_id, pauseId, pausedAt: now, reason: input.reason, lamp: 'off' },
+        });
+        afterCommit(db, () => this.#events.changed({ kind: 'session', tableId: s.table_id }));
+      }
+      return running.map((s) => s.id);
+    });
+  }
+
+  /**
+   * Mains are back: every game still paused by `pauseAll` asks for its lamp; time
+   * runs again when the lamp confirms (at once in manual mode), like `resume`.
+   * Games staff already resumed or stopped are left alone. Returns the ids resumed.
+   */
+  resumeAll(input: SystemPauseInput): string[] {
+    const db = this.#db;
+    const now = input.now;
+    return transaction(db, () => {
+      const paused = all<SessionRow>(
+        db,
+        `${SESSION_SQL} WHERE s.status = 'ACTIVE' AND p.id IS NOT NULL AND p.reason = ? AND p.resume_requested_at IS NULL
+         ORDER BY s.started_at, s.rowid`,
+        input.reason,
+      );
+      const manual = isManualMode(db);
+      for (const s of paused) {
+        run(
+          db,
+          'UPDATE session_pauses SET resume_requested_at = ?, resumed_by = ?, resumed_at = ? WHERE id = ?',
+          now,
+          SYSTEM,
+          manual ? now : null,
+          s.pause_id,
+        );
+        run(db, 'UPDATE table_sessions SET updated_at = ? WHERE id = ?', now, s.id);
+        this.#lamps.request(s.table_id, 'ON', s.id);
+        record(db, now, {
+          actor: SYSTEM,
+          action: 'session.resume_requested',
+          entityType: 'session',
+          entityId: s.id,
+          data: { tableId: s.table_id, pauseId: s.pause_id, pausedAt: s.pause_started_at, reason: input.reason, manual },
+        });
+        if (manual && s.pause_started_at !== null) {
+          record(db, now, {
+            actor: SYSTEM,
+            action: 'session.resumed',
+            entityType: 'session',
+            entityId: s.id,
+            data: {
+              tableId: s.table_id,
+              reason: input.reason,
+              pausedAt: s.pause_started_at,
+              resumedAt: now,
+              pausedSeconds: Math.floor((now - s.pause_started_at) / 1000),
+              manual: true,
+            },
+          });
+        }
+        afterCommit(db, () => this.#events.changed({ kind: 'session', tableId: s.table_id }));
+      }
+      return paused.map((s) => s.id);
     });
   }
 

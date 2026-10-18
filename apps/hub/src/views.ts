@@ -174,7 +174,9 @@ export function loadSession(db: Db, id: string, now: number): SessionView {
   return toSessionView(row, loadPauseSpans(db, id), now);
 }
 
-export function buildState(db: Db, now: number): HubState {
+import type { PowerView } from '@bills/domain';
+
+export function buildState(db: Db, now: number, power: PowerView): HubState {
   const club = one<HubState['club']>(db, 'SELECT id, name, timezone, currency FROM clubs ORDER BY created_at LIMIT 1');
   if (!club) throw new HubError(503, 'CLUB_NOT_CONFIGURED', 'Клуб не настроен');
 
@@ -242,7 +244,7 @@ export function buildState(db: Db, now: number): HubState {
   const open = openShiftRow(db, club.id);
   const shift = open ? toShiftView(db, open) : null;
 
-  return { serverNow: now, club, tariffs, tables, unpaid, checks, shift, alerts, manualMode: getManualMode(db) };
+  return { serverNow: now, club, tariffs, tables, unpaid, checks, shift, alerts, manualMode: getManualMode(db), power };
 }
 
 // ── Checks ───────────────────────────────────────────────────────────────────

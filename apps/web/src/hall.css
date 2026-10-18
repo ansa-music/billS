@@ -215,6 +215,45 @@
   border-color: var(--warn);
 }
 
+/* UPS indicator in the top bar */
+
+.power {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.power-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.power[data-state='battery'] {
+  border-color: var(--warn);
+  background: color-mix(in oklab, var(--warn) 22%, var(--surface));
+  color: color-mix(in oklab, var(--warn) 70%, var(--text));
+  font-weight: 600;
+}
+
+.power[data-state='critical'],
+.power[data-state='unknown'] {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.power[data-state='critical'] .power-icon {
+  animation: hall-blink 1s ease-in-out infinite;
+}
+
 /* Hardware panel */
 
 .tag-warn {

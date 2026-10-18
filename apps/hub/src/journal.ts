@@ -37,10 +37,19 @@ export interface AlertInput {
 
 /**
  * Raises an alert for staff and the owner. While an alert of the same kind for
- * a table is unresolved, repeats are folded into it; lamp command alerts
- * (LAMP_*) are folded into any open lamp command alert of the table.
+ * a table (or club-wide, without a table) is unresolved, repeats are folded
+ * into it; lamp command alerts (LAMP_*) are folded into any open lamp command
+ * alert of the table.
  */
 export function raiseAlert(db: Db, at: number, alert: AlertInput): void {
+  if (!alert.tableId) {
+    const open = one<{ id: string }>(
+      db,
+      'SELECT id FROM alerts WHERE table_id IS NULL AND kind = ? AND resolved_at IS NULL',
+      alert.kind,
+    );
+    if (open) return;
+  }
   if (alert.tableId) {
     const sameKind = one<{ id: string }>(
       db,

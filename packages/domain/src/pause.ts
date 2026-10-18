@@ -2,10 +2,11 @@ import type { TariffConfig } from './tariff.ts';
 
 /**
  * Pauses of a game. A pause is time the guests do not pay for: staff paused the
- * game (reason `pause`) or moved it to another table (reason `transfer`, the
- * time between the old lamp going off and the new one confirming ON).
+ * game (reason `pause`), moved it to another table (reason `transfer`, the
+ * time between the old lamp going off and the new one confirming ON), or the
+ * mains failed and the HUB paused every game itself (reason `power`).
  */
-export type PauseReason = 'pause' | 'transfer';
+export type PauseReason = 'pause' | 'transfer' | 'power';
 
 export interface PauseSpan {
   from: number;
@@ -76,7 +77,8 @@ export function pauseRefusal(pauses: readonly PauseSpan[], tariff: TariffConfig,
 /**
  * The spans of a game that are not billed, up to `end`. Staff pauses share one
  * budget (`maxPauseMinutes`): once it is spent, the rest of a pause is billed as
- * if the game went on. Transfers are never billed. Open pauses end at `end`.
+ * if the game went on. Transfers and power-loss pauses are never billed. Open
+ * pauses end at `end`.
  */
 export function unpaidSpans(pauses: readonly PauseSpan[], tariff: TariffConfig, end: number): UnpaidSpan[] {
   const budgetMs = pauseLimits(tariff).maxPauseMinutes * 60_000;
@@ -85,7 +87,7 @@ export function unpaidSpans(pauses: readonly PauseSpan[], tariff: TariffConfig, 
   for (const p of [...pauses].sort((a, b) => a.from - b.from)) {
     const to = Math.min(p.to ?? end, end);
     if (to <= p.from) continue;
-    if (p.reason === 'transfer') {
+    if (p.reason === 'transfer' || p.reason === 'power') {
       spans.push({ from: p.from, to });
       continue;
     }

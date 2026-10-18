@@ -234,3 +234,18 @@ test('PAUSED is a live status between ACTIVE and ACTIVE or stop', () => {
   assert.ok(!canTransition('PAUSED', 'CANCELLED'));
   assert.ok(isLive('PAUSED'));
 });
+
+test('a power-loss pause is never billed and does not spend the staff pause budget', () => {
+  const limited: TariffConfig = { ...tariff, maxPauses: 1, maxPauseMinutes: 10 };
+  const start = Date.UTC(2026, 9, 12, 7, 0);
+  const pauses = [
+    { from: start + 20 * MIN, to: start + 50 * MIN, reason: 'power' as const },
+    { from: start + 60 * MIN, to: start + 65 * MIN, reason: 'pause' as const },
+  ];
+  assert.deepEqual(unpaidSpans(pauses, limited, start + 90 * MIN), [
+    { from: start + 20 * MIN, to: start + 50 * MIN },
+    { from: start + 60 * MIN, to: start + 65 * MIN },
+  ]);
+  assert.deepEqual(pauseUsage(pauses, start + 90 * MIN), { count: 1, seconds: 5 * 60 });
+  assert.equal(pauseRefusal(pauses, limited, start + 90 * MIN), 'Лимит пауз исчерпан: по тарифу не больше 1 за игру');
+});

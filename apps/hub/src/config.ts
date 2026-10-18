@@ -38,6 +38,10 @@ export interface HubConfig {
   lampAlertAfterMs: number;
   /** Who may switch manual mode off, by X-Actor name (until stage 3 roles). */
   managerActors: string[];
+  /** UPS to watch: nut://host:3493/ups | apcupsd://host:3551 | simulator | '' (off). */
+  ups: string | undefined;
+  upsPollMs: number;
+  upsCriticalPercent: number;
 }
 
 function int(value: string | undefined, fallback: number, name: string): number {
@@ -84,5 +88,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+    ups: env.HUB_UPS || undefined,
+    upsPollMs: int(env.HUB_UPS_POLL_MS, 5000, 'HUB_UPS_POLL_MS'),
+    upsCriticalPercent: int(env.HUB_UPS_CRITICAL_PERCENT, 20, 'HUB_UPS_CRITICAL_PERCENT'),
   };
 }

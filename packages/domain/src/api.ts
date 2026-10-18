@@ -75,6 +75,28 @@ export interface ManualModeView {
   by: string | null;
 }
 
+/** The club's UPS as the HUB sees it (HUB_UPS). Lamps are not on the UPS: on battery the hall is dark. */
+export interface PowerView {
+  /** HUB_UPS is set. When false the rest is empty. */
+  configured: boolean;
+  source: 'nut' | 'apcupsd' | 'simulator' | null;
+  label: string | null;
+  /** The last reading succeeded recently. */
+  reachable: boolean;
+  onBattery: boolean;
+  chargePercent: number | null;
+  runtimeSeconds: number | null;
+  status: string | null;
+  model: string | null;
+  checkedAt: number | null;
+  onBatterySince: number | null;
+  /** Charge fell below the critical level during this outage. */
+  critical: boolean;
+  /** Games paused automatically by this outage (0 when the setting is off). */
+  autoPausedSessions: number;
+  settings: { autoPauseOnPowerLoss: boolean };
+}
+
 export interface HubState {
   serverNow: number;
   club: { id: string; name: string; timezone: string; currency: string };
@@ -83,6 +105,7 @@ export interface HubState {
   unpaid: SessionView[];
   alerts: AlertView[];
   manualMode: ManualModeView;
+  power: PowerView;
 }
 
 export interface TransferRequest {

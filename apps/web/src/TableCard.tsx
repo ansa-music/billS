@@ -398,6 +398,7 @@ function PausedBody({
 
   const current = session.pauses.find((p) => p.to === null) ?? session.pauses.at(-1);
   const transferring = current?.reason === 'transfer';
+  const powerLoss = current?.reason === 'power';
   const pausedAt = session.pausedAt ?? current?.from ?? end;
   const pausedFor = Math.max(0, end - pausedAt);
 
@@ -406,8 +407,8 @@ function PausedBody({
   const pausesLeft = Math.max(0, limits.maxPauses - usage.count);
   const budgetSeconds = limits.maxPauseMinutes * 60;
   const secondsLeft = Math.max(0, budgetSeconds - usage.seconds);
-  // Only staff pauses spend the budget; a transfer is never billed.
-  const overBudget = !transferring && usage.seconds >= budgetSeconds;
+  // Only staff pauses spend the budget; a transfer or a power loss is never billed.
+  const overBudget = !transferring && !powerLoss && usage.seconds >= budgetSeconds;
   const resuming = session.resumeRequestedAt != null;
 
   return (
@@ -416,7 +417,8 @@ function PausedBody({
         {formatDuration(charge.playedSeconds * 1000)}
       </p>
       <p className="status paused-status">
-        {transferring ? 'Перенос' : 'На паузе'} · <span className="paused-for">{formatPause(pausedFor)}</span>
+        {transferring ? 'Перенос' : powerLoss ? 'Пауза: нет электричества' : 'На паузе'} ·{' '}
+        <span className="paused-for">{formatPause(pausedFor)}</span>
       </p>
       <p className="amount">
         {amount}
