@@ -14,14 +14,16 @@ import type { PowerActions, PowerOptions, PowerSettings } from './power/monitor.
 import { PowerMonitor, setPowerSettings } from './power/monitor.ts';
 import type { UpsSource } from './power/ups.ts';
 import { CheckService } from './checks.ts';
+import { PrepaidService } from './prepaid.ts';
+import type { StopSessionInput } from './sessions.ts';
 import { SessionService } from './sessions.ts';
 import { ShiftService } from './shifts.ts';
 import type { ManualMode } from './settings.ts';
 import { getManualMode, isManualMode, managerMatcher, setManualMode } from './settings.ts';
 import type { SyncOptions } from './sync.ts';
 import { SyncWorker, syncStatus } from './sync.ts';
-import type { HubState } from './views.ts';
-import { buildState } from './views.ts';
+import type { HubState, SessionView } from './views.ts';
+import { buildState, loadSession } from './views.ts';
 
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 export const MAX_BLINK_TIMES = 10;
@@ -62,6 +64,7 @@ export class Hub {
   readonly checks: CheckService;
   readonly shifts: ShiftService;
   readonly sync: SyncWorker | undefined;
+  readonly prepaid: PrepaidService;
   readonly #reconcileIntervalMs: number;
   readonly #isManager: (actor: string) => boolean;
   #reconcileTimer: NodeJS.Timeout | undefined;
@@ -107,17 +110,35 @@ export class Hub {
     this.checks = new CheckService({ db: deps.db, clock: deps.clock, events: this.events, sessions: this.sessions });
     this.shifts = new ShiftService({ db: deps.db, clock: deps.clock, events: this.events });
     this.sync = deps.sync ? new SyncWorker({ db: deps.db, clock: deps.clock, events: this.events, ...deps.sync }) : undefined;
+    this.prepaid = new PrepaidService({
+      db: deps.db,
+      clock: deps.clock,
+      events: this.events,
+      sessions: this.sessions,
+      checks: this.checks,
+      lamps: this.lamps,
+    });
   }
 
   /** Restores lamps and pending commands after a (re)start. */
   start(): void {
     purgeIdempotencyKeys(this.db, this.clock.now() - IDEMPOTENCY_TTL_MS);
     this.lamps.recover();
+    this.prepaid.start();
     this.#reconcileTimer = setInterval(() => this.lamps.reconcile(), this.#reconcileIntervalMs);
     this.#reconcileTimer.unref();
     this.monitor.start();
     this.power.start();
     this.sync?.start();
+  }
+
+  /** Stop from staff: a game paid upfront closes in the same transaction, so the reply already says so. */
+  stopGame(input: StopSessionInput): SessionView {
+    return transaction(this.db, () => {
+      this.sessions.stop(input);
+      this.prepaid.settleStopped(input.sessionId);
+      return loadSession(this.db, input.sessionId, this.clock.now());
+    });
   }
 
   state(): HubState {
@@ -197,6 +218,7 @@ export class Hub {
 
   close(): void {
     clearInterval(this.#reconcileTimer);
+    this.prepaid.close();
     this.power.close();
     this.monitor.close();
     this.sync?.stop();

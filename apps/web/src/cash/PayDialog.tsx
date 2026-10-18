@@ -18,6 +18,7 @@ import type { Desk } from './desk.ts';
 import { toActionError, useAction } from './desk.ts';
 import { currencySymbol, METHOD_LABEL, toMoneyInput } from './format.ts';
 import { FormError, Modal } from './Modal.tsx';
+import { printReceipt } from './print/Receipt.tsx';
 
 type Amounts = Record<PaymentMethod, string>;
 const NO_AMOUNTS: Amounts = { CASH: '', CARD: '', QR: '' };
@@ -124,9 +125,14 @@ export function PayDialog({ desk, initial, onClose }: { desk: Desk; initial: Che
         title={`Счёт №${done.check.number}`}
         onClose={onClose}
         footer={
-          <button ref={doneRef} type="button" className="btn btn-primary" onClick={onClose}>
-            Готово
-          </button>
+          <div className="modal-actions">
+            <button type="button" className="btn" onClick={() => printReceipt(done.check, state.club)}>
+              Печать чека
+            </button>
+            <button ref={doneRef} type="button" className="btn btn-primary" onClick={onClose}>
+              Готово
+            </button>
+          </div>
         }
       >
         <div className="pay-done" role="status">
@@ -186,14 +192,24 @@ export function PayDialog({ desk, initial, onClose }: { desk: Desk; initial: Che
           </div>
           {noShift && <p className="hint hint-warn">Откройте смену, чтобы принимать оплату</p>}
           <FormError error={action.error?.message} />
-          <button
-            type="submit"
-            form={formId}
-            className="btn btn-primary"
-            disabled={!preview.plan || !open || noShift || action.pending}
-          >
-            {check.due === 0 ? 'Закрыть счёт' : 'Принять оплату'}
-          </button>
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="btn btn-narrow"
+              title={open ? 'Напечатать счёт как есть, до оплаты' : undefined}
+              onClick={() => printReceipt(check, state.club)}
+            >
+              {open ? 'Предчек' : 'Печать чека'}
+            </button>
+            <button
+              type="submit"
+              form={formId}
+              className="btn btn-primary"
+              disabled={!preview.plan || !open || noShift || action.pending}
+            >
+              {check.due === 0 ? 'Закрыть счёт' : 'Принять оплату'}
+            </button>
+          </div>
         </>
       }
     >

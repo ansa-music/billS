@@ -7,6 +7,7 @@ import { afterCommit, all, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import type { HubEvents } from './events.ts';
 import { record, SYSTEM } from './journal.ts';
+import { shiftPrepaidDeadline } from './prepaid-deadline.ts';
 import { isManualMode } from './settings.ts';
 import type { LampController } from './lamps/controller.ts';
 import { desiredLampFor } from './lamps/controller.ts';
@@ -22,6 +23,14 @@ export interface OpenTableInput {
 export interface SessionCommandInput {
   sessionId: string;
   actor: string;
+}
+
+export interface StopSessionInput extends SessionCommandInput {
+  /**
+   * Bill up to this moment instead of now (never later than now): the prepaid
+   * service stops a game at its deadline even when it gets there late.
+   */
+  at?: number | undefined;
 }
 
 export interface TransferSessionInput extends SessionCommandInput {
@@ -122,8 +131,8 @@ export class SessionService {
     });
   }
 
-  /** Billing ends now, not when the lamp confirms OFF. The table is free right away. */
-  stop(input: SessionCommandInput): SessionView {
+  /** Billing ends now (or at `input.at`), not when the lamp confirms OFF. The table is free right away. */
+  stop(input: StopSessionInput): SessionView {
     const db = this.#db;
     const now = this.#clock.now();
     return transaction(db, () => {
@@ -132,7 +141,7 @@ export class SessionService {
 
       if ((status === 'ACTIVE' || status === 'PAUSED') && s.started_at !== null) {
         const tariff = JSON.parse(s.tariff_snapshot) as TariffConfig;
-        const end = Math.max(now, s.started_at);
+        const end = Math.max(Math.min(input.at ?? now, now), s.started_at);
         // A game stopped while paused: the pause ends with the game.
         if (s.pause_id !== null) {
           run(db, 'UPDATE session_pauses SET resumed_at = ?, resumed_by = ? WHERE id = ?', end, input.actor, s.pause_id);
@@ -276,6 +285,8 @@ export class SessionService {
         s.pause_id,
       );
       run(db, 'UPDATE table_sessions SET updated_at = ? WHERE id = ?', now, s.id);
+      // Manual mode: the pause is over now, a prepaid deadline moves by its length.
+      if (manual) shiftPrepaidDeadline(db, s.id, now);
       // The lamp command is still sent in case the controller is back.
       this.#lamps.request(s.table_id, 'ON', s.id);
       record(db, now, {
@@ -372,6 +383,7 @@ export class SessionService {
           s.pause_id,
         );
         run(db, 'UPDATE table_sessions SET updated_at = ? WHERE id = ?', now, s.id);
+        if (manual) shiftPrepaidDeadline(db, s.id, now);
         this.#lamps.request(s.table_id, 'ON', s.id);
         record(db, now, {
           actor: SYSTEM,

@@ -1,0 +1,198 @@
+/* Prepaid games: the time selector and «Предоплата» on a free card, the countdown badge
+   on a running one, the prepaid dialog. Only design tokens from styles.css, so both themes
+   work. This file loads BEFORE styles.css: overrides of shared classes use two-class selectors. */
+
+/* Free card */
+
+.prepaid-select {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.prepaid-select[data-set] {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 14%, var(--surface-2));
+}
+
+.prepaid-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn.prepaid-btn {
+  flex: 0 1 auto;
+  touch-action: manipulation;
+}
+
+/* «Откройте смену…» under the buttons, on its own line. */
+.hint.prepaid-nohint {
+  flex-basis: 100%;
+  order: 1;
+  font-size: 12px;
+}
+
+/* Running (or opening) prepaid game */
+
+.prepaid-badge {
+  display: grid;
+  gap: 2px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-variant-numeric: tabular-nums;
+  transition: background-color 0.3s, border-color 0.3s;
+}
+
+.prepaid-countdown {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 6px;
+}
+
+.prepaid-label {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.prepaid-time {
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.prepaid-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.prepaid-paid {
+  font-size: 18px;
+  font-weight: 650;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The last minutes: the lamp blinks, the badge turns to the warning colour and breathes. */
+
+.prepaid-badge[data-ending],
+.prepaid-badge[data-over] {
+  border-color: color-mix(in oklab, var(--warn) 70%, transparent);
+  background: color-mix(in oklab, var(--warn) 14%, var(--surface));
+}
+
+.prepaid-badge[data-ending] {
+  animation: prepaid-pulse 2s ease-in-out infinite;
+}
+
+/* Darker than --warn on light, lighter on dark — readable in both themes. */
+.prepaid-badge[data-ending] .prepaid-time,
+.prepaid-badge[data-over] .prepaid-time,
+.prepaid-soon {
+  color: color-mix(in oklab, var(--warn) 70%, var(--text));
+}
+
+.prepaid-soon {
+  font-weight: 650;
+}
+
+@keyframes prepaid-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--warn) 30%, transparent);
+  }
+}
+
+/* The whole card too — unless it already shows a lamp problem in red. */
+.card:not([data-problem]):has(.prepaid-badge[data-ending]) {
+  border-color: color-mix(in oklab, var(--warn) 75%, var(--border));
+}
+
+/* Prepaid dialog */
+
+.prepaid-section {
+  display: grid;
+  gap: 8px;
+}
+
+.prepaid-section .cash-sub,
+.prepaid-quote .cash-sub {
+  margin: 0;
+}
+
+.modal .prepaid-minutes {
+  max-width: 240px;
+}
+
+.modal .prepaid-minutes input {
+  min-height: 44px;
+  font-variant-numeric: tabular-nums;
+}
+
+.prepaid-quote {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.prepaid-price {
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.prepaid-changed {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklab, var(--warn) 55%, transparent);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--warn) 12%, var(--surface));
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.prepaid-changed strong {
+  font-weight: 700;
+}
+
+@media (pointer: coarse) {
+  .prepaid-select {
+    min-height: 52px;
+    font-size: 17px;
+  }
+
+  .modal .prepaid-minutes input {
+    min-height: 48px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prepaid-badge {
+    transition: none;
+  }
+
+  .prepaid-badge[data-ending] {
+    animation: none;
+  }
+}

@@ -18,7 +18,7 @@ import type {
   TableView,
   TariffConfig,
 } from '@bills/domain';
-import { calculateChargeWithPauses, checkTotals, minorPerMajor, shiftTotals, unpaidSpans } from '@bills/domain';
+import { calculateChargeWithPauses, checkTotals, minorPerMajor, prepaidDeadline, shiftTotals, unpaidSpans } from '@bills/domain';
 import type { Db, Param } from './db.ts';
 import { all, one } from './db.ts';
 import { HubError } from './errors.ts';
@@ -59,6 +59,12 @@ export interface SessionRow {
   pause_reason: PauseReason | null;
   pause_started_at: number | null;
   resume_requested_at: number | null;
+  /** Joined from prepaid_games. */
+  prepaid_minutes: number | null;
+  prepaid_deadline_at: number | null;
+  prepaid_amount: number | null;
+  prepaid_check_id: string | null;
+  prepaid_warned_at: number | null;
 }
 
 export interface PauseRow {
@@ -75,15 +81,18 @@ export interface PauseRow {
 }
 
 /**
- * A game with the check it is billed on and its open pause. Append `WHERE s.…` conditions.
+ * A game with the check it is billed on, its open pause and its prepaid time. Append `WHERE s.…` conditions.
  * Exported under both names the HUB modules use.
  */
 export const SESSION_SQL = `
   SELECT s.*, ci.check_id AS check_id,
-         p.id AS pause_id, p.reason AS pause_reason, p.paused_at AS pause_started_at, p.resume_requested_at
+         p.id AS pause_id, p.reason AS pause_reason, p.paused_at AS pause_started_at, p.resume_requested_at,
+         pg.minutes AS prepaid_minutes, pg.deadline_at AS prepaid_deadline_at, pg.amount AS prepaid_amount,
+         pg.check_id AS prepaid_check_id, pg.warned_at AS prepaid_warned_at
   FROM table_sessions s
   LEFT JOIN check_items ci ON ci.session_id = s.id
-  LEFT JOIN session_pauses p ON p.session_id = s.id AND p.resumed_at IS NULL`;
+  LEFT JOIN session_pauses p ON p.session_id = s.id AND p.resumed_at IS NULL
+  LEFT JOIN prepaid_games pg ON pg.session_id = s.id`;
 export const SESSION_SELECT = SESSION_SQL;
 
 export function effectiveStatus(row: Pick<SessionRow, 'status' | 'pause_id'>): SessionStatus {
@@ -165,6 +174,18 @@ export function toSessionView(row: SessionRow, pauses: PauseSpan[], now: number)
     checkId: row.check_id ?? null,
     cancelReason: row.cancel_reason ?? null,
     cancelApprovedBy: row.cancel_approved_by ?? null,
+    prepaid:
+      row.prepaid_minutes == null
+        ? null
+        : {
+            minutes: row.prepaid_minutes,
+            until:
+              row.prepaid_deadline_at ??
+              (row.started_at === null ? null : prepaidDeadline(row.started_at, row.prepaid_minutes)),
+            amount: row.prepaid_amount,
+            checkId: row.prepaid_check_id,
+            warnedAt: row.prepaid_warned_at,
+          },
   };
 }
 

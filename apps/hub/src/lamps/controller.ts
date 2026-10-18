@@ -6,6 +6,7 @@ import type { Db } from '../db.ts';
 import { afterCommit, all, one, run, transaction } from '../db.ts';
 import type { HubEvents } from '../events.ts';
 import { raiseAlert, record, SYSTEM } from '../journal.ts';
+import { shiftPrepaidDeadline } from '../prepaid-deadline.ts';
 import type { LampDriver } from './driver.ts';
 import { BLINK_PERIOD_MS, blinkByToggling } from './driver.ts';
 
@@ -384,6 +385,8 @@ export class LampController {
         if (pause) {
           run(db, 'UPDATE session_pauses SET resumed_at = ? WHERE id = ?', now, pause.id);
           run(db, 'UPDATE table_sessions SET updated_at = ? WHERE id = ?', now, cmd.session_id);
+          // A prepaid game gets its pause time back: the deadline moves by the unpaid span.
+          shiftPrepaidDeadline(db, cmd.session_id, now);
           record(db, now, {
             actor: SYSTEM,
             action: 'session.resumed',

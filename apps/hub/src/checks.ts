@@ -95,6 +95,56 @@ export class CheckService {
     });
   }
 
+  /** A check for a game paid before it is played (prepaid time): the line is the prepaid price. */
+  createPrepaid(input: { sessionId: string; amount: number; actor: string }): CheckView {
+    const db = this.#db;
+    const now = this.#clock.now();
+    return transaction(db, () => {
+      const s = one<{ id: string; club_id: string; table_id: string; table_name: string }>(
+        db,
+        `SELECT s.id, s.club_id, s.table_id, t.name AS table_name
+         FROM table_sessions s JOIN billiard_tables t ON t.id = s.table_id WHERE s.id = ?`,
+        input.sessionId,
+      );
+      if (!s) throw new HubError(404, 'SESSION_NOT_FOUND', 'Игра не найдена');
+      const number =
+        (one<{ n: number | null }>(db, 'SELECT MAX(number) AS n FROM checks WHERE club_id = ?', s.club_id)?.n ?? 0) + 1;
+      const id = randomUUID();
+      run(
+        db,
+        `INSERT INTO checks (id, club_id, number, status, created_at, created_by, updated_at)
+         VALUES (?, ?, ?, 'OPEN', ?, ?, ?)`,
+        id,
+        s.club_id,
+        number,
+        now,
+        input.actor,
+        now,
+      );
+      const itemId = randomUUID();
+      run(
+        db,
+        `INSERT INTO check_items (id, check_id, kind, session_id, title, amount, created_at)
+         VALUES (?, ?, 'GAME', ?, ?, ?, ?)`,
+        itemId,
+        id,
+        s.id,
+        s.table_name,
+        input.amount,
+        now,
+      );
+      record(db, now, {
+        actor: input.actor,
+        action: 'check.created',
+        entityType: 'check',
+        entityId: id,
+        data: { number, prepaid: true, items: [{ itemId, sessionId: s.id, tableId: s.table_id, amount: input.amount }] },
+      });
+      afterCommit(db, () => this.#events.changed({ kind: 'check' }));
+      return loadCheck(db, id);
+    });
+  }
+
   addGame(input: { checkId: string; sessionId: string; actor: string }): CheckView {
     const db = this.#db;
     const now = this.#clock.now();

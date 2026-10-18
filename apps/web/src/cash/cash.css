@@ -184,6 +184,14 @@ textarea:focus-visible {
   width: 100%;
 }
 
+.shift-print {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* Unpaid panel (extends .unpaid from styles.css) */
 
 .cash-panel .unpaid li {
@@ -297,6 +305,10 @@ html:has(.modal[open]) {
 
 .modal-actions .btn {
   flex: 1;
+}
+
+.modal-actions .btn.btn-narrow {
+  flex: none;
 }
 
 .modal ul,
@@ -636,6 +648,10 @@ html:has(.modal[open]) {
   justify-self: start;
 }
 
+.shift-checks .sc-actions {
+  justify-self: start;
+}
+
 /* Report */
 
 .report {
@@ -688,39 +704,4 @@ html:has(.modal[open]) {
   overflow-wrap: anywhere;
 }
 
-/* Printing: only the report copy in .print-root */
-
-.print-root {
-  display: none;
-}
-
-@media print {
-  html body {
-    background: #fff;
-    color: #000;
-  }
-
-  body > :not(.print-root) {
-    display: none !important;
-  }
-
-  .print-root {
-    display: block;
-    --text: #000;
-    --muted: #444;
-    --border: #999;
-    --danger: #b00020;
-    --warn: #7a4f00;
-    color: #000;
-    font-size: 12pt;
-  }
-
-  .print-root h1 {
-    margin: 0 0 8pt;
-    font-size: 16pt;
-  }
-
-  .print-root .report-table :is(th, td) {
-    padding: 4pt 6pt;
-  }
-}
+/* Printing lives in print/print.css: receipt-printer forms in #print-root. */

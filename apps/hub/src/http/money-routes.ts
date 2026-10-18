@@ -5,6 +5,7 @@ import type {
   CashMovementRequest,
   CloseShiftRequest,
   CreateCheckRequest,
+  OpenPrepaidRequest,
   OpenShiftRequest,
   PayRequest,
   RefundRequest,
@@ -23,6 +24,16 @@ const emptyBody = { type: 'object', additionalProperties: false, properties: {} 
 const moneySchema = { type: 'integer', minimum: 0, maximum: 1_000_000_000_00 } as const;
 const methodSchema = { type: 'string', enum: [...PAYMENT_METHODS] } as const;
 const reasonSchema = { type: 'string', maxLength: 500 } as const;
+const paymentPartsSchema = {
+  type: 'array',
+  maxItems: PAYMENT_METHODS.length,
+  items: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['method', 'amount'],
+    properties: { method: methodSchema, amount: moneySchema },
+  },
+} as const;
 const approvalBody = {
   type: 'object',
   additionalProperties: false,
@@ -132,18 +143,7 @@ export function registerMoneyRoutes(app: FastifyInstance, hub: Hub): void {
           type: 'object',
           additionalProperties: false,
           required: ['parts'],
-          properties: {
-            parts: {
-              type: 'array',
-              maxItems: PAYMENT_METHODS.length,
-              items: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['method', 'amount'],
-                properties: { method: methodSchema, amount: moneySchema },
-              },
-            },
-          },
+          properties: { parts: paymentPartsSchema },
         },
       },
     },
@@ -170,6 +170,33 @@ export function registerMoneyRoutes(app: FastifyInstance, hub: Hub): void {
       runCommand(req, reply, hub, (actor) => ({
         status: 200,
         body: hub.checks.refund({ checkId: req.params.checkId, ...req.body, actor }),
+      })),
+  );
+
+  // ── Prepaid time: open for N minutes and take the whole payment at once ──
+
+  app.post<{ Params: { tableId: string }; Body: OpenPrepaidRequest }>(
+    '/api/tables/:tableId/open-prepaid',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['minutes', 'amount', 'parts'],
+          properties: {
+            tariffId: { type: 'string' },
+            minutes: { type: 'integer' },
+            amount: moneySchema,
+            quotedAt: { type: 'integer' },
+            parts: paymentPartsSchema,
+          },
+        },
+      },
+    },
+    async (req, reply) =>
+      runCommand(req, reply, hub, (actor) => ({
+        status: 201,
+        body: hub.prepaid.openPaid({ tableId: req.params.tableId, ...req.body, actor }),
       })),
   );
 
