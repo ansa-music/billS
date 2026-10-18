@@ -89,7 +89,10 @@ export interface SimulatorStatus {
   latencyMs: number;
   offline: boolean;
   faults: Array<'fail' | 'drop-ack'>;
+  /** Channel → relay is on. */
   lamps: Record<string, boolean>;
+  /** Channel → the lamp was asked to keep blinking (paused game). */
+  blink: Record<string, boolean>;
   /** Current-sensor overrides: true — light on by hand, false — dead bulb. */
   lights: Record<string, boolean>;
   blinks: Record<string, number>;

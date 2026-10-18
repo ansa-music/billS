@@ -33,6 +33,8 @@ interface PollRow {
   reported: 'ON' | 'OFF' | 'UNKNOWN' | null;
   session_id: string | null;
   session_status: 'OPENING' | 'ACTIVE' | null;
+  /** Open pause of the live game: the lamp is off or blinking on purpose. */
+  pause_id: string | null;
   pending: number;
 }
 
@@ -50,7 +52,8 @@ export interface PollResult {
  *
  * A relay that disagrees with the desired state and has no command in flight
  * is told again once (audited); if the light still disagrees, the alert follows.
- * Lamps are never judged while a command is pending or in manual mode.
+ * Lamps are never judged while a command is pending, while the game is paused
+ * or in manual mode.
  */
 export class LampMonitor {
   readonly #db: Db;
@@ -116,10 +119,12 @@ export class LampMonitor {
     const rows = all<PollRow>(
       this.#db,
       `SELECT t.id AS table_id, t.name, t.lamp_channel, l.desired, l.reported, s.id AS session_id, s.status AS session_status,
+              p.id AS pause_id,
               EXISTS (SELECT 1 FROM lamp_commands c WHERE c.table_id = t.id AND c.status = 'PENDING') AS pending
        FROM billiard_tables t
        LEFT JOIN lamp_states l ON l.table_id = t.id
        LEFT JOIN table_sessions s ON s.table_id = t.id AND s.status IN ('OPENING', 'ACTIVE')
+       LEFT JOIN session_pauses p ON p.session_id = s.id AND p.resumed_at IS NULL
        WHERE t.is_active = 1
        ORDER BY t.sort_order, t.name`,
     );
@@ -178,7 +183,8 @@ export class LampMonitor {
       afterCommit(db, () => this.#events.changed({ kind: 'lamp', tableId: row.table_id }));
     }
 
-    if (busy || quiet) {
+    // A paused game has its lamp off (or blinking) on purpose: nothing to judge.
+    if (busy || quiet || row.pause_id !== null) {
       this.#anomalies.delete(row.table_id);
       return;
     }

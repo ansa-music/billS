@@ -130,11 +130,13 @@ export function SimulatorPanel({ onError }: { onError: (message: string) => void
         {Object.entries(sim.lamps)
           .sort(([a], [b]) => a.localeCompare(b, 'en', { numeric: true }))
           .map(([channel, on]) => {
-            const light = sim.lights[channel];
+            const light = sim.lights?.[channel];
+            const blink = sim.blink?.[channel] ?? false;
             return (
-              <li key={channel} data-on={on || undefined}>
+              <li key={channel} data-on={on || undefined} data-blink={blink || undefined}>
                 <span className="lamp-dot" aria-hidden="true" />
                 {channel}
+                {blink && <span className="relay-note">мигает</span>}
                 <span className="sim-light" role="group" aria-label={`Датчик тока ${channel}`}>
                   <button
                     type="button"

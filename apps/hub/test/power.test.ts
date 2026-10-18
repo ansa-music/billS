@@ -375,3 +375,40 @@ test('the dev endpoint drives the simulated UPS for demos', async (t) => {
   const noUps = await plain.start();
   assert.equal((await noUps.app.inject({ method: 'GET', url: '/api/dev/ups' })).statusCode, 404);
 });
+
+test('a real outage pauses running games (reason power, unbilled) and resumes them when the mains return', async (t) => {
+  const h = harness(t);
+  const ups = new SimulatorUps();
+  const hub = await h.start(undefined, { ups, powerOptions: { intervalMs: 0 } });
+  await post(hub, '/api/power/settings', { autoPauseOnPowerLoss: true });
+  const opened = await post(hub, `/api/tables/${tableId(hub, 'Стол 1')}/open`);
+  await waitFor(() => sessionStatus(hub, opened.body.id) === 'ACTIVE');
+  const staffPaused = await post(hub, `/api/tables/${tableId(hub, 'Стол 2')}/open`);
+  await waitFor(() => sessionStatus(hub, staffPaused.body.id) === 'ACTIVE');
+  await post(hub, `/api/sessions/${staffPaused.body.id}/pause`);
+  await hub.hub.power.poll();
+
+  h.clock.advance(10 * 60 * 1000); // 10 minutes of play
+  ups.set({ onBattery: true, chargePercent: 60 });
+  await hub.hub.power.poll();
+  const paused = hub.hub.state().tables.find((x) => x.name === 'Стол 1')?.session;
+  assert.equal(paused?.status, 'PAUSED');
+  assert.equal(paused?.pauses.at(-1)?.reason, 'power');
+  assert.equal(hub.hub.state().power.autoPausedSessions, 1, 'the staff-paused game is left alone');
+  await waitFor(() => !hub.driver.isOn('relay-1'));
+
+  h.clock.advance(30 * 60 * 1000); // half an hour without electricity
+  ups.set({ onBattery: false });
+  await hub.hub.power.poll();
+  await waitFor(() => hub.hub.state().tables.find((x) => x.name === 'Стол 1')?.session?.status === 'ACTIVE');
+  assert.ok(hub.driver.isOn('relay-1'));
+  assert.equal(sessionStatus(hub, staffPaused.body.id), 'ACTIVE');
+  assert.equal(hub.hub.state().tables.find((x) => x.name === 'Стол 2')?.session?.status, 'PAUSED', 'still paused by staff');
+
+  h.clock.advance(20 * 60 * 1000); // 20 more minutes of play
+  const stopped = await post(hub, `/api/sessions/${opened.body.id}/stop`);
+  assert.equal(stopped.body.playedSeconds, 30 * 60, 'the outage is not played time');
+  assert.equal(stopped.body.amount, 1000_00, '30 minutes at 2000/h; the power pause spent no pause budget');
+  const actions = auditActions(hub);
+  assert.ok(actions.includes('power.auto_paused') && actions.includes('power.auto_resumed') && actions.includes('session.resumed'));
+});

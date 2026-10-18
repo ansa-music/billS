@@ -101,9 +101,15 @@ export function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  // `keys` are the cards to lock while the command runs (a transfer locks both tables).
   const run = useCallback(
-    async (key: string, fn: () => Promise<unknown>) => {
-      setBusy((b) => new Set(b).add(key));
+    async (keys: string | string[], fn: () => Promise<unknown>) => {
+      const locked = Array.isArray(keys) ? keys : [keys];
+      setBusy((b) => {
+        const next = new Set(b);
+        for (const k of locked) next.add(k);
+        return next;
+      });
       try {
         await fn();
       } catch (e) {
@@ -111,7 +117,7 @@ export function App() {
       } finally {
         setBusy((b) => {
           const next = new Set(b);
-          next.delete(key);
+          for (const k of locked) next.delete(k);
           return next;
         });
         void refresh();
@@ -182,6 +188,7 @@ export function App() {
               <CardBoundary key={table.id} name={table.name} resetKey={table}>
                 <TableCard
                   table={table}
+                  tables={state.tables}
                   tariffs={state.tariffs}
                   timezone={state.club.timezone}
                   alert={tableAlerts.get(table.id)}
@@ -192,6 +199,15 @@ export function App() {
                     run(table.id, () => command(`/api/tables/${table.id}/open`, actor, { tariffId }))
                   }
                   onStop={(sessionId) => run(table.id, () => command(`/api/sessions/${sessionId}/stop`, actor))}
+                  onPause={(sessionId) => run(table.id, () => command(`/api/sessions/${sessionId}/pause`, actor))}
+                  onResume={(sessionId) =>
+                    run(table.id, () => command(`/api/sessions/${sessionId}/resume`, actor))
+                  }
+                  onTransfer={(sessionId, toTableId) =>
+                    run([table.id, toTableId], () =>
+                      command(`/api/sessions/${sessionId}/transfer`, actor, { toTableId }),
+                    )
+                  }
                 />
               </CardBoundary>
             ))}

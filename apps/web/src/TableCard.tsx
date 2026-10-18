@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AlertView, HubState, SessionView, TableView, TariffConfig } from '@bills/domain';
-import { calculateCharge, formatMoney, nextPriceChange, priceAt } from '@bills/domain';
-import { formatClock, formatDuration, KIND_LABEL } from './format.ts';
+import {
+  calculateChargeWithPauses,
+  formatMoney,
+  nextPriceChange,
+  pauseLimits,
+  pauseRefusal,
+  pauseUsage,
+  priceAt,
+  unpaidSpans,
+} from '@bills/domain';
+import { formatClock, formatDuration, formatPause, KIND_LABEL } from './format.ts';
 import { hasProblem, tablePhase } from './hall.ts';
 
 const HOUR = 60 * 60 * 1000;
@@ -10,6 +19,8 @@ const SLOW_LAMP_MS = 4000;
 
 interface Props {
   table: TableView;
+  /** Every table of the hall: a game can be moved to a free one. */
+  tables: TableView[];
   tariffs: HubState['tariffs'];
   timezone: string;
   currency: string;
@@ -18,16 +29,25 @@ interface Props {
   alert: AlertView | undefined;
   onOpen: (tariffId: string) => void;
   onStop: (sessionId: string) => void;
+  onPause: (sessionId: string) => void;
+  onResume: (sessionId: string) => void;
+  onTransfer: (sessionId: string, toTableId: string) => void;
 }
 
-const PHASE_LABEL = { free: 'Свободен', opening: 'Включаем свет', playing: 'Идёт игра' } as const;
+const PHASE_LABEL = {
+  free: 'Свободен',
+  opening: 'Включаем свет',
+  playing: 'Идёт игра',
+  paused: 'На паузе',
+} as const;
 
 function LampBadge({ lamp }: { lamp: TableView['lamp'] }) {
-  const switching = lamp.reported !== lamp.desired;
+  const switching = !lamp.blink && lamp.reported !== lamp.desired;
   // The current sensor disagrees with the relay: a dead bulb or a bypassed relay.
-  const sensorOff = lamp.currentOn !== null && !switching && lamp.currentOn !== (lamp.reported === 'ON');
-  const label =
-    lamp.reported === 'UNKNOWN'
+  const sensorOff = lamp.currentOn !== null && !switching && !lamp.blink && lamp.currentOn !== (lamp.reported === 'ON');
+  const label = lamp.blink
+    ? 'Свет мигает'
+    : lamp.reported === 'UNKNOWN'
       ? 'Свет: нет ответа'
       : sensorOff
         ? lamp.reported === 'ON'
@@ -37,7 +57,13 @@ function LampBadge({ lamp }: { lamp: TableView['lamp'] }) {
           ? 'Свет включён'
           : 'Свет выключен';
   return (
-    <span className="lamp" data-lamp={lamp.reported.toLowerCase()} data-switching={switching || undefined} title={label}>
+    <span
+      className="lamp"
+      data-lamp={lamp.reported.toLowerCase()}
+      data-switching={switching || undefined}
+      data-blink={lamp.blink || undefined}
+      title={label}
+    >
       <span className="lamp-dot" aria-hidden="true" />
       {label}
     </span>
@@ -81,6 +107,71 @@ function RateLine(props: {
   );
 }
 
+/**
+ * The bill of a live game as of `serverNow`: play minus pauses, an open pause
+ * running until now. Pause time over the tariff budget counts as play.
+ */
+function useLiveCharge(session: SessionView, startedAt: number, serverNow: number) {
+  const end = Math.max(serverNow, startedAt);
+  const charge = calculateChargeWithPauses(
+    startedAt,
+    end,
+    unpaidSpans(session.pauses, session.tariff, end),
+    session.tariff,
+    session.timezone,
+  );
+  const { freeMinutes, minimumMinutes } = session.tariff;
+  const inFreeMinutes = freeMinutes > 0 && charge.billedSeconds === 0;
+  const freeLeft = freeMinutes * 60 - charge.playedSeconds;
+  const note = inFreeMinutes
+    ? `бесплатно ещё ${Math.floor(freeLeft / 60)}:${String(freeLeft % 60).padStart(2, '0')}`
+    : minimumMinutes > 0 && charge.playedSeconds < minimumMinutes * 60
+      ? `минимум ${minimumMinutes} мин`
+      : null;
+  return { end, charge, inFreeMinutes, note };
+}
+
+/** «Стоп» arms a confirmation that disarms itself after a few seconds. */
+function useStopConfirm() {
+  const [confirming, setConfirming] = useState(false);
+  useEffect(() => {
+    if (!confirming) return;
+    const t = setTimeout(() => setConfirming(false), 4000);
+    return () => clearTimeout(t);
+  }, [confirming]);
+  return { confirming, arm: () => setConfirming(true), disarm: () => setConfirming(false) };
+}
+
+function StopControls({
+  confirm,
+  amount,
+  busy,
+  onStop,
+}: {
+  confirm: ReturnType<typeof useStopConfirm>;
+  amount: string;
+  busy: boolean;
+  onStop: () => void;
+}) {
+  if (confirm.confirming) {
+    return (
+      <>
+        <button type="button" className="btn btn-danger" disabled={busy} onClick={onStop}>
+          Остановить · {amount}
+        </button>
+        <button type="button" className="btn btn-ghost btn-narrow" onClick={confirm.disarm}>
+          Нет
+        </button>
+      </>
+    );
+  }
+  return (
+    <button type="button" className="btn btn-outline-danger" disabled={busy} onClick={confirm.arm}>
+      Стоп
+    </button>
+  );
+}
+
 export function TableCard(props: Props) {
   const { table, alert } = props;
   const phase = tablePhase(table);
@@ -112,6 +203,9 @@ export function TableCard(props: Props) {
       {phase === 'opening' && session && <OpeningBody {...props} session={session} />}
       {phase === 'playing' && session?.startedAt != null && (
         <PlayingBody {...props} session={session} startedAt={session.startedAt} />
+      )}
+      {phase === 'paused' && session?.startedAt != null && (
+        <PausedBody {...props} session={session} startedAt={session.startedAt} />
       )}
     </article>
   );
@@ -195,36 +289,28 @@ function OpeningBody({ session, serverNow, busy, onStop }: Props & { session: Se
 }
 
 function PlayingBody({
+  table,
+  tables,
   session,
   startedAt,
   serverNow,
   currency,
   busy,
   onStop,
+  onPause,
+  onTransfer,
 }: Props & { session: SessionView; startedAt: number }) {
-  const [confirming, setConfirming] = useState(false);
-  useEffect(() => {
-    if (!confirming) return;
-    const t = setTimeout(() => setConfirming(false), 4000);
-    return () => clearTimeout(t);
-  }, [confirming]);
-
-  const end = Math.max(serverNow, startedAt);
-  const charge = calculateCharge(startedAt, end, session.tariff, session.timezone);
-  const { freeMinutes, minimumMinutes } = session.tariff;
-  const inFreeMinutes = freeMinutes > 0 && charge.billedSeconds === 0;
-  const freeLeft = freeMinutes * 60 - charge.playedSeconds;
-  const note = inFreeMinutes
-    ? `бесплатно ещё ${Math.floor(freeLeft / 60)}:${String(freeLeft % 60).padStart(2, '0')}`
-    : minimumMinutes > 0 && charge.playedSeconds < minimumMinutes * 60
-      ? `минимум ${minimumMinutes} мин`
-      : null;
+  const confirm = useStopConfirm();
+  const [movePicking, setMovePicking] = useState(false);
+  const { end, charge, inFreeMinutes, note } = useLiveCharge(session, startedAt, serverNow);
   const amount = formatMoney(charge.amount, currency);
+  const refusal = pauseRefusal(session.pauses, session.tariff, end);
+  const freeTables = tables.filter((t) => t.id !== table.id && t.session === null);
 
   return (
     <div className="card-body">
-      <p className="timer" aria-label="Время игры">
-        {formatDuration(end - startedAt)}
+      <p className="timer" aria-label="Сыграно">
+        {formatDuration(charge.playedSeconds * 1000)}
       </p>
       <p className="amount">
         {amount}
@@ -232,6 +318,7 @@ function PlayingBody({
       </p>
       <p className="card-meta">
         с {formatClock(startedAt, session.timezone)} · открыл {session.openedBy}
+        {charge.pausedSeconds > 0 && ` · пауз ${formatPause(charge.pausedSeconds * 1000)}`}
       </p>
       <RateLine
         tariffName={session.tariffName}
@@ -243,21 +330,131 @@ function PlayingBody({
       />
       {inFreeMinutes && <p className="tip">Ошиблись столом? «Стоп» сейчас — без оплаты.</p>}
 
+      {movePicking && (
+        <div className="transfer">
+          <p className="hint">Перенести игру на стол:</p>
+          {freeTables.length === 0 ? (
+            <p className="hint">Свободных столов нет</p>
+          ) : (
+            <div className="tariff-chips transfer-chips" role="group" aria-label="Куда перенести">
+              {freeTables.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className="chip"
+                  disabled={busy}
+                  onClick={() => {
+                    setMovePicking(false);
+                    onTransfer(session.id, t.id);
+                  }}
+                >
+                  {t.name}
+                  <span className="chip-note"> · {KIND_LABEL[t.kind]}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="actions">
-        {confirming ? (
-          <>
-            <button type="button" className="btn btn-danger" disabled={busy} onClick={() => onStop(session.id)}>
-              Остановить · {amount}
-            </button>
-            <button type="button" className="btn btn-ghost btn-narrow" onClick={() => setConfirming(false)}>
-              Нет
-            </button>
-          </>
-        ) : (
-          <button type="button" className="btn btn-outline-danger" disabled={busy} onClick={() => setConfirming(true)}>
-            Стоп
+        {!confirm.confirming && (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={busy || refusal !== null}
+            title={refusal ?? undefined}
+            onClick={() => onPause(session.id)}
+          >
+            Пауза
           </button>
         )}
+        <StopControls confirm={confirm} amount={amount} busy={busy} onStop={() => onStop(session.id)} />
+        {!confirm.confirming && (
+          <button type="button" className="link" disabled={busy} onClick={() => setMovePicking((v) => !v)}>
+            {movePicking ? 'Не переносить' : 'Перенести'}
+          </button>
+        )}
+      </div>
+      {refusal && !confirm.confirming && <p className="hint">{refusal}</p>}
+    </div>
+  );
+}
+
+function PausedBody({
+  session,
+  startedAt,
+  serverNow,
+  currency,
+  busy,
+  onStop,
+  onResume,
+}: Props & { session: SessionView; startedAt: number }) {
+  const confirm = useStopConfirm();
+  const { end, charge, note } = useLiveCharge(session, startedAt, serverNow);
+  const amount = formatMoney(charge.amount, currency);
+
+  const current = session.pauses.find((p) => p.to === null) ?? session.pauses.at(-1);
+  const transferring = current?.reason === 'transfer';
+  const powerCut = current?.reason === 'power';
+  const pausedAt = session.pausedAt ?? current?.from ?? end;
+  const pausedFor = Math.max(0, end - pausedAt);
+
+  const limits = pauseLimits(session.tariff);
+  const usage = pauseUsage(session.pauses, end);
+  const pausesLeft = Math.max(0, limits.maxPauses - usage.count);
+  const budgetSeconds = limits.maxPauseMinutes * 60;
+  const secondsLeft = Math.max(0, budgetSeconds - usage.seconds);
+  // Only staff pauses spend the budget; a transfer is never billed.
+  const overBudget = !transferring && !powerCut && usage.seconds >= budgetSeconds;
+  const resuming = session.resumeRequestedAt != null;
+
+  return (
+    <div className="card-body">
+      <p className="timer" aria-label="Сыграно">
+        {formatDuration(charge.playedSeconds * 1000)}
+      </p>
+      <p className="status paused-status">
+        {transferring ? 'Перенос' : powerCut ? 'Пауза: нет электричества' : 'На паузе'} ·{' '}
+        <span className="paused-for">{formatPause(pausedFor)}</span>
+      </p>
+      <p className="amount">
+        {amount}
+        {note && <span className="amount-note">{note}</span>}
+      </p>
+      <p className="card-meta">
+        с {formatClock(startedAt, session.timezone)} · открыл {session.openedBy}
+      </p>
+      {overBudget ? (
+        <p className="warn-note" role="status">
+          Лимит паузы исчерпан — время снова идёт
+        </p>
+      ) : (
+        <p className="hint">
+          осталось пауз: {pausesLeft} · времени: {Math.ceil(secondsLeft / 60)} мин
+        </p>
+      )}
+
+      {resuming && (
+        <>
+          <p className="status">
+            <span className="spinner" aria-hidden="true" /> Включаем свет…
+          </p>
+          <p className="hint">
+            {transferring
+              ? 'Переносим игру — включаем свет на новом столе'
+              : 'Время пойдёт, когда лампа подтвердит включение'}
+          </p>
+        </>
+      )}
+
+      <div className="actions">
+        {!resuming && !confirm.confirming && (
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onResume(session.id)}>
+            Продолжить
+          </button>
+        )}
+        <StopControls confirm={confirm} amount={amount} busy={busy} onStop={() => onStop(session.id)} />
       </div>
     </div>
   );

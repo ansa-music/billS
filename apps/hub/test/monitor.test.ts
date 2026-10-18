@@ -141,3 +141,28 @@ test('the monitor stays silent in manual mode and when the driver cannot read st
   assert.equal(blind.hub.monitor.supported, false);
   assert.deepEqual(await blind.hub.monitor.poll(), { polled: 0, unreachable: 0 });
 });
+
+test('a paused game with its lamp off is not a dark lamp', async (t) => {
+  const h = harness(t);
+  const hub = await h.start();
+  const opened = await post(hub, `/api/tables/${tableId(hub, 'Стол 1')}/open`);
+  await waitFor(() => sessionStatus(hub, opened.body.id) === 'ACTIVE');
+  await post(hub, `/api/sessions/${opened.body.id}/pause`);
+  await waitFor(() => !hub.driver.isOn('relay-1'));
+  await settled(hub);
+
+  await hub.hub.monitor.poll();
+  h.clock.advance(MINUTE + 1);
+  await hub.hub.monitor.poll();
+  assert.equal(hub.hub.state().alerts.length, 0);
+
+  // Resumed: the lamp is on again and judged as usual.
+  await post(hub, `/api/sessions/${opened.body.id}/resume`);
+  await waitFor(() => hub.hub.state().tables.find((x) => x.name === 'Стол 1')?.session?.status === 'ACTIVE');
+  await settled(hub);
+  hub.driver.setLight('relay-1', false);
+  await hub.hub.monitor.poll();
+  h.clock.advance(MINUTE + 1);
+  await hub.hub.monitor.poll();
+  assert.equal(hub.hub.state().alerts[0]?.kind, 'LAMP_DARK_DURING_GAME');
+});

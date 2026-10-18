@@ -6,6 +6,15 @@
  *
  * Channels are the `lamp_channel` strings of tables, see address.ts.
  */
+export interface LampSetOptions {
+  /**
+   * Keep the lamp blinking instead of steady (a paused game with tariff
+   * pauseLamp = 'blink'). A hint: a driver that cannot blink keeps the lamp
+   * steady, which is still the requested ON state.
+   */
+  blink?: boolean;
+}
+
 export interface LampState {
   /** The relay is closed (the lamp should be lit). */
   on: boolean;
@@ -15,12 +24,13 @@ export interface LampState {
 
 export interface LampDriver {
   /** Resolves once the controller confirms the lamp is in the requested state. */
-  setLamp(channel: string, on: boolean, signal: AbortSignal): Promise<void>;
+  setLamp(channel: string, on: boolean, signal: AbortSignal, options?: LampSetOptions): Promise<void>;
   /** Reads the relay and the current sensor of a channel. Used by the periodic monitor. */
   readState?(channel: string, signal: AbortSignal): Promise<LampState>;
   /**
-   * Flashes the lamp `times` times and leaves it in the state it was in.
-   * Resolves when the controller accepted the command (it may still be flashing).
+   * Flashes the lamp `times` times and leaves it in the state it was in
+   * (hardware check, "time is ending" warning). Resolves when the controller
+   * accepted the command (it may still be flashing).
    */
   blink?(channel: string, times: number, signal: AbortSignal): Promise<void>;
 }

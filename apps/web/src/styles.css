@@ -279,6 +279,10 @@ summary:focus-visible {
   border-color: color-mix(in oklab, var(--lamp) 40%, var(--border));
 }
 
+.card[data-state='paused'] {
+  border-color: color-mix(in oklab, var(--muted) 45%, var(--border));
+}
+
 .card[data-problem] {
   border-color: color-mix(in oklab, var(--danger) 70%, var(--border));
 }
@@ -318,6 +322,12 @@ summary:focus-visible {
     var(--pocket) 50% 100% / 22px 22px no-repeat,
     radial-gradient(90% 120% at 50% 0%, color-mix(in oklab, var(--lamp) 38%, transparent), transparent 70%),
     var(--felt-lit);
+}
+
+/* Paused: the light is off, the cloth is dim and grey — but the game is still there. */
+.card[data-state='paused'] .felt {
+  background-color: color-mix(in oklab, var(--felt-dark) 55%, var(--muted) 20%);
+  color: #cfd9d4;
 }
 
 .felt-title {
@@ -372,6 +382,12 @@ summary:focus-visible {
   color: #ffe3a1;
 }
 
+.phase[data-phase='paused'] {
+  background: rgb(0 0 0 / 0.45);
+  color: #cfd9d4;
+  border: 1px dashed rgb(255 255 255 / 0.35);
+}
+
 .card-alert {
   margin: 12px 18px 0;
   padding: 8px 10px;
@@ -413,6 +429,20 @@ summary:focus-visible {
   animation: pulse 0.9s ease-in-out infinite;
 }
 
+/* A blinking lamp (paused game): the dot blinks too, whatever the relay reported last. */
+.lamp[data-blink] .lamp-dot,
+.relays li[data-blink] .lamp-dot {
+  background: var(--lamp);
+  animation: blink 1s steps(1, end) infinite;
+}
+
+@keyframes blink {
+  50% {
+    background: rgb(255 255 255 / 0.25);
+    box-shadow: none;
+  }
+}
+
 @keyframes pulse {
   50% {
     opacity: 0.3;
@@ -443,6 +473,24 @@ summary:focus-visible {
   gap: 8px;
 }
 
+.paused-status {
+  color: var(--muted);
+}
+
+.paused-for {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.warn-note {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--warn);
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--warn) 14%, transparent);
+}
+
 .card-meta {
   font-size: 13px;
   color: var(--muted);
@@ -465,6 +513,17 @@ summary:focus-visible {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 4px;
+}
+
+.transfer {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .chip {
@@ -556,7 +615,9 @@ summary:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .spinner,
-  .lamp[data-switching] .lamp-dot {
+  .lamp[data-switching] .lamp-dot,
+  .lamp[data-blink] .lamp-dot,
+  .relays li[data-blink] .lamp-dot {
     animation: none;
   }
 }
@@ -756,6 +817,11 @@ summary:focus-visible {
 
 .relays.relays-wide {
   grid-template-columns: 1fr;
+}
+
+.relay-note {
+  font-size: 11px;
+  color: var(--lamp);
 }
 
 .toast {

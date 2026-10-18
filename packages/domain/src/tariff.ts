@@ -1,5 +1,6 @@
 import type { Minor } from './money.ts';
 import { roundToStep } from './money.ts';
+import type { PauseLampMode, UnpaidSpan } from './pause.ts';
 import type { Weekday, ZonedParts } from './time.ts';
 import { isValidTimeZone, parseClock, previousWeekday, zonedParts } from './time.ts';
 
@@ -31,6 +32,12 @@ export interface TariffConfig {
   freeMinutes: number;
   /** Final amount is rounded to a multiple of this many minor units (e.g. 1000 = 10 ₸). */
   roundingMinor: Minor;
+  /** Pauses per game staff may take (default 3, see DEFAULT_PAUSE_LIMITS). */
+  maxPauses?: number;
+  /** Unpaid pause time per game in minutes (default 30); beyond it a pause is billed as play. */
+  maxPauseMinutes?: number;
+  /** Lamp while paused: off (default) or blinking. */
+  pauseLamp?: PauseLampMode;
 }
 
 export interface ChargeSegment {
@@ -45,6 +52,11 @@ export interface ChargeResult {
   billedSeconds: number;
   amount: Minor;
   segments: ChargeSegment[];
+}
+
+export interface ChargeWithPausesResult extends ChargeResult {
+  /** Unpaid pause time within [start, end]. */
+  pausedSeconds: number;
 }
 
 const BASE_LABEL = 'Базовый';
@@ -150,6 +162,32 @@ export function billableSeconds(playedSeconds: number, tariff: TariffConfig): nu
   return Math.max(rounded, tariff.minimumMinutes * 60);
 }
 
+interface Pricing {
+  segments: ChargeSegment[];
+  /** Σ seconds × price per hour */
+  weighted: number;
+}
+
+/** Prices [fromMs, toMs) at the rates in force, splitting at tariff boundaries. */
+function priceSpan(fromMs: number, toMs: number, tariff: TariffConfig, timeZone: string, into: Pricing): void {
+  const windows = compile(tariff.windows);
+  const edges = boundaryMinutes(windows);
+  let t = fromMs;
+  while (t < toMs) {
+    const p = zonedParts(t, timeZone);
+    const w = windowAt(windows, p.weekday, p.minuteOfDay);
+    const label = w?.label ?? BASE_LABEL;
+    const price = w?.pricePerHour ?? tariff.basePricePerHour;
+
+    const to = Math.min(nextBoundary(t, p, edges, timeZone), toMs);
+    const last = into.segments.at(-1);
+    if (last && last.to === t && last.label === label && last.pricePerHour === price) last.to = to;
+    else into.segments.push({ from: t, to, label, pricePerHour: price });
+    into.weighted += ((to - t) / 1000) * price;
+    t = to;
+  }
+}
+
 /**
  * Price of a game from `startMs` to `endMs` (epoch ms) in the club's time zone.
  * Billable time (after rounding and minimum) is priced as if the game continued
@@ -161,32 +199,64 @@ export function calculateCharge(startMs: number, endMs: number, tariff: TariffCo
   const billedSeconds = billableSeconds(playedSeconds, tariff);
   if (billedSeconds === 0) return { playedSeconds, billedSeconds, amount: 0, segments: [] };
 
-  const windows = compile(tariff.windows);
-  const edges = boundaryMinutes(windows);
-  const billedEnd = startMs + billedSeconds * 1000;
-  const segments: ChargeSegment[] = [];
-  let weighted = 0; // Σ seconds × price per hour
+  const pricing: Pricing = { segments: [], weighted: 0 };
+  priceSpan(startMs, startMs + billedSeconds * 1000, tariff, timeZone, pricing);
+  return {
+    playedSeconds,
+    billedSeconds,
+    amount: roundToStep(pricing.weighted / 3600, tariff.roundingMinor),
+    segments: pricing.segments,
+  };
+}
 
-  let t = startMs;
-  while (t < billedEnd) {
-    const p = zonedParts(t, timeZone);
-    const w = windowAt(windows, p.weekday, p.minuteOfDay);
-    const label = w?.label ?? BASE_LABEL;
-    const price = w?.pricePerHour ?? tariff.basePricePerHour;
-
-    const to = Math.min(nextBoundary(t, p, edges, timeZone), billedEnd);
-    const last = segments.at(-1);
-    if (last && last.label === label && last.pricePerHour === price) last.to = to;
-    else segments.push({ from: t, to, label, pricePerHour: price });
-    weighted += ((to - t) / 1000) * price;
-    t = to;
+/**
+ * Price of a game with pauses. Play is the time between pauses; each stretch is
+ * priced at the rates in force then (a tariff boundary inside a pause changes
+ * the rate for what follows). Free minutes, minimum and step apply to the total
+ * played time, not to each stretch; rounded-up time is priced as if the game went
+ * on after `endMs`. `pauses` must lie within [startMs, endMs] and not overlap
+ * (see `unpaidSpans` for turning raw pauses into them).
+ */
+export function calculateChargeWithPauses(
+  startMs: number,
+  endMs: number,
+  pauses: readonly UnpaidSpan[],
+  tariff: TariffConfig,
+  timeZone: string,
+): ChargeWithPausesResult {
+  if (endMs < startMs) throw new Error('Game end is before its start');
+  const sorted = [...pauses].sort((a, b) => a.from - b.from);
+  const play: UnpaidSpan[] = [];
+  let cursor = startMs;
+  let pausedMs = 0;
+  for (const p of sorted) {
+    if (p.to < p.from) throw new Error('Pause end is before its start');
+    if (p.from < cursor) throw new Error('Pauses overlap or start before the game');
+    if (p.to > endMs) throw new Error('Pause ends after the game');
+    if (p.from > cursor) play.push({ from: cursor, to: p.from });
+    pausedMs += p.to - p.from;
+    cursor = p.to;
   }
+  if (endMs > cursor) play.push({ from: cursor, to: endMs });
+
+  const playedMs = play.reduce((sum, s) => sum + (s.to - s.from), 0);
+  const playedSeconds = Math.floor(playedMs / 1000);
+  const pausedSeconds = Math.floor(pausedMs / 1000);
+  const billedSeconds = billableSeconds(playedSeconds, tariff);
+  if (billedSeconds === 0) return { playedSeconds, billedSeconds, amount: 0, segments: [], pausedSeconds };
+
+  const pricing: Pricing = { segments: [], weighted: 0 };
+  for (const s of play) priceSpan(s.from, s.to, tariff, timeZone, pricing);
+  // Rounded-up minutes: the game "continues" after its end at the rate in force then.
+  const extraMs = billedSeconds * 1000 - playedMs;
+  if (extraMs > 0) priceSpan(endMs, endMs + extraMs, tariff, timeZone, pricing);
 
   return {
     playedSeconds,
     billedSeconds,
-    amount: roundToStep(weighted / 3600, tariff.roundingMinor),
-    segments,
+    amount: roundToStep(pricing.weighted / 3600, tariff.roundingMinor),
+    segments: pricing.segments,
+    pausedSeconds,
   };
 }
 
@@ -199,6 +269,13 @@ export function validateTariff(tariff: TariffConfig, timeZone?: string): string[
   if (!isNonNegInt(tariff.minimumMinutes)) errors.push('minimumMinutes must be a non-negative integer');
   if (!isNonNegInt(tariff.freeMinutes)) errors.push('freeMinutes must be a non-negative integer');
   if (!Number.isInteger(tariff.roundingMinor) || tariff.roundingMinor < 1) errors.push('roundingMinor must be >= 1');
+  if (tariff.maxPauses !== undefined && !isNonNegInt(tariff.maxPauses)) errors.push('maxPauses must be a non-negative integer');
+  if (tariff.maxPauseMinutes !== undefined && !isNonNegInt(tariff.maxPauseMinutes)) {
+    errors.push('maxPauseMinutes must be a non-negative integer');
+  }
+  if (tariff.pauseLamp !== undefined && tariff.pauseLamp !== 'off' && tariff.pauseLamp !== 'blink') {
+    errors.push("pauseLamp must be 'off' or 'blink'");
+  }
   if (timeZone !== undefined && !isValidTimeZone(timeZone)) errors.push(`unknown time zone ${timeZone}`);
   tariff.windows.forEach((w, i) => {
     if (w.days.length === 0 || w.days.some((d) => !Number.isInteger(d) || d < 1 || d > 7)) {

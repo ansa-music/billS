@@ -40,6 +40,8 @@ export interface HubConfig {
   ups: string | undefined;
   upsPollMs: number;
   upsCriticalPercent: number;
+  /** Built hall screen (apps/web/dist) served on `/`; skipped when the folder is missing. */
+  webDistPath: string;
 }
 
 function int(value: string | undefined, fallback: number, name: string): number {
@@ -88,5 +90,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
     ups: env.HUB_UPS || undefined,
     upsPollMs: int(env.HUB_UPS_POLL_MS, 5000, 'HUB_UPS_POLL_MS'),
     upsCriticalPercent: int(env.HUB_UPS_CRITICAL_PERCENT, 20, 'HUB_UPS_CRITICAL_PERCENT'),
+    webDistPath: env.HUB_WEB_DIST ?? fileURLToPath(new URL('../../web/dist', import.meta.url)),
   };
 }

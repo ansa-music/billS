@@ -4,7 +4,7 @@ import { afterCommit, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import { HubEvents } from './events.ts';
 import { purgeIdempotencyKeys } from './idempotency.ts';
-import { record } from './journal.ts';
+import { record, SYSTEM } from './journal.ts';
 import type { LampOptions } from './lamps/controller.ts';
 import { DEFAULT_BLINK_TIMES, LampController } from './lamps/controller.ts';
 import type { LampDriver } from './lamps/driver.ts';
@@ -38,19 +38,11 @@ export interface HubDeps {
   /** The club's UPS (HUB_UPS); null — no power monitoring. */
   ups?: UpsSource | null;
   powerOptions?: Partial<PowerOptions>;
-  /** What to do with running games on power loss; defaults to "alert only" until pauses exist. */
+  /** What to do with running games on power loss; default: pause/resume them through SessionService. */
   powerActions?: PowerActions;
 }
 
-/**
- * Game pauses (stage 1, in another branch) are not here yet: on power loss
- * the HUB alerts and audits, but cannot pause. Wire SessionService.pause/resume
- * here when they land; PowerMonitor and its tests already expect this shape.
- */
-export const ALERT_ONLY_POWER_ACTIONS: PowerActions = {
-  pauseAll: () => [],
-  resumeAll: () => [],
-};
+
 
 /** The club server: wires storage, lamps and game rules together. */
 export class Hub {
@@ -91,15 +83,20 @@ export class Hub {
       quiet,
       ...(deps.monitorOptions ? { options: deps.monitorOptions } : {}),
     });
+    this.sessions = new SessionService({ db: deps.db, clock: deps.clock, lamps: this.lamps, events: this.events });
+    // On power loss the running games are paused (reason `power`, never billed) and resumed on mains.
+    const powerActions: PowerActions = deps.powerActions ?? {
+      pauseAll: (at) => this.sessions.pauseAllForPower(at, SYSTEM),
+      resumeAll: (at) => this.sessions.resumeAllAfterPower(at, SYSTEM),
+    };
     this.power = new PowerMonitor({
       db: deps.db,
       source: deps.ups ?? null,
       clock: deps.clock,
       events: this.events,
-      actions: deps.powerActions ?? ALERT_ONLY_POWER_ACTIONS,
+      actions: powerActions,
       ...(deps.powerOptions ? { options: deps.powerOptions } : {}),
     });
-    this.sessions = new SessionService({ db: deps.db, clock: deps.clock, lamps: this.lamps, events: this.events });
     this.checks = new CheckService({ db: deps.db, clock: deps.clock, events: this.events, sessions: this.sessions });
     this.shifts = new ShiftService({ db: deps.db, clock: deps.clock, events: this.events });
   }

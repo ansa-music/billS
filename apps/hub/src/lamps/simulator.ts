@@ -1,4 +1,4 @@
-import type { LampDriver, LampState } from './driver.ts';
+import type { LampDriver, LampSetOptions, LampState } from './driver.ts';
 import { blinkByToggling } from './driver.ts';
 
 /**
@@ -14,13 +14,15 @@ export interface SimulatorStatus {
   faults: SimulatorFault[];
   /** Relay state per channel. */
   lamps: Record<string, boolean>;
+  /** Channels asked to keep blinking (paused game); always a subset of lamps that are on. */
+  blink: Record<string, boolean>;
   /**
    * Current-sensor overrides per channel: `true` — someone switched the light on
    * by hand (bypassing the relay), `false` — the bulb is dead. Absent: the
    * sensor follows the relay.
    */
   lights: Record<string, boolean>;
-  /** Blink commands accepted, per channel. */
+  /** One-off blink commands accepted, per channel. */
   blinks: Record<string, number>;
 }
 
@@ -29,8 +31,9 @@ export class SimulatorLampDriver implements LampDriver {
   latencyMs: number;
   /** While true every command fails, like an unplugged controller. */
   offline = false;
-  readonly calls: Array<{ channel: string; on: boolean }> = [];
+  readonly calls: Array<{ channel: string; on: boolean; blink: boolean }> = [];
   readonly #lamps = new Map<string, boolean>();
+  readonly #blink = new Map<string, boolean>();
   readonly #lights = new Map<string, boolean>();
   readonly #blinks = new Map<string, number>();
   #faults: SimulatorFault[] = [];
@@ -52,6 +55,10 @@ export class SimulatorLampDriver implements LampDriver {
     return this.#lamps.get(channel) ?? false;
   }
 
+  isBlinking(channel: string): boolean {
+    return this.#blink.get(channel) ?? false;
+  }
+
   /**
    * Forces what the current sensor of a channel reports, regardless of the
    * relay: `true` = light on by hand, `false` = bulb dead, `null` = follow the relay.
@@ -71,13 +78,15 @@ export class SimulatorLampDriver implements LampDriver {
       offline: this.offline,
       faults: [...this.#faults],
       lamps: Object.fromEntries(this.#lamps),
+      blink: Object.fromEntries(this.#blink),
       lights: Object.fromEntries(this.#lights),
       blinks: Object.fromEntries(this.#blinks),
     };
   }
 
-  setLamp(channel: string, on: boolean, signal: AbortSignal): Promise<void> {
-    this.calls.push({ channel, on });
+  setLamp(channel: string, on: boolean, signal: AbortSignal, options: LampSetOptions = {}): Promise<void> {
+    const blink = on && (options.blink ?? false);
+    this.calls.push({ channel, on, blink });
     const fault: SimulatorFault | undefined = this.offline ? 'fail' : this.#faults.shift();
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -86,6 +95,7 @@ export class SimulatorLampDriver implements LampDriver {
           return;
         }
         this.#lamps.set(channel, on);
+        this.#blink.set(channel, blink);
         if (fault !== 'drop-ack') resolve();
       }, this.latencyMs);
       signal.addEventListener(

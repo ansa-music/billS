@@ -11,6 +11,7 @@
   },
   "scripts": {
     "test": "npm run test -w @bills/domain -w @bills/hub",
+    "build": "npm run build -w @bills/web",
     "typecheck": "tsc -p packages/domain && tsc -p apps/hub && tsc -p apps/web",
     "dev:hub": "npm run dev -w @bills/hub",
     "dev:web": "npm run dev -w @bills/web",

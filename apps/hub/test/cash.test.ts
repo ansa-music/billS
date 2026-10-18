@@ -500,6 +500,46 @@ test('a game is voided only with a reason and a manager, even while it runs', as
   assert.ok(approvals.length >= 2, 'both approvals are in the audit');
 });
 
+test('a paused game can be voided: the pause closes with the game, the table is free, the lamp is off', async (t) => {
+  const h = harness(t);
+  const hub = await h.start();
+  const shift = await openShift(hub, 1000_00);
+
+  const opened = await post(hub, `/api/tables/${tableId(hub, 'Стол 1')}/open`);
+  assert.equal(opened.status, 201);
+  const id = opened.body.id as string;
+  await waitFor(() => sessionStatus(hub, id) === 'ACTIVE');
+  h.clock.advance(30 * MINUTE);
+  const paused = await send<SessionView>(hub, `/api/sessions/${id}/pause`);
+  assert.equal(paused.status, 200);
+  assert.equal(paused.body.status, 'PAUSED');
+  await waitFor(() => tableState(hub, 'Стол 1').lamp.reported === 'OFF');
+  h.clock.advance(10 * MINUTE);
+
+  const voided = await send<SessionView>(hub, `/api/sessions/${id}/cancel`, {
+    reason: 'Гости ушли во время паузы',
+    approvedBy: MANAGER,
+  });
+  assert.equal(voided.status, 200);
+  assert.equal(voided.body.status, 'CANCELLED');
+  assert.equal(voided.body.cancelApprovedBy, MANAGER);
+  assert.equal(voided.body.pausedAt, null);
+  assert.equal(voided.body.pauses.length, 1);
+  assert.equal(voided.body.pauses[0]?.to, paused.body.pausedAt! + 10 * MINUTE, 'the open pause ends with the game');
+  assert.equal(voided.body.playedSeconds, 30 * 60);
+  assert.equal(voided.body.pausedSeconds, 10 * 60);
+
+  const openPauses = all<{ id: string }>(hub.db, 'SELECT id FROM session_pauses WHERE session_id = ? AND resumed_at IS NULL', id);
+  assert.equal(openPauses.length, 0, 'no pause row stays open');
+  assert.equal(sessionStatus(hub, id), 'CANCELLED');
+  assert.equal(tableState(hub, 'Стол 1').session, null);
+  assert.ok(!hub.driver.isOn('relay-1'));
+  assert.ok(!(await state(hub)).unpaid.some((g) => g.id === id));
+  // The table can be opened again right away.
+  assert.equal((await post(hub, `/api/tables/${tableId(hub, 'Стол 1')}/open`)).status, 201);
+  assert.equal((await report(hub, shift.id)).cancelledGames, 1);
+});
+
 test('a game with money on its check cannot be voided; voided games do not block the shift', async (t) => {
   const h = harness(t);
   const hub = await h.start();
