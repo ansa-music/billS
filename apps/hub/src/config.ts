@@ -42,6 +42,12 @@ export interface HubConfig {
   ups: string | undefined;
   upsPollMs: number;
   upsCriticalPercent: number;
+  /** Cloud base URL (stage 6); null = the club runs standalone, the outbox just accumulates. */
+  cloudUrl: string | null;
+  cloudApiKey: string;
+  hubId: string;
+  /** How often the outbox is pushed to the cloud (also the heartbeat period). */
+  cloudSyncIntervalMs: number;
 }
 
 function int(value: string | undefined, fallback: number, name: string): number {
@@ -63,6 +69,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
   }
   const coilBase = int(env.HUB_MODBUS_COIL_BASE, 1, 'HUB_MODBUS_COIL_BASE');
   if (coilBase !== 0 && coilBase !== 1) throw new Error('HUB_MODBUS_COIL_BASE must be 0 or 1');
+  const cloudUrl = env.CLOUD_URL?.trim();
   return {
     host: env.HUB_HOST ?? '127.0.0.1',
     port: int(env.HUB_PORT, 4310, 'HUB_PORT'),
@@ -91,5 +98,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
     ups: env.HUB_UPS || undefined,
     upsPollMs: int(env.HUB_UPS_POLL_MS, 5000, 'HUB_UPS_POLL_MS'),
     upsCriticalPercent: int(env.HUB_UPS_CRITICAL_PERCENT, 20, 'HUB_UPS_CRITICAL_PERCENT'),
+    cloudUrl: cloudUrl ? cloudUrl.replace(/\/+$/, '') : null,
+    cloudApiKey: env.CLOUD_API_KEY ?? '',
+    hubId: env.HUB_ID ?? '',
+    cloudSyncIntervalMs: int(env.CLOUD_SYNC_INTERVAL_MS, 10_000, 'CLOUD_SYNC_INTERVAL_MS'),
   };
 }

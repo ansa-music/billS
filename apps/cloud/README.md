@@ -1,0 +1,110 @@
+# @bills/cloud — облако billS
+
+Сервер сети клубов: принимает журнал событий от HUB каждого клуба, хранит настройки
+(тарифы, столы) по версиям и отдаёт владельцу сводку по всем клубам компании.
+Fastify 5, Node 24, TypeScript без сборки (`node src/main.ts`).
+
+## Архитектура
+
+```
+HUB клуба A ──POST /sync/events──▶ ┌─────────────┐ ◀── cookie ── кабинет владельца
+HUB клуба B ──POST /sync/snapshot─▶ │   облако    │      (apps/cloud-web, /api/owner/*)
+            ◀─GET /sync/settings── └─────────────┘
+                                     │
+                              SQLite | PostgreSQL
+```
+
+- **Вверх (HUB → облако).** HUB шлёт пачки строк своего `outbox` (`SyncEventsRequest`).
+  Каждое событие сохраняется в сырой журнал `events` с ключом `(hub_id, outbox_id)` —
+  повторная доставка той же пачки безвредна: дубликат пропускается и проекция для него
+  не применяется повторно. Вставка события и проекция — одна транзакция.
+- **Проекция** (`src/projection.ts`) превращает события в читаемые таблицы:
+  `sessions` (игры), `alerts` (тревоги), `daily_stats` (выручка/игры/время/тревоги
+  по локальным дням клуба). Неизвестные топики (например, будущий `check.paid`)
+  остаются только в сыром журнале. Пропуски выдерживаются: `session.stopped`
+  без `session.started` всё равно создаёт строку игры.
+- **Настройки** (`src/sync.ts`, `src/settings.ts`). У клуба одна запись `club_settings`
+  с версией. HUB присылает снимок своих настроек (`POST /sync/snapshot`); он принимается,
+  если HUB на текущей версии облака, иначе 409 — HUB сначала должен забрать
+  `GET /sync/settings?since=<его версия>`. Правка тарифов владельцем даёт версию +1,
+  и ответ на следующую пачку событий (`settingsVersion`) говорит HUB, что пора забрать.
+- **Отчёты** (`src/reports.ts`). Сегодня/неделя/месяц считаются из `daily_stats` по
+  поясу каждого клуба; загрузка по часам и по столам режется на чтении из `sessions`
+  по локальным часам (идущие игры — до «сейчас»).
+- **Слой базы** (`src/db/`). Один интерфейс `SqlDriver` (`all`, `run`, `transaction`,
+  `close`), SQL в коде с плейсхолдерами `?`. `sqlite.ts` — `node:sqlite` с async-мьютексом
+  (одно соединение, транзакции по очереди). `postgres.ts` — поверх `pg.Pool`,
+  переводит `?` → `$n` вне строковых литералов, транзакцию выполняет на выделенном клиенте.
+  Миграции `src/migrations/NNN_name.sql` — портируемый SQL для обоих движков
+  (TEXT-идентификаторы, BIGINT-время, INTEGER 0/1, JSON в TEXT, без AUTOINCREMENT/SERIAL/PRAGMA).
+
+## Запуск
+
+```sh
+npm install
+node --env-file-if-exists=.env apps/cloud/src/main.ts    # или: npm run dev -w @bills/cloud
+```
+
+Переменные окружения (все необязательны, см. `.env.example` в корне):
+
+| Переменная | По умолчанию | Смысл |
+|---|---|---|
+| `CLOUD_HOST` / `CLOUD_PORT` | `127.0.0.1` / `4320` | адрес сервера |
+| `CLOUD_DB_PATH` | `apps/cloud/data/cloud.db` | файл SQLite |
+| `CLOUD_DATABASE_URL` | — | строка подключения PostgreSQL; если задана, SQLite не используется |
+| `CLOUD_DEMO_SEED` | `1` для SQLite, `0` для PostgreSQL | демо-сид на пустой базе |
+| `CLOUD_SECURE_COOKIES` | `0` | ставить флаг `Secure` на cookie владельца (только за HTTPS) |
+
+Демо-сид создаёт компанию «Демо сеть», владельца `owner@demo.kz` / `demo1234`, клубы
+«Клуб «Демо»» и «Клуб «Север»» (Asia/Almaty) и по одному HUB с фиксированными ключами —
+`hub-demo-1` / `demo-hub-key-1` и `hub-demo-2` / `demo-hub-key-2`. Ключи печатаются в лог при
+создании; их же можно сразу вписать в `.env` HUB (`CLOUD_URL`, `CLOUD_API_KEY`, `HUB_ID`).
+
+Проверка: `npm test -w @bills/cloud` (node --test, SQLite в памяти) и `npx tsc -p apps/cloud`.
+
+## Режимы базы
+
+- **SQLite** (разработка, один клуб-два клуба): файл `CLOUD_DB_PATH`, WAL, внешние ключи
+  включены. Так работает всё, что покрыто тестами.
+- **PostgreSQL** (продакшен): `CLOUD_DATABASE_URL=postgres://user:pass@host:5432/bills`.
+  Драйвер покрыт тестами на fake-клиенте (перевод плейсхолдеров, BEGIN/COMMIT/ROLLBACK,
+  миграции без запрещённых конструкций). **На живой базе PostgreSQL режим не проверялся** —
+  перед вводом в эксплуатацию прогоните миграции и тестовую синхронизацию с HUB на стенде.
+  `BIGINT`/`NUMERIC` приходят из `pg` строками; `main.ts` настраивает парсер типов в `Number`.
+
+## HTTP
+
+Ошибки — `{ error: { code, message } }`; сообщения на русском для людей.
+
+HUB (`Authorization: Bearer <ключ>`; `hubId` в теле должен совпадать с HUB ключа, иначе 403 `HUB_MISMATCH`; неизвестный ключ — 401):
+
+| Метод и путь | Тело → ответ |
+|---|---|
+| `POST /sync/events` | `SyncEventsRequest` → `SyncEventsResponse { lastAcceptedId, inserted, settingsVersion }` |
+| `POST /sync/snapshot` | `SyncSnapshotRequest` → `SyncSnapshotResponse`; 409 `{ accepted:false, settingsVersion }`, если HUB отстал |
+| `GET /sync/settings?since=N` | `SyncSettingsResponse` (`changed:false`, если `since >= version`) |
+
+Владелец (cookie `bills_owner`: HttpOnly, SameSite=Lax, Path=/, 30 дней; без cookie — 401 `UNAUTHORIZED`; чужой клуб — 404 `CLUB_NOT_FOUND`):
+
+| Метод и путь | Ответ |
+|---|---|
+| `POST /api/auth/login { email, password }` | `OwnerView` (неверно — 401 `INVALID_CREDENTIALS`) |
+| `POST /api/auth/logout` | `{ ok: true }` |
+| `GET /api/auth/me` | `OwnerView` |
+| `GET /api/owner/overview` | `OwnerOverview` |
+| `GET /api/owner/clubs/:id` | `ClubDetails` |
+| `GET /api/owner/clubs/:id/sessions?day=YYYY-MM-DD` | `CloudSessionView[]` (по умолчанию — сегодня клуба) |
+| `PUT /api/owner/clubs/:id/tariffs` | `UpdateTariffsRequest` → `UpdateTariffsResponse`; 400 `TARIFF_INVALID` |
+| `GET /api/health` | `{ ok: true, now }` |
+
+Типы — в `packages/domain/src/cloud.ts`.
+
+## Персональные данные и хостинг
+
+В облаке хранятся персональные данные: почта и имена владельцев, имена сотрудников
+(в журнале событий — кто открыл и остановил игру, в настройках — список персонала).
+Закон Республики Казахстан «О персональных данных и их защите» требует хранить персональные
+данные граждан РК на серверах, физически расположенных на территории Казахстана. Поэтому
+облако billS и его базу данных нужно размещать у хостинг-провайдера с дата-центром в РК,
+а не на зарубежных площадках; резервные копии — тоже внутри страны. Пароли хранятся только
+в виде scrypt-хэшей, ключи HUB — в виде sha256-хэшей.

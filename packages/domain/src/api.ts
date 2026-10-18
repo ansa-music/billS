@@ -1,4 +1,5 @@
 import type { DiscountKind, PaymentMethod } from './billing.ts';
+import type { SyncStatus } from './cloud.ts';
 import type { Minor } from './money.ts';
 import type { PauseSpan } from './pause.ts';
 import type { CashMovementKind, ShiftTotals } from './shift.ts';
@@ -106,6 +107,8 @@ export interface HubState {
   alerts: AlertView[];
   manualMode: ManualModeView;
   power: PowerView;
+  /** Cloud sync status (stage 6); enabled=false when the club runs without a cloud. */
+  sync: SyncStatus;
 }
 
 export interface TransferRequest {

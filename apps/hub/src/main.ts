@@ -11,6 +11,9 @@ import { managerMatcher } from './settings.ts';
 import { versionInfo, versionString } from './version.ts';
 
 const config = loadConfig();
+if (config.cloudUrl && (!config.cloudApiKey || !config.hubId)) {
+  throw new Error('CLOUD_URL задан, но CLOUD_API_KEY или HUB_ID пустые');
+}
 const db = openDb(config.dbPath);
 const seeded = seedDemo(db, Date.now(), config.demoTimezone);
 
@@ -26,6 +29,18 @@ const hub = new Hub({
   isManager: managerMatcher(config.managerActors),
   ups,
   powerOptions: { intervalMs: config.upsPollMs, criticalPercent: config.upsCriticalPercent },
+  ...(config.cloudUrl
+    ? {
+        sync: {
+          url: config.cloudUrl,
+          apiKey: config.cloudApiKey,
+          hubId: config.hubId,
+          intervalMs: config.cloudSyncIntervalMs,
+          // `app` is created below; the worker only logs after hub.start().
+          logger: { info: (m: string) => app.log.info(m), warn: (m: string) => app.log.warn(m) },
+        },
+      }
+    : {}),
 });
 const app = buildApp(hub, {
   simulator: lamps.simulator,
@@ -50,6 +65,8 @@ app.log.info(
     ups: ups?.label ?? 'off',
     webDist: config.webDistPath,
     webDistServed,
+    cloud: config.cloudUrl ?? 'off',
+    hubId: config.hubId || undefined,
   },
   'HUB started',
 );

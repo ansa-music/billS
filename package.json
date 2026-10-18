@@ -10,12 +10,15 @@
     "node": ">=24"
   },
   "scripts": {
-    "test": "npm run test -w @bills/domain -w @bills/hub",
-    "build": "npm run build -w @bills/web",
-    "typecheck": "tsc -p packages/domain && tsc -p apps/hub && tsc -p apps/web",
+    "test": "npm run test -w @bills/domain -w @bills/hub -w @bills/cloud",
+    "build": "npm run build -w @bills/web -w @bills/cloud-web",
+    "typecheck": "tsc -p packages/domain && tsc -p apps/hub && tsc -p apps/web && tsc -p apps/cloud && tsc -p apps/cloud-web",
     "dev:hub": "npm run dev -w @bills/hub",
     "dev:web": "npm run dev -w @bills/web",
-    "start:hub": "npm run start -w @bills/hub"
+    "dev:cloud": "npm run dev -w @bills/cloud",
+    "dev:cloud-web": "npm run dev -w @bills/cloud-web",
+    "start:hub": "npm run start -w @bills/hub",
+    "start:cloud": "npm run start -w @bills/cloud"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

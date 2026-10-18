@@ -7,3 +7,4 @@ export * from './pause.ts';
 export * from './session.ts';
 export * from './fiscal.ts';
 export type * from './api.ts';
+export type * from './cloud.ts';

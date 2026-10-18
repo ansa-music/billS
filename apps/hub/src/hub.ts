@@ -18,6 +18,8 @@ import { SessionService } from './sessions.ts';
 import { ShiftService } from './shifts.ts';
 import type { ManualMode } from './settings.ts';
 import { getManualMode, isManualMode, managerMatcher, setManualMode } from './settings.ts';
+import type { SyncOptions } from './sync.ts';
+import { SyncWorker, syncStatus } from './sync.ts';
 import type { HubState } from './views.ts';
 import { buildState } from './views.ts';
 
@@ -44,6 +46,8 @@ export interface HubDeps {
    * Tests may inject a fake.
    */
   powerActions?: PowerActions;
+  /** Cloud sync (stage 6); omitted = standalone club, the outbox just accumulates. */
+  sync?: SyncOptions;
 }
 
 /** The club server: wires storage, lamps and game rules together. */
@@ -57,6 +61,7 @@ export class Hub {
   readonly sessions: SessionService;
   readonly checks: CheckService;
   readonly shifts: ShiftService;
+  readonly sync: SyncWorker | undefined;
   readonly #reconcileIntervalMs: number;
   readonly #isManager: (actor: string) => boolean;
   #reconcileTimer: NodeJS.Timeout | undefined;
@@ -101,6 +106,7 @@ export class Hub {
     });
     this.checks = new CheckService({ db: deps.db, clock: deps.clock, events: this.events, sessions: this.sessions });
     this.shifts = new ShiftService({ db: deps.db, clock: deps.clock, events: this.events });
+    this.sync = deps.sync ? new SyncWorker({ db: deps.db, clock: deps.clock, events: this.events, ...deps.sync }) : undefined;
   }
 
   /** Restores lamps and pending commands after a (re)start. */
@@ -111,10 +117,11 @@ export class Hub {
     this.#reconcileTimer.unref();
     this.monitor.start();
     this.power.start();
+    this.sync?.start();
   }
 
   state(): HubState {
-    return buildState(this.db, this.clock.now(), this.power.view());
+    return buildState(this.db, this.clock.now(), this.power.view(), this.sync ? this.sync.status() : syncStatus(this.db, false));
   }
 
   resolveAlert(alertId: string, actor: string): { id: string } {
@@ -192,6 +199,7 @@ export class Hub {
     clearInterval(this.#reconcileTimer);
     this.power.close();
     this.monitor.close();
+    this.sync?.stop();
     this.lamps.close();
     this.events.removeAllListeners();
   }
