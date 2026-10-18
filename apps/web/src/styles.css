@@ -243,6 +243,13 @@ summary:focus-visible {
   }
 }
 
+.hall {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-width: 0;
+}
+
 .tables {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -268,8 +275,12 @@ summary:focus-visible {
   transition: border-color 0.3s;
 }
 
-.card[data-state='active'] {
+.card[data-state='playing'] {
   border-color: color-mix(in oklab, var(--lamp) 40%, var(--border));
+}
+
+.card[data-problem] {
+  border-color: color-mix(in oklab, var(--danger) 70%, var(--border));
 }
 
 .felt {
@@ -297,7 +308,7 @@ summary:focus-visible {
   background-color: color-mix(in oklab, var(--felt-dark) 55%, var(--felt));
 }
 
-.card[data-state='active'] .felt {
+.card[data-state='playing'] .felt {
   background:
     var(--pocket) 0 0 / 22px 22px no-repeat,
     var(--pocket) 100% 0 / 22px 22px no-repeat,
@@ -326,6 +337,49 @@ summary:focus-visible {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   opacity: 0.8;
+}
+
+.felt-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Phase chip: readable on the felt in both themes. */
+.phase {
+  font-size: 12px;
+  font-weight: 650;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.35);
+  color: #e9f3ee;
+  white-space: nowrap;
+}
+
+.phase[data-phase='free'] {
+  background: #e9f3ee;
+  color: #0f3d26;
+}
+
+.phase[data-phase='opening'] {
+  background: rgb(0 0 0 / 0.45);
+  color: var(--lamp);
+}
+
+.phase[data-phase='playing'] {
+  background: rgb(0 0 0 / 0.5);
+  color: #ffe3a1;
+}
+
+.card-alert {
+  margin: 12px 18px 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .lamp {
@@ -372,9 +426,13 @@ summary:focus-visible {
   gap: 6px;
 }
 
-.card-body .row {
+.card-body .actions {
   margin-top: auto;
   padding-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .status {
@@ -385,8 +443,64 @@ summary:focus-visible {
   gap: 8px;
 }
 
-.card[data-state='free'] .status {
+.card-meta {
+  font-size: 13px;
   color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.price-next {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--warn);
+}
+
+.tip {
+  font-size: 13px;
+  color: var(--accent);
+}
+
+.tariff-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.chip {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chip[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 18%, var(--surface-2));
+}
+
+.chip-note {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.link {
+  background: none;
+  border: none;
+  padding: 8px 4px;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .timer {
@@ -423,11 +537,6 @@ summary:focus-visible {
 
 .row.wrap {
   flex-wrap: wrap;
-}
-
-.row select {
-  flex: 1;
-  min-width: 0;
 }
 
 .spinner {
@@ -504,6 +613,10 @@ summary:focus-visible {
   min-height: 36px;
   padding: 0 12px;
   font-size: 14px;
+  flex: none;
+}
+
+.btn-narrow {
   flex: none;
 }
 
@@ -662,5 +775,25 @@ summary:focus-visible {
 
   .actor input {
     width: 110px;
+  }
+}
+
+/* Tablets and phones: fingers, not a mouse. */
+@media (pointer: coarse) {
+  .btn {
+    min-height: 52px;
+    font-size: 17px;
+  }
+
+  .btn-small {
+    min-height: 44px;
+  }
+
+  .chip {
+    min-height: 48px;
+  }
+
+  .link {
+    padding: 12px 6px;
   }
 }

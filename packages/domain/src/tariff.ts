@@ -1,6 +1,6 @@
 import type { Minor } from './money.ts';
 import { roundToStep } from './money.ts';
-import type { Weekday } from './time.ts';
+import type { Weekday, ZonedParts } from './time.ts';
 import { isValidTimeZone, parseClock, previousWeekday, zonedParts } from './time.ts';
 
 /**
@@ -88,6 +88,48 @@ function boundaryMinutes(windows: CompiledWindow[]): number[] {
   return [...edges];
 }
 
+/** The next instant after `t` where a tariff window may start or end (local midnight included). */
+function nextBoundary(t: number, p: ZonedParts, edges: number[], timeZone: string): number {
+  let ahead = 1440;
+  for (const e of edges) {
+    const d = (e - p.minuteOfDay + 1440) % 1440;
+    if (d > 0 && d < ahead) ahead = d;
+  }
+  let next = t + ahead * 60_000 - p.second * 1000 - p.millisecond;
+  // DST: local minutes and real minutes can diverge across a clock change.
+  const target = (p.minuteOfDay + ahead) % 1440;
+  let diff = target - zonedParts(next, timeZone).minuteOfDay;
+  if (diff >= 720) diff -= 1440;
+  if (diff < -720) diff += 1440;
+  if (diff !== 0 && next + diff * 60_000 > t) next += diff * 60_000;
+  return next;
+}
+
+/**
+ * When the rate changes next, if within `withinMs` from `fromMs`.
+ * Lets staff warn guests: "from 18:00 the evening rate applies".
+ */
+export function nextPriceChange(
+  fromMs: number,
+  tariff: TariffConfig,
+  timeZone: string,
+  withinMs: number,
+): { at: number; label: string; pricePerHour: Minor } | null {
+  const windows = compile(tariff.windows);
+  const edges = boundaryMinutes(windows);
+  const current = priceAt(fromMs, tariff, timeZone);
+  const limit = fromMs + withinMs;
+  let t = fromMs;
+  while (t < limit) {
+    const next = nextBoundary(t, zonedParts(t, timeZone), edges, timeZone);
+    if (next > limit) return null;
+    const p = priceAt(next, tariff, timeZone);
+    if (p.pricePerHour !== current.pricePerHour || p.label !== current.label) return { at: next, ...p };
+    t = next;
+  }
+  return null;
+}
+
 /** The rate in force at an instant: shown to staff next to a running game. */
 export function priceAt(
   epochMs: number,
@@ -132,20 +174,7 @@ export function calculateCharge(startMs: number, endMs: number, tariff: TariffCo
     const label = w?.label ?? BASE_LABEL;
     const price = w?.pricePerHour ?? tariff.basePricePerHour;
 
-    let ahead = 1440;
-    for (const e of edges) {
-      const d = (e - p.minuteOfDay + 1440) % 1440;
-      if (d > 0 && d < ahead) ahead = d;
-    }
-    let next = t + ahead * 60_000 - p.second * 1000 - p.millisecond;
-    // DST: local minutes and real minutes can diverge across a clock change.
-    const target = (p.minuteOfDay + ahead) % 1440;
-    let diff = target - zonedParts(next, timeZone).minuteOfDay;
-    if (diff >= 720) diff -= 1440;
-    if (diff < -720) diff += 1440;
-    if (diff !== 0 && next + diff * 60_000 > t) next += diff * 60_000;
-
-    const to = Math.min(next, billedEnd);
+    const to = Math.min(nextBoundary(t, p, edges, timeZone), billedEnd);
     const last = segments.at(-1);
     if (last && last.label === label && last.pricePerHour === price) last.to = to;
     else segments.push({ from: t, to, label, pricePerHour: price });

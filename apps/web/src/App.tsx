@@ -3,6 +3,10 @@ import type { HubState } from '@bills/domain';
 import { command, fetchState } from './api.ts';
 import { CardBoundary } from './CardBoundary.tsx';
 import { formatClock } from './format.ts';
+import { alertsByTable, matchesFilter } from './hall.ts';
+import { HallToolbar, useHallFilter } from './HallToolbar.tsx';
+import { useWakeLock } from './kiosk.ts';
+import { OfflineBanner } from './OfflineBanner.tsx';
 import { AlertsBar, SimulatorPanel, UnpaidPanel } from './Panels.tsx';
 import { TableCard } from './TableCard.tsx';
 
@@ -76,6 +80,8 @@ export function App() {
   const [actor, setActor] = useState(readActor);
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
+  const [filter, setFilter] = useHallFilter();
+  useWakeLock();
 
   useEffect(() => {
     try {
@@ -119,7 +125,8 @@ export function App() {
   }
 
   const serverNow = now + offset;
-  const playing = state.tables.filter((t) => t.session?.status === 'ACTIVE').length;
+  const tableAlerts = alertsByTable(state.alerts);
+  const shown = state.tables.filter((t) => matchesFilter(t, filter, tableAlerts.get(t.id)));
 
   return (
     <div className="app">
@@ -130,9 +137,7 @@ export function App() {
           </span>
           <div>
             <h1>{state.club.name}</h1>
-            <p className="muted">
-              Играют {playing} из {state.tables.length}
-            </p>
+            <p className="muted">Экран зала</p>
           </div>
         </div>
         <div className="topbar-right">
@@ -147,6 +152,8 @@ export function App() {
         </div>
       </header>
 
+      <OfflineBanner online={online} />
+
       <AlertsBar
         alerts={state.alerts}
         timezone={state.club.timezone}
@@ -155,23 +162,29 @@ export function App() {
       />
 
       <div className="layout">
-        <main className="tables" aria-label="Столы">
-          {state.tables.map((table) => (
-            <CardBoundary key={table.id} name={table.name} resetKey={table}>
-              <TableCard
-                table={table}
-                tariffs={state.tariffs}
-                currency={state.club.currency}
-                serverNow={serverNow}
-                busy={busy.has(table.id) || !online}
-                onOpen={(tariffId) =>
-                  run(table.id, () => command(`/api/tables/${table.id}/open`, actor, { tariffId }))
-                }
-                onStop={(sessionId) => run(table.id, () => command(`/api/sessions/${sessionId}/stop`, actor))}
-              />
-            </CardBoundary>
-          ))}
-        </main>
+        <div className="hall">
+          <HallToolbar tables={state.tables} alerts={tableAlerts} filter={filter} onFilter={setFilter} />
+          {shown.length === 0 && <p className="empty">В этом фильтре столов нет</p>}
+          <main className="tables" aria-label="Столы">
+            {shown.map((table) => (
+              <CardBoundary key={table.id} name={table.name} resetKey={table}>
+                <TableCard
+                  table={table}
+                  tariffs={state.tariffs}
+                  timezone={state.club.timezone}
+                  alert={tableAlerts.get(table.id)}
+                  currency={state.club.currency}
+                  serverNow={serverNow}
+                  busy={busy.has(table.id) || !online}
+                  onOpen={(tariffId) =>
+                    run(table.id, () => command(`/api/tables/${table.id}/open`, actor, { tariffId }))
+                  }
+                  onStop={(sessionId) => run(table.id, () => command(`/api/sessions/${sessionId}/stop`, actor))}
+                />
+              </CardBoundary>
+            ))}
+          </main>
+        </div>
         <aside className="side">
           <UnpaidPanel state={state} />
           <SimulatorPanel onError={setToast} />

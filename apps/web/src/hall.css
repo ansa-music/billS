@@ -1,0 +1,177 @@
+/* Hall toolbar (filter chips, fullscreen) and the offline banner.
+   Only design tokens from styles.css, so both themes work. Note: this file can load
+   before styles.css, so overrides of shared classes (.btn) use two-class selectors. */
+
+/* Toolbar */
+
+.hall-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.hall-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.hall-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  max-width: 100%;
+  padding: 0 8px 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.hall-chip-count {
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.hall-chip[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.hall-chip[aria-pressed='true'] .hall-chip-count {
+  background: color-mix(in oklab, var(--accent-text) 18%, transparent);
+  color: inherit;
+}
+
+/* Problems: red whether or not it is selected; solid red when selected. */
+
+.hall-chip-danger {
+  border-color: color-mix(in oklab, var(--danger) 60%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.hall-chip-danger .hall-chip-count {
+  background: var(--danger);
+  color: #fff;
+}
+
+.hall-chip-danger[aria-pressed='true'] {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.hall-chip-danger[aria-pressed='true'] .hall-chip-count {
+  background: rgb(255 255 255 / 0.22);
+  color: inherit;
+}
+
+@media (hover: hover) {
+  .hall-chip:not([aria-pressed='true']):hover {
+    border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+  }
+
+  .hall-chip-danger:not([aria-pressed='true']):hover {
+    border-color: var(--danger);
+  }
+}
+
+.btn.hall-fullscreen {
+  flex: none;
+  margin-left: auto;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+
+.hall-fullscreen-icon {
+  flex: none;
+}
+
+@media (pointer: coarse) {
+  .hall-chip,
+  .btn.hall-fullscreen {
+    min-height: 52px;
+  }
+
+  .hall-chip {
+    padding-left: 18px;
+    padding-right: 10px;
+  }
+}
+
+/* Offline banner */
+
+.hall-offline {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in oklab, var(--warn) 55%, transparent);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--warn) 14%, var(--surface));
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.hall-offline-text {
+  margin: 0;
+  min-width: 0;
+}
+
+.hall-offline-text strong {
+  font-weight: 650;
+  /* Darker than --warn on light, lighter on dark — readable in both themes. */
+  color: color-mix(in oklab, var(--warn) 65%, var(--text));
+}
+
+.hall-offline-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+  animation: hall-blink 1.6s ease-in-out infinite;
+}
+
+@keyframes hall-blink {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hall-chip {
+    transition: none;
+  }
+
+  .hall-offline-dot {
+    animation: none;
+  }
+}

@@ -4,6 +4,7 @@ import {
   calculateCharge,
   billableSeconds,
   priceAt,
+  nextPriceChange,
   validateTariff,
   formatMoney,
   canTransition,
@@ -111,6 +112,21 @@ test('priceAt returns the rate in force', () => {
   assert.deepEqual(priceAt(almaty(12, 12), tariff, TZ), { label: 'Базовый', pricePerHour: 2000_00 });
   assert.deepEqual(priceAt(almaty(17, 1), tariff, TZ), { label: 'Вечер', pricePerHour: 3000_00 });
   assert.deepEqual(priceAt(almaty(17, 2), tariff, TZ), { label: 'Выходные', pricePerHour: 3500_00 });
+});
+
+test('nextPriceChange finds the upcoming rate within the horizon', () => {
+  const hour = 60 * 60 * 1000;
+  assert.deepEqual(nextPriceChange(almaty(12, 17, 30), tariff, TZ, hour), {
+    at: almaty(12, 18),
+    label: 'Вечер',
+    pricePerHour: 3000_00,
+  });
+  assert.equal(nextPriceChange(almaty(12, 12), tariff, TZ, hour), null);
+  // Friday evening runs into Saturday 02:00, then the weekend rate.
+  assert.equal(nextPriceChange(almaty(17, 1, 15), tariff, TZ, hour)?.at, almaty(17, 2));
+  // Midnight between two base-rate days is not a change.
+  const plain = { ...tariff, windows: [] };
+  assert.equal(nextPriceChange(almaty(12, 23, 30), plain, TZ, hour), null);
 });
 
 test('billableSeconds ignores non-positive time', () => {
