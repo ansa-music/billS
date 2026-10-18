@@ -4,6 +4,7 @@ import { openDb } from './db.ts';
 import { buildApp } from './http/app.ts';
 import { Hub } from './hub.ts';
 import { createLampDriver } from './lamps/factory.ts';
+import { createUpsSource, parseUpsUrl, SimulatorUps } from './power/ups.ts';
 import { seedDemo } from './seed.ts';
 import { managerMatcher } from './settings.ts';
 import { versionInfo, versionString } from './version.ts';
@@ -13,15 +14,20 @@ const db = openDb(config.dbPath);
 const seeded = seedDemo(db, Date.now(), config.demoTimezone);
 
 const lamps = createLampDriver(config);
+const upsConfig = parseUpsUrl(config.ups);
+const ups = upsConfig ? createUpsSource(upsConfig) : null;
 const hub = new Hub({
   db,
   clock: systemClock,
   lampDriver: lamps.driver,
   monitorOptions: { intervalMs: config.lampPollMs, alertAfterMs: config.lampAlertAfterMs },
   isManager: managerMatcher(config.managerActors),
+  ups,
+  powerOptions: { intervalMs: config.upsPollMs, criticalPercent: config.upsCriticalPercent },
 });
 const app = buildApp(hub, {
   simulator: lamps.simulator,
+  upsSimulator: ups instanceof SimulatorUps ? ups : undefined,
   logger: true,
   dbPath: config.dbPath,
   startedAt: Date.now(),
@@ -37,6 +43,7 @@ app.log.info(
     version: versionString(),
     lampDriver: config.lampDriver,
     lampPollMs: hub.monitor.supported ? config.lampPollMs : 'unsupported',
+    ups: ups?.label ?? 'off',
   },
   'HUB started',
 );

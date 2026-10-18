@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { HubState } from '@bills/domain';
-import { blinkTable, command, fetchState, setManualMode } from './api.ts';
+import { blinkTable, command, fetchState, setManualMode, setPowerSettings } from './api.ts';
 import { CardBoundary } from './CardBoundary.tsx';
 import { formatClock } from './format.ts';
 import { alertsByTable, matchesFilter } from './hall.ts';
@@ -8,6 +8,7 @@ import { HallToolbar, useHallFilter } from './HallToolbar.tsx';
 import { HardwarePanel, ManualModeBanner } from './Hardware.tsx';
 import { useWakeLock } from './kiosk.ts';
 import { OfflineBanner } from './OfflineBanner.tsx';
+import { PowerBadge } from './PowerBadge.tsx';
 import { ShiftPanel } from './cash/ShiftPanel.tsx';
 import { UnpaidPanel } from './cash/UnpaidPanel.tsx';
 import { AlertsBar, SimulatorPanel } from './Panels.tsx';
@@ -149,6 +150,7 @@ export function App() {
             <input value={actor} onChange={(e) => setActor(e.target.value)} maxLength={60} />
           </label>
           <span className="clock">{formatClock(serverNow, state.club.timezone)}</span>
+          <PowerBadge power={state.power} />
           <span className="conn" data-online={online || undefined}>
             {online ? 'HUB на связи' : 'Нет связи с HUB'}
           </span>
@@ -203,6 +205,7 @@ export function App() {
             busy={busy.has('manual') || !online}
             onBlink={(id) => run(`blink:${id}`, () => blinkTable(id, actor))}
             onManual={(enabled, reason) => run('manual', () => setManualMode(actor, enabled, reason))}
+            onAutoPause={(enabled) => run('manual', () => setPowerSettings(actor, { autoPauseOnPowerLoss: enabled }))}
           />
           <SimulatorPanel onError={setToast} />
         </aside>

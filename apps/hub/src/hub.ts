@@ -10,6 +10,9 @@ import { DEFAULT_BLINK_TIMES, LampController } from './lamps/controller.ts';
 import type { LampDriver } from './lamps/driver.ts';
 import type { MonitorOptions } from './lamps/monitor.ts';
 import { LampMonitor } from './lamps/monitor.ts';
+import type { PowerActions, PowerOptions, PowerSettings } from './power/monitor.ts';
+import { PowerMonitor, setPowerSettings } from './power/monitor.ts';
+import type { UpsSource } from './power/ups.ts';
 import { SessionService } from './sessions.ts';
 import type { ManualMode } from './settings.ts';
 import { getManualMode, isManualMode, managerMatcher, setManualMode } from './settings.ts';
@@ -32,7 +35,22 @@ export interface HubDeps {
   reconcileIntervalMs?: number;
   /** Who may switch manual mode off. Default: the X-Actor "Управляющий". */
   isManager?: (actor: string) => boolean;
+  /** The club's UPS (HUB_UPS); null — no power monitoring. */
+  ups?: UpsSource | null;
+  powerOptions?: Partial<PowerOptions>;
+  /** What to do with running games on power loss; defaults to "alert only" until pauses exist. */
+  powerActions?: PowerActions;
 }
+
+/**
+ * Game pauses (stage 1, in another branch) are not here yet: on power loss
+ * the HUB alerts and audits, but cannot pause. Wire SessionService.pause/resume
+ * here when they land; PowerMonitor and its tests already expect this shape.
+ */
+export const ALERT_ONLY_POWER_ACTIONS: PowerActions = {
+  pauseAll: () => [],
+  resumeAll: () => [],
+};
 
 /** The club server: wires storage, lamps and game rules together. */
 export class Hub {
@@ -41,6 +59,7 @@ export class Hub {
   readonly events = new HubEvents();
   readonly lamps: LampController;
   readonly monitor: LampMonitor;
+  readonly power: PowerMonitor;
   readonly sessions: SessionService;
   readonly checks: CheckService;
   readonly shifts: ShiftService;
@@ -72,6 +91,14 @@ export class Hub {
       quiet,
       ...(deps.monitorOptions ? { options: deps.monitorOptions } : {}),
     });
+    this.power = new PowerMonitor({
+      db: deps.db,
+      source: deps.ups ?? null,
+      clock: deps.clock,
+      events: this.events,
+      actions: deps.powerActions ?? ALERT_ONLY_POWER_ACTIONS,
+      ...(deps.powerOptions ? { options: deps.powerOptions } : {}),
+    });
     this.sessions = new SessionService({ db: deps.db, clock: deps.clock, lamps: this.lamps, events: this.events });
     this.checks = new CheckService({ db: deps.db, clock: deps.clock, events: this.events, sessions: this.sessions });
     this.shifts = new ShiftService({ db: deps.db, clock: deps.clock, events: this.events });
@@ -84,10 +111,11 @@ export class Hub {
     this.#reconcileTimer = setInterval(() => this.lamps.reconcile(), this.#reconcileIntervalMs);
     this.#reconcileTimer.unref();
     this.monitor.start();
+    this.power.start();
   }
 
   state(): HubState {
-    return buildState(this.db, this.clock.now());
+    return buildState(this.db, this.clock.now(), this.power.view());
   }
 
   resolveAlert(alertId: string, actor: string): { id: string } {
@@ -156,8 +184,14 @@ export class Hub {
     return mode;
   }
 
+  /** Club setting: pause games automatically while the club is on battery. */
+  setPowerSettings(actor: string, patch: Partial<PowerSettings>): PowerSettings {
+    return setPowerSettings(this.db, this.clock.now(), this.events, actor, patch);
+  }
+
   close(): void {
     clearInterval(this.#reconcileTimer);
+    this.power.close();
     this.monitor.close();
     this.lamps.close();
     this.events.removeAllListeners();

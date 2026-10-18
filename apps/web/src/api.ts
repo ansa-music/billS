@@ -77,6 +77,10 @@ export function blinkTable(tableId: string, actor: string, times = 3): Promise<{
   return command(`/api/tables/${tableId}/blink`, actor, { times });
 }
 
+export function setPowerSettings(actor: string, patch: { autoPauseOnPowerLoss?: boolean }): Promise<{ autoPauseOnPowerLoss: boolean }> {
+  return command('/api/power/settings', actor, patch);
+}
+
 export function setManualMode(actor: string, enabled: boolean, reason?: string): Promise<ManualModeView> {
   return command('/api/lamps/manual', actor, reason === undefined ? { enabled } : { enabled, reason });
 }

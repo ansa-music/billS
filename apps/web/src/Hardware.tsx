@@ -58,15 +58,18 @@ export function HardwarePanel({
   busy,
   onBlink,
   onManual,
+  onAutoPause,
 }: {
   state: HubState;
   busy: boolean;
   onBlink: (tableId: string) => void;
   onManual: (enabled: boolean, reason?: string) => void;
+  onAutoPause: (enabled: boolean) => void;
 }) {
   const [reason, setReason] = useState('');
   const mode = state.manualMode;
   const polled = state.tables.some((t) => t.lamp.polledAt != null);
+  const power = state.power;
 
   return (
     <details className="panel hw">
@@ -94,6 +97,28 @@ export function HardwarePanel({
           </li>
         ))}
       </ul>
+
+      {power.configured && (
+        <div className="hw-manual">
+          <h3>Электричество</h3>
+          <p className="hint">
+            {!power.reachable
+              ? `ИБП не отвечает (${power.label ?? ''}).`
+              : power.onBattery
+                ? `Клуб работает от батареи ИБП${power.chargePercent !== null ? `, заряд ${Math.round(power.chargePercent)}%` : ''}.`
+                : `Сеть в норме${power.model ? `, ИБП ${power.model}` : ''}${power.chargePercent !== null ? `, заряд ${Math.round(power.chargePercent)}%` : ''}.`}
+          </p>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={power.settings.autoPauseOnPowerLoss}
+              disabled={busy}
+              onChange={(e) => onAutoPause(e.target.checked)}
+            />
+            При отключении света ставить все игры на паузу, при возврате — продолжать
+          </label>
+        </div>
+      )}
 
       <div className="hw-manual">
         <h3>Ручной режим</h3>

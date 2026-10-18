@@ -10,6 +10,8 @@ import type { ChangeEvent } from '../events.ts';
 import type { SimulatorFault, SimulatorLampDriver } from '../lamps/simulator.ts';
 import { SIMULATOR_FAULTS } from '../lamps/simulator.ts';
 import { collectHealth, renderMetrics } from '../ops.ts';
+import { renderPowerMetrics } from '../power/metrics.ts';
+import type { SimulatorUps } from '../power/ups.ts';
 import type { VersionInfo } from '../version.ts';
 import { versionInfo } from '../version.ts';
 import { registerMoneyRoutes } from './money-routes.ts';
@@ -17,6 +19,8 @@ import { registerMoneyRoutes } from './money-routes.ts';
 export interface AppOptions {
   /** Exposes /api/dev/lamps to control the simulator. Never in production. */
   simulator?: SimulatorLampDriver;
+  /** Exposes /api/dev/ups to drive the simulated UPS (HUB_UPS=simulator). */
+  upsSimulator?: SimulatorUps;
   logger?: boolean;
   /** Database file reported by /api/health (size, free disk, last backup). */
   dbPath?: string;
@@ -76,11 +80,13 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
     version: options.version ?? versionInfo(),
   };
   // Health for operators and monitoring; `now` stays the HUB clock, the rest is wall time.
-  app.get('/api/health', async () => ({ ...collectHealth(healthCtx), now: hub.clock.now() }));
+  app.get('/api/health', async () => ({ ...collectHealth(healthCtx), now: hub.clock.now(), power: hub.power.view() }));
 
   // Prometheus / Uptime Kuma scrape target.
   app.get('/metrics', async (_req, reply) =>
-    reply.header('content-type', 'text/plain; version=0.0.4; charset=utf-8').send(renderMetrics(collectHealth(healthCtx))),
+    reply
+      .header('content-type', 'text/plain; version=0.0.4; charset=utf-8')
+      .send(renderMetrics(collectHealth(healthCtx)) + renderPowerMetrics(hub.power.view())),
   );
 
   app.get('/api/state', async () => hub.state());
@@ -122,6 +128,20 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
         status: 202,
         body: hub.blink(req.params.tableId, actor, req.body?.times ?? 3),
       })),
+  );
+
+  // The club's UPS and what to do on power loss.
+  app.get('/api/power', async () => hub.power.view());
+
+  app.post<{ Body: { autoPauseOnPowerLoss?: boolean } }>(
+    '/api/power/settings',
+    {
+      schema: {
+        body: { type: 'object', additionalProperties: false, properties: { autoPauseOnPowerLoss: { type: 'boolean' } } },
+      },
+    },
+    async (req, reply) =>
+      runCommand(req, reply, hub, (actor) => ({ status: 200, body: hub.setPowerSettings(actor, req.body ?? {}) })),
   );
 
   // Emergency manual mode: the controller is down, lamps are switched by hand.
@@ -173,6 +193,35 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
       hub.events.off('changed', onChange);
     });
   });
+
+  const ups = options.upsSimulator;
+  if (ups) {
+    app.get('/api/dev/ups', async () => ({ ...ups.state }));
+    app.post<{ Body: { onBattery?: boolean; chargePercent?: number; runtimeSeconds?: number; unreachable?: boolean; poll?: boolean } }>(
+      '/api/dev/ups',
+      {
+        schema: {
+          body: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              onBattery: { type: 'boolean' },
+              chargePercent: { type: 'number', minimum: 0, maximum: 100 },
+              runtimeSeconds: { type: 'integer', minimum: 0 },
+              unreachable: { type: 'boolean' },
+              poll: { type: 'boolean' },
+            },
+          },
+        },
+      },
+      async (req) => {
+        const { poll, ...patch } = req.body;
+        ups.set(patch);
+        if (poll !== false) await hub.power.poll();
+        return { ...ups.state };
+      },
+    );
+  }
 
   const simulator = options.simulator;
   if (simulator) {
