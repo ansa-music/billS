@@ -270,3 +270,47 @@ export interface CloseShiftResponse {
   shift: ShiftView;
   report: ShiftReport;
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Prepaid games: opened for N minutes, stopped by the HUB at the deadline.
+// ═════════════════════════════════════════════════════════════════════════════
+
+export interface PrepaidView {
+  minutes: number;
+  /** When the HUB stops the game: lamp-confirmed start + minutes. Null until the lamp confirms. */
+  until: number | null;
+  /** Paid upfront (open-prepaid): the amount taken and its check. Null for a timed game paid after. */
+  amount: Minor | null;
+  checkId: string | null;
+  /** When the 5-minute warning blink was requested. */
+  warnedAt: number | null;
+}
+
+export interface SessionView {
+  /** Set for a game opened for N minutes. */
+  prepaid: PrepaidView | null;
+}
+
+/** POST /api/tables/:tableId/open — `prepaidMinutes` makes a timed game, paid after it stops. */
+export interface OpenTableRequest {
+  tariffId?: string;
+  prepaidMinutes?: number;
+}
+
+/** POST /api/tables/:tableId/open-prepaid — open for N minutes and take the whole payment at once. */
+export interface OpenPrepaidRequest {
+  tariffId?: string;
+  minutes: number;
+  /** The price the cashier showed the guest (prepaidPrice); the HUB refuses if it no longer matches. */
+  amount: Minor;
+  /** What the guest hands over, as for /pay. Must cover the whole amount. */
+  parts: Array<{ method: PaymentMethod; amount: Minor }>;
+}
+
+export interface OpenPrepaidResponse {
+  session: SessionView;
+  /** Already PAID. */
+  check: CheckView;
+  applied: Minor;
+  change: Minor;
+}

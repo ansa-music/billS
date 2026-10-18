@@ -20,6 +20,8 @@ export class SimulatorLampDriver implements LampDriver {
   /** While true every command fails, like an unplugged controller. */
   offline = false;
   readonly calls: Array<{ channel: string; on: boolean }> = [];
+  /** Channels that got a warning blink, in order. The simulator only records it. */
+  readonly blinks: string[] = [];
   readonly #lamps = new Map<string, boolean>();
   #faults: SimulatorFault[] = [];
 
@@ -47,6 +49,27 @@ export class SimulatorLampDriver implements LampDriver {
       faults: [...this.#faults],
       lamps: Object.fromEntries(this.#lamps),
     };
+  }
+
+  blink(channel: string, signal: AbortSignal): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.offline) {
+          reject(new Error('Controller error'));
+          return;
+        }
+        this.blinks.push(channel);
+        resolve();
+      }, this.latencyMs);
+      signal.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(timer);
+          reject(signal.reason);
+        },
+        { once: true },
+      );
+    });
   }
 
   setLamp(channel: string, on: boolean, signal: AbortSignal): Promise<void> {

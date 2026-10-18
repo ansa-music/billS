@@ -6,7 +6,8 @@ import type { HubEvents } from '../events.ts';
 import { raiseAlert, record, SYSTEM } from '../journal.ts';
 import type { LampDriver } from './driver.ts';
 
-export type LampAction = 'ON' | 'OFF';
+/** BLINK is a warning signal (prepaid time ending), not a lamp state. */
+export type LampAction = 'ON' | 'OFF' | 'BLINK';
 
 export interface LampOptions {
   /** How long to wait for one confirmation from the controller. */
@@ -69,6 +70,20 @@ export class LampController {
   request(tableId: string, action: LampAction, sessionId: string | null): string {
     const db = this.#db;
     const now = this.#clock.now();
+    if (action === 'BLINK') {
+      // Neither supersedes a pending ON/OFF nor changes the wanted state; a later ON/OFF supersedes it.
+      const id = randomUUID();
+      run(
+        db,
+        "INSERT INTO lamp_commands (id, table_id, session_id, action, status, created_at) VALUES (?, ?, ?, 'BLINK', 'PENDING', ?)",
+        id,
+        tableId,
+        sessionId,
+        now,
+      );
+      afterCommit(db, () => this.kick());
+      return id;
+    }
     run(
       db,
       "UPDATE lamp_commands SET status = 'SUPERSEDED', finished_at = ? WHERE table_id = ? AND status = 'PENDING'",
@@ -117,7 +132,7 @@ export class LampController {
         const desired: LampAction = t.live_session_id ? 'ON' : 'OFF';
         const pending = one<CommandRow>(
           db,
-          "SELECT * FROM lamp_commands WHERE table_id = ? AND status = 'PENDING'",
+          "SELECT * FROM lamp_commands WHERE table_id = ? AND status = 'PENDING' AND action <> 'BLINK'",
           t.id,
         );
         if (pending?.action === desired) continue;
@@ -149,7 +164,9 @@ export class LampController {
          JOIN billiard_tables t ON t.id = l.table_id AND t.is_active = 1
          LEFT JOIN table_sessions s ON s.table_id = l.table_id AND s.status IN ('OPENING', 'ACTIVE')
          WHERE l.reported = 'UNKNOWN'
-           AND NOT EXISTS (SELECT 1 FROM lamp_commands c WHERE c.table_id = l.table_id AND c.status = 'PENDING')`,
+           AND NOT EXISTS (
+             SELECT 1 FROM lamp_commands c WHERE c.table_id = l.table_id AND c.status = 'PENDING' AND c.action <> 'BLINK'
+           )`,
       );
       for (const r of rows) this.request(r.table_id, r.live_session_id ? 'ON' : 'OFF', r.live_session_id);
       return rows.length;
@@ -185,8 +202,12 @@ export class LampController {
         cmd.table_id,
       );
       if (!table) throw new Error(`Unknown table ${cmd.table_id}`);
+      const channel = table.lamp_channel;
       await withTimeout(
-        (signal) => this.#driver.setLamp(table.lamp_channel, cmd.action === 'ON', signal),
+        (signal) =>
+          cmd.action === 'BLINK'
+            ? (this.#driver.blink?.(channel, signal) ?? Promise.resolve())
+            : this.#driver.setLamp(channel, cmd.action === 'ON', signal),
         this.#options.attemptTimeoutMs,
       );
     } catch (err) {
@@ -205,15 +226,17 @@ export class LampController {
     const now = this.#clock.now();
     this.#retryAt.delete(cmd.id);
     transaction(db, () => {
-      run(
-        db,
-        'UPDATE lamp_states SET reported = ?, reported_at = ?, updated_at = ? WHERE table_id = ?',
-        cmd.action,
-        now,
-        now,
-        cmd.table_id,
-      );
-      afterCommit(db, () => this.#events.changed({ kind: 'lamp', tableId: cmd.table_id }));
+      if (cmd.action !== 'BLINK') {
+        run(
+          db,
+          'UPDATE lamp_states SET reported = ?, reported_at = ?, updated_at = ? WHERE table_id = ?',
+          cmd.action,
+          now,
+          now,
+          cmd.table_id,
+        );
+        afterCommit(db, () => this.#events.changed({ kind: 'lamp', tableId: cmd.table_id }));
+      }
       const acked = run(
         db,
         "UPDATE lamp_commands SET status = 'ACKED', attempts = attempts + 1, finished_at = ? WHERE id = ? AND status = 'PENDING'",
@@ -224,7 +247,7 @@ export class LampController {
       if (!acked) return;
       record(db, now, {
         actor: SYSTEM,
-        action: cmd.action === 'ON' ? 'lamp.on' : 'lamp.off',
+        action: cmd.action === 'ON' ? 'lamp.on' : cmd.action === 'OFF' ? 'lamp.off' : 'lamp.blink',
         entityType: 'table',
         entityId: cmd.table_id,
         data: { commandId: cmd.id, sessionId: cmd.session_id },
@@ -273,7 +296,6 @@ export class LampController {
         now,
         cmd.id,
       );
-      run(db, "UPDATE lamp_states SET reported = 'UNKNOWN', updated_at = ? WHERE table_id = ?", now, cmd.table_id);
       record(db, now, {
         actor: SYSTEM,
         action: 'lamp.failed',
@@ -281,6 +303,9 @@ export class LampController {
         entityId: cmd.table_id,
         data: { commandId: cmd.id, action: cmd.action, attempts, error: message },
       });
+      // A missed warning blink says nothing about the light itself: no alarm.
+      if (cmd.action === 'BLINK') return;
+      run(db, "UPDATE lamp_states SET reported = 'UNKNOWN', updated_at = ? WHERE table_id = ?", now, cmd.table_id);
       const tableName =
         one<{ name: string }>(db, 'SELECT name FROM billiard_tables WHERE id = ?', cmd.table_id)?.name ?? cmd.table_id;
 

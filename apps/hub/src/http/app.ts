@@ -85,18 +85,29 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
 
   app.get('/api/state', async () => hub.state());
 
-  app.post<{ Params: { tableId: string }; Body: { tariffId?: string } }>(
+  app.post<{ Params: { tableId: string }; Body: { tariffId?: string; prepaidMinutes?: number } }>(
     '/api/tables/:tableId/open',
     {
       schema: {
-        body: { type: 'object', additionalProperties: false, properties: { tariffId: { type: 'string' } } },
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { tariffId: { type: 'string' }, prepaidMinutes: { type: 'integer' } },
+        },
       },
     },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => ({
-        status: 201,
-        body: hub.sessions.open({ tableId: req.params.tableId, tariffId: req.body?.tariffId, actor }),
-      })),
+      runCommand(req, reply, hub, (actor) => {
+        const { tariffId, prepaidMinutes } = req.body ?? {};
+        const tableId = req.params.tableId;
+        return {
+          status: 201,
+          body:
+            prepaidMinutes === undefined
+              ? hub.sessions.open({ tableId, tariffId, actor })
+              : hub.prepaid.open({ tableId, tariffId, minutes: prepaidMinutes, actor }),
+        };
+      }),
   );
 
   app.post<{ Params: { sessionId: string } }>(
@@ -105,7 +116,7 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
     async (req, reply) =>
       runCommand(req, reply, hub, (actor) => ({
         status: 200,
-        body: hub.sessions.stop({ sessionId: req.params.sessionId, actor }),
+        body: hub.stopGame({ sessionId: req.params.sessionId, actor }),
       })),
   );
 

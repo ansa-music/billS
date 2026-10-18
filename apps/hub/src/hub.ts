@@ -9,10 +9,12 @@ import type { LampOptions } from './lamps/controller.ts';
 import { LampController } from './lamps/controller.ts';
 import type { LampDriver } from './lamps/driver.ts';
 import { CheckService } from './checks.ts';
+import { PrepaidService } from './prepaid.ts';
+import type { StopSessionInput } from './sessions.ts';
 import { SessionService } from './sessions.ts';
 import { ShiftService } from './shifts.ts';
-import type { HubState } from './views.ts';
-import { buildState } from './views.ts';
+import type { HubState, SessionView } from './views.ts';
+import { buildState, loadSession } from './views.ts';
 
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -34,6 +36,7 @@ export class Hub {
   readonly sessions: SessionService;
   readonly checks: CheckService;
   readonly shifts: ShiftService;
+  readonly prepaid: PrepaidService;
   readonly #reconcileIntervalMs: number;
   #reconcileTimer: NodeJS.Timeout | undefined;
 
@@ -52,14 +55,32 @@ export class Hub {
     this.sessions = new SessionService({ db: deps.db, clock: deps.clock, lamps: this.lamps, events: this.events });
     this.checks = new CheckService({ db: deps.db, clock: deps.clock, events: this.events, sessions: this.sessions });
     this.shifts = new ShiftService({ db: deps.db, clock: deps.clock, events: this.events });
+    this.prepaid = new PrepaidService({
+      db: deps.db,
+      clock: deps.clock,
+      events: this.events,
+      sessions: this.sessions,
+      checks: this.checks,
+      lamps: this.lamps,
+    });
   }
 
   /** Restores lamps and pending commands after a (re)start. */
   start(): void {
     purgeIdempotencyKeys(this.db, this.clock.now() - IDEMPOTENCY_TTL_MS);
     this.lamps.recover();
+    this.prepaid.start();
     this.#reconcileTimer = setInterval(() => this.lamps.reconcile(), this.#reconcileIntervalMs);
     this.#reconcileTimer.unref();
+  }
+
+  /** Stop from staff: a game paid upfront closes in the same transaction, so the reply already says so. */
+  stopGame(input: StopSessionInput): SessionView {
+    return transaction(this.db, () => {
+      this.sessions.stop(input);
+      this.prepaid.settleStopped(input.sessionId);
+      return loadSession(this.db, input.sessionId, this.clock.now());
+    });
   }
 
   state(): HubState {
@@ -85,6 +106,7 @@ export class Hub {
 
   close(): void {
     clearInterval(this.#reconcileTimer);
+    this.prepaid.close();
     this.lamps.close();
     this.events.removeAllListeners();
   }

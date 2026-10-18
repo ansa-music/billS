@@ -16,7 +16,7 @@ import type {
   TableView,
   TariffConfig,
 } from '@bills/domain';
-import { calculateCharge, checkTotals, minorPerMajor, shiftTotals } from '@bills/domain';
+import { calculateCharge, checkTotals, minorPerMajor, prepaidDeadline, shiftTotals } from '@bills/domain';
 import type { Db, Param } from './db.ts';
 import { all, one } from './db.ts';
 import { HubError } from './errors.ts';
@@ -45,11 +45,21 @@ export interface SessionRow {
   cancel_approved_by: string | null;
   /** Joined from check_items. */
   check_id: string | null;
+  /** Joined from prepaid_games. */
+  prepaid_minutes: number | null;
+  prepaid_deadline_at: number | null;
+  prepaid_amount: number | null;
+  prepaid_check_id: string | null;
+  prepaid_warned_at: number | null;
 }
 
-/** Sessions with the check they are billed on. */
-export const SESSION_SELECT =
-  'SELECT s.*, ci.check_id AS check_id FROM table_sessions s LEFT JOIN check_items ci ON ci.session_id = s.id';
+/** Sessions with the check they are billed on and their prepaid time. */
+export const SESSION_SELECT = `SELECT s.*, ci.check_id AS check_id,
+    pg.minutes AS prepaid_minutes, pg.deadline_at AS prepaid_deadline_at, pg.amount AS prepaid_amount,
+    pg.check_id AS prepaid_check_id, pg.warned_at AS prepaid_warned_at
+  FROM table_sessions s
+  LEFT JOIN check_items ci ON ci.session_id = s.id
+  LEFT JOIN prepaid_games pg ON pg.session_id = s.id`;
 
 export function toSessionView(row: SessionRow, now: number): SessionView {
   const tariff = JSON.parse(row.tariff_snapshot) as TariffConfig;
@@ -77,6 +87,18 @@ export function toSessionView(row: SessionRow, now: number): SessionView {
     checkId: row.check_id ?? null,
     cancelReason: row.cancel_reason ?? null,
     cancelApprovedBy: row.cancel_approved_by ?? null,
+    prepaid:
+      row.prepaid_minutes == null
+        ? null
+        : {
+            minutes: row.prepaid_minutes,
+            until:
+              row.prepaid_deadline_at ??
+              (row.started_at === null ? null : prepaidDeadline(row.started_at, row.prepaid_minutes)),
+            amount: row.prepaid_amount,
+            checkId: row.prepaid_check_id,
+            warnedAt: row.prepaid_warned_at,
+          },
   };
 }
 
