@@ -7,6 +7,7 @@ import { afterCommit, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import type { HubEvents } from './events.ts';
 import { record } from './journal.ts';
+import { isManualMode } from './settings.ts';
 import type { LampController } from './lamps/controller.ts';
 import type { SessionRow, SessionView } from './views.ts';
 import { loadSession } from './views.ts';
@@ -36,7 +37,12 @@ export class SessionService {
     this.#events = deps.events;
   }
 
-  /** Requests the lamp; time starts only when the lamp confirms (see LampController). */
+  /**
+   * Requests the lamp; time starts only when the lamp confirms (see LampController).
+   * In manual mode (controller broken, lamps switched by hand) the game starts at
+   * once and is marked `manual`; the lamp command is still sent in case the
+   * controller is back.
+   */
   open(input: OpenTableInput): SessionView {
     const db = this.#db;
     const now = this.#clock.now();
@@ -66,12 +72,13 @@ export class SessionService {
       const club = one<{ timezone: string }>(db, 'SELECT timezone FROM clubs WHERE id = ?', table.club_id);
       if (!club) throw new HubError(503, 'CLUB_NOT_CONFIGURED', 'Клуб не настроен');
 
+      const manual = isManualMode(db);
       const id = randomUUID();
       run(
         db,
         `INSERT INTO table_sessions
-           (id, club_id, table_id, tariff_id, tariff_name, tariff_snapshot, timezone, status, requested_at, opened_by, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'OPENING', ?, ?, ?)`,
+           (id, club_id, table_id, tariff_id, tariff_name, tariff_snapshot, timezone, status, requested_at, started_at, manual, opened_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
         table.club_id,
         table.id,
@@ -79,7 +86,10 @@ export class SessionService {
         tariff.name,
         tariff.config,
         club.timezone,
+        manual ? 'ACTIVE' : 'OPENING',
         now,
+        manual ? now : null,
+        manual ? 1 : 0,
         input.actor,
         now,
       );
@@ -88,8 +98,17 @@ export class SessionService {
         action: 'session.open_requested',
         entityType: 'session',
         entityId: id,
-        data: { tableId: table.id, tariffId: tariff.id },
+        data: { tableId: table.id, tariffId: tariff.id, manual },
       });
+      if (manual) {
+        record(db, now, {
+          actor: input.actor,
+          action: 'session.started',
+          entityType: 'session',
+          entityId: id,
+          data: { tableId: table.id, startedAt: now, manual: true },
+        });
+      }
       this.#lamps.request(table.id, 'ON', id);
       afterCommit(db, () => this.#events.changed({ kind: 'session', tableId: table.id }));
       return loadSession(db, id, now);

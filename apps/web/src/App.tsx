@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { HubState } from '@bills/domain';
-import { command, fetchState } from './api.ts';
+import { blinkTable, command, fetchState, setManualMode } from './api.ts';
 import { CardBoundary } from './CardBoundary.tsx';
 import { formatClock } from './format.ts';
 import { alertsByTable, matchesFilter } from './hall.ts';
 import { HallToolbar, useHallFilter } from './HallToolbar.tsx';
+import { HardwarePanel, ManualModeBanner } from './Hardware.tsx';
 import { useWakeLock } from './kiosk.ts';
 import { OfflineBanner } from './OfflineBanner.tsx';
 import { AlertsBar, SimulatorPanel, UnpaidPanel } from './Panels.tsx';
@@ -154,6 +155,13 @@ export function App() {
 
       <OfflineBanner online={online} />
 
+      <ManualModeBanner
+        mode={state.manualMode}
+        timezone={state.club.timezone}
+        busy={busy.has('manual') || !online}
+        onDisable={() => run('manual', () => setManualMode(actor, false))}
+      />
+
       <AlertsBar
         alerts={state.alerts}
         timezone={state.club.timezone}
@@ -187,6 +195,12 @@ export function App() {
         </div>
         <aside className="side">
           <UnpaidPanel state={state} />
+          <HardwarePanel
+            state={state}
+            busy={busy.has('manual') || !online}
+            onBlink={(id) => run(`blink:${id}`, () => blinkTable(id, actor))}
+            onManual={(enabled, reason) => run('manual', () => setManualMode(actor, enabled, reason))}
+          />
           <SimulatorPanel onError={setToast} />
         </aside>
       </div>

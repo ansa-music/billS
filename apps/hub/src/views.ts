@@ -3,6 +3,7 @@ import { calculateCharge } from '@bills/domain';
 import type { Db } from './db.ts';
 import { all, one } from './db.ts';
 import { HubError } from './errors.ts';
+import { getManualMode } from './settings.ts';
 
 export type { AlertView, HubState, SessionView, TableView };
 
@@ -24,6 +25,7 @@ export interface SessionRow {
   failure_reason: string | null;
   opened_by: string;
   stopped_by: string | null;
+  manual: number;
 }
 
 export function toSessionView(row: SessionRow, now: number): SessionView {
@@ -49,6 +51,7 @@ export function toSessionView(row: SessionRow, now: number): SessionView {
     failureReason: row.failure_reason,
     openedBy: row.opened_by,
     stoppedBy: row.stopped_by,
+    manual: row.manual === 1,
   };
 }
 
@@ -81,9 +84,11 @@ export function buildState(db: Db, now: number): HubState {
     default_tariff_id: string;
     desired: 'ON' | 'OFF' | null;
     reported: 'ON' | 'OFF' | 'UNKNOWN' | null;
+    current_on: number | null;
+    polled_at: number | null;
   }>(
     db,
-    `SELECT t.id, t.name, t.kind, t.default_tariff_id, l.desired, l.reported
+    `SELECT t.id, t.name, t.kind, t.default_tariff_id, l.desired, l.reported, l.current_on, l.polled_at
      FROM billiard_tables t LEFT JOIN lamp_states l ON l.table_id = t.id
      WHERE t.club_id = ? AND t.is_active = 1
      ORDER BY t.sort_order, t.name`,
@@ -93,7 +98,12 @@ export function buildState(db: Db, now: number): HubState {
     name: t.name,
     kind: t.kind,
     defaultTariffId: t.default_tariff_id,
-    lamp: { desired: t.desired ?? 'OFF', reported: t.reported ?? 'UNKNOWN' },
+    lamp: {
+      desired: t.desired ?? 'OFF',
+      reported: t.reported ?? 'UNKNOWN',
+      currentOn: t.current_on === null ? null : t.current_on === 1,
+      polledAt: t.polled_at,
+    },
     session: live.get(t.id) ?? null,
   }));
 
@@ -109,5 +119,5 @@ export function buildState(db: Db, now: number): HubState {
      WHERE resolved_at IS NULL ORDER BY at DESC LIMIT 20`,
   );
 
-  return { serverNow: now, club, tariffs, tables, unpaid, alerts };
+  return { serverNow: now, club, tariffs, tables, unpaid, alerts, manualMode: getManualMode(db) };
 }

@@ -84,6 +84,43 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
       })),
   );
 
+  // Flashes the lamp: checks the wiring from the screen; stage 2 uses it before prepaid time ends.
+  app.post<{ Params: { tableId: string }; Body: { times?: number } }>(
+    '/api/tables/:tableId/blink',
+    {
+      schema: {
+        body: { type: 'object', additionalProperties: false, properties: { times: { type: 'integer', minimum: 1, maximum: 10 } } },
+      },
+    },
+    async (req, reply) =>
+      runCommand(req, reply, hub, (actor) => ({
+        status: 202,
+        body: hub.blink(req.params.tableId, actor, req.body?.times ?? 3),
+      })),
+  );
+
+  // Emergency manual mode: the controller is down, lamps are switched by hand.
+  app.get('/api/lamps/manual', async () => hub.manualMode());
+
+  app.post<{ Body: { enabled: boolean; reason?: string } }>(
+    '/api/lamps/manual',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['enabled'],
+          properties: { enabled: { type: 'boolean' }, reason: { type: 'string', maxLength: 300 } },
+        },
+      },
+    },
+    async (req, reply) =>
+      runCommand(req, reply, hub, (actor) => ({
+        status: 200,
+        body: hub.setManualMode({ enabled: req.body.enabled, reason: req.body.reason, actor }),
+      })),
+  );
+
   app.post<{ Params: { alertId: string } }>(
     '/api/alerts/:alertId/resolve',
     { schema: { body: emptyBody } },
@@ -114,7 +151,18 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   if (simulator) {
     app.get('/api/dev/lamps', async () => simulator.status());
 
-    app.post<{ Body: { latencyMs?: number; offline?: boolean; faults?: SimulatorFault[]; clearFaults?: boolean } }>(
+    app.post<{
+      Body: {
+        latencyMs?: number;
+        offline?: boolean;
+        faults?: SimulatorFault[];
+        clearFaults?: boolean;
+        /** Current sensor override: on by hand (true), dead bulb (false), follow the relay (null). */
+        light?: { channel: string; on: boolean | null };
+        /** Run one monitor poll right away (demo of the current-sensor alerts). */
+        poll?: boolean;
+      };
+    }>(
       '/api/dev/lamps',
       {
         schema: {
@@ -126,6 +174,13 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
               offline: { type: 'boolean' },
               faults: { type: 'array', items: { type: 'string', enum: [...SIMULATOR_FAULTS] } },
               clearFaults: { type: 'boolean' },
+              light: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['channel', 'on'],
+                properties: { channel: { type: 'string', minLength: 1, maxLength: 100 }, on: { type: ['boolean', 'null'] } },
+              },
+              poll: { type: 'boolean' },
             },
           },
         },
@@ -136,6 +191,8 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
         if (b.offline !== undefined) simulator.offline = b.offline;
         if (b.clearFaults) simulator.clearFaults();
         if (b.faults) simulator.injectFaults(...b.faults);
+        if (b.light) simulator.setLight(b.light.channel, b.light.on);
+        if (b.poll) await hub.monitor.poll();
         // Coming back online: resync lamps in an unknown state right away.
         if (b.offline === false) {
           hub.lamps.reconcile();

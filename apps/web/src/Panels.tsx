@@ -122,16 +122,54 @@ export function SimulatorPanel({ onError }: { onError: (message: string) => void
           </button>
         )}
       </div>
-      <ul className="relays">
+      <p className="hint">
+        Датчик тока: «руками» — свет включили мимо реле (через минуту тревога «свет без игры»), «сгорела» — ток не
+        течёт при игре (тревога «лампа не горит»). «Опросить» — не ждать 10 секунд.
+      </p>
+      <ul className="relays relays-wide">
         {Object.entries(sim.lamps)
           .sort(([a], [b]) => a.localeCompare(b, 'en', { numeric: true }))
-          .map(([channel, on]) => (
-            <li key={channel} data-on={on || undefined}>
-              <span className="lamp-dot" aria-hidden="true" />
-              {channel}
-            </li>
-          ))}
+          .map(([channel, on]) => {
+            const light = sim.lights[channel];
+            return (
+              <li key={channel} data-on={on || undefined}>
+                <span className="lamp-dot" aria-hidden="true" />
+                {channel}
+                <span className="sim-light" role="group" aria-label={`Датчик тока ${channel}`}>
+                  <button
+                    type="button"
+                    aria-pressed={light === undefined}
+                    title="Датчик следует за реле"
+                    onClick={() => patch({ light: { channel, on: null } })}
+                  >
+                    авто
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={light === true}
+                    title="Свет включили руками, мимо реле"
+                    onClick={() => patch({ light: { channel, on: true } })}
+                  >
+                    руками
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={light === false}
+                    title="Лампа сгорела: тока нет"
+                    onClick={() => patch({ light: { channel, on: false } })}
+                  >
+                    сгорела
+                  </button>
+                </span>
+              </li>
+            );
+          })}
       </ul>
+      <div className="row wrap">
+        <button type="button" className="btn btn-small btn-ghost" onClick={() => patch({ poll: true })}>
+          Опросить датчики сейчас
+        </button>
+      </div>
     </details>
   );
 }

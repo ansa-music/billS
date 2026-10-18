@@ -3,21 +3,35 @@ import { loadConfig } from './config.ts';
 import { openDb } from './db.ts';
 import { buildApp } from './http/app.ts';
 import { Hub } from './hub.ts';
-import { SimulatorLampDriver } from './lamps/simulator.ts';
+import { createLampDriver } from './lamps/factory.ts';
 import { seedDemo } from './seed.ts';
+import { managerMatcher } from './settings.ts';
 
 const config = loadConfig();
 const db = openDb(config.dbPath);
 const seeded = seedDemo(db, Date.now(), config.demoTimezone);
 
-// Stage 5 replaces the simulator with a real controller driver.
-const simulator = new SimulatorLampDriver({ latencyMs: config.simulatorLatencyMs });
-const hub = new Hub({ db, clock: systemClock, lampDriver: simulator });
-const app = buildApp(hub, { simulator, logger: true });
+const lamps = createLampDriver(config);
+const hub = new Hub({
+  db,
+  clock: systemClock,
+  lampDriver: lamps.driver,
+  monitorOptions: { intervalMs: config.lampPollMs, alertAfterMs: config.lampAlertAfterMs },
+  isManager: managerMatcher(config.managerActors),
+});
+const app = buildApp(hub, { simulator: lamps.simulator, logger: true });
 
 hub.start();
 await app.listen({ host: config.host, port: config.port });
-app.log.info({ dbPath: config.dbPath, seeded }, 'HUB started');
+app.log.info(
+  {
+    dbPath: config.dbPath,
+    seeded,
+    lampDriver: config.lampDriver,
+    lampPollMs: hub.monitor.supported ? config.lampPollMs : 'unsupported',
+  },
+  'HUB started',
+);
 
 let stopping = false;
 async function shutdown(signal: string) {
@@ -26,6 +40,7 @@ async function shutdown(signal: string) {
   app.log.info({ signal }, 'HUB stopping');
   await app.close();
   hub.close();
+  lamps.close();
   db.close();
   process.exit(0);
 }

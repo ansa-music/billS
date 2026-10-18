@@ -24,8 +24,18 @@ const PHASE_LABEL = { free: 'Свободен', opening: 'Включаем св�
 
 function LampBadge({ lamp }: { lamp: TableView['lamp'] }) {
   const switching = lamp.reported !== lamp.desired;
+  // The current sensor disagrees with the relay: a dead bulb or a bypassed relay.
+  const sensorOff = lamp.currentOn !== null && !switching && lamp.currentOn !== (lamp.reported === 'ON');
   const label =
-    lamp.reported === 'UNKNOWN' ? 'Свет: нет ответа' : lamp.reported === 'ON' ? 'Свет включён' : 'Свет выключен';
+    lamp.reported === 'UNKNOWN'
+      ? 'Свет: нет ответа'
+      : sensorOff
+        ? lamp.reported === 'ON'
+          ? 'Свет включён, тока нет'
+          : 'Свет горит без команды'
+        : lamp.reported === 'ON'
+          ? 'Свет включён'
+          : 'Свет выключен';
   return (
     <span className="lamp" data-lamp={lamp.reported.toLowerCase()} data-switching={switching || undefined} title={label}>
       <span className="lamp-dot" aria-hidden="true" />

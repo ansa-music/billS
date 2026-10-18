@@ -754,6 +754,10 @@ summary:focus-visible {
   gap: 6px;
 }
 
+.relays.relays-wide {
+  grid-template-columns: 1fr;
+}
+
 .toast {
   position: fixed;
   left: 50%;
