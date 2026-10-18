@@ -74,7 +74,7 @@ test('cli check reports a healthy database and fails on a corrupt one', async (t
   assert.equal(ok.code, 0, ok.stderr);
   const report = JSON.parse(ok.stdout) as ReturnType<typeof integrityCheck>;
   assert.equal(report.ok, true);
-  assert.ok(Number.isInteger(report.schemaVersion) && report.schemaVersion >= 1); // grows with every migration
+  assert.ok(Number.isInteger(report.schemaVersion) && (report.schemaVersion ?? 0) >= 1); // grows with every migration
   assert.equal(report.counts?.tables, 6);
 
   const corrupt = join(h.dir, 'corrupt.db');
