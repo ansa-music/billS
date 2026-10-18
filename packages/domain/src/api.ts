@@ -303,6 +303,8 @@ export interface OpenPrepaidRequest {
   minutes: number;
   /** The price the cashier showed the guest (prepaidPrice); the HUB refuses if it no longer matches. */
   amount: Minor;
+  /** HUB time the price was computed for; honoured up to PREPAID_QUOTE_TTL_MS ago, else "now". */
+  quotedAt?: number;
   /** What the guest hands over, as for /pay. Must cover the whole amount. */
   parts: Array<{ method: PaymentMethod; amount: Minor }>;
 }

@@ -13,6 +13,11 @@ import { calculateCharge } from './tariff.ts';
 export const PREPAID_WARNING_MS = 5 * 60_000;
 export const PREPAID_MIN_MINUTES = 5;
 export const PREPAID_MAX_MINUTES = 12 * 60;
+/**
+ * The HUB honours a price shown to the guest up to this long ago. A game across a
+ * rate change costs a little more every few seconds; the guest pays what was quoted.
+ */
+export const PREPAID_QUOTE_TTL_MS = 60_000;
 
 export function assertPrepaidMinutes(minutes: number): void {
   if (!Number.isInteger(minutes) || minutes < PREPAID_MIN_MINUTES || minutes > PREPAID_MAX_MINUTES) {

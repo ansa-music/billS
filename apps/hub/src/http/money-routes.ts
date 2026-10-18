@@ -187,6 +187,7 @@ export function registerMoneyRoutes(app: FastifyInstance, hub: Hub): void {
             tariffId: { type: 'string' },
             minutes: { type: 'integer' },
             amount: moneySchema,
+            quotedAt: { type: 'integer' },
             parts: paymentPartsSchema,
           },
         },

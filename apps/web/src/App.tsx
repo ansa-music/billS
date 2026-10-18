@@ -10,6 +10,9 @@ import { OfflineBanner } from './OfflineBanner.tsx';
 import { ShiftPanel } from './cash/ShiftPanel.tsx';
 import { UnpaidPanel } from './cash/UnpaidPanel.tsx';
 import { AlertsBar, SimulatorPanel } from './Panels.tsx';
+import { openTable } from './prepaid/prepaid.ts';
+import type { PrepaidTarget } from './prepaid/PrepaidDialog.tsx';
+import { PrepaidDialog } from './prepaid/PrepaidDialog.tsx';
 import { TableCard } from './TableCard.tsx';
 
 const ACTOR_KEY = 'bills.actor';
@@ -83,6 +86,7 @@ export function App() {
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
   const [filter, setFilter] = useHallFilter();
+  const [prepaidFor, setPrepaidFor] = useState<PrepaidTarget | null>(null);
   useWakeLock();
 
   useEffect(() => {
@@ -178,9 +182,11 @@ export function App() {
                   currency={state.club.currency}
                   serverNow={serverNow}
                   busy={busy.has(table.id) || !online}
-                  onOpen={(tariffId) =>
-                    run(table.id, () => command(`/api/tables/${table.id}/open`, actor, { tariffId }))
+                  shiftOpen={state.shift !== null}
+                  onOpen={(tariffId, prepaidMinutes) =>
+                    run(table.id, () => openTable(table.id, actor, tariffId, prepaidMinutes))
                   }
+                  onPrepaid={(tariffId, minutes) => setPrepaidFor({ tableId: table.id, tariffId, minutes })}
                   onStop={(sessionId) => run(table.id, () => command(`/api/sessions/${sessionId}/stop`, actor))}
                 />
               </CardBoundary>
@@ -193,6 +199,19 @@ export function App() {
           <SimulatorPanel onError={setToast} />
         </aside>
       </div>
+
+      {prepaidFor && (
+        <PrepaidDialog
+          key={prepaidFor.tableId}
+          state={state}
+          actor={actor}
+          refresh={refresh}
+          notify={setToast}
+          serverNow={serverNow}
+          target={prepaidFor}
+          onClose={() => setPrepaidFor(null)}
+        />
+      )}
 
       {toast && (
         <div className="toast" role="status" onClick={() => setToast(null)}>

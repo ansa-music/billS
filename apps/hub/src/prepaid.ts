@@ -4,6 +4,7 @@ import {
   BillingError,
   calculateCharge,
   formatMoney,
+  PREPAID_QUOTE_TTL_MS,
   PREPAID_WARNING_MS,
   prepaidDeadline,
   prepaidPrice,
@@ -28,8 +29,9 @@ export interface OpenPrepaidInput {
 }
 
 export interface OpenPaidInput extends OpenPrepaidInput {
-  /** The price the guest was shown. */
+  /** The price the guest was shown, and when it was computed. */
   amount: number;
+  quotedAt?: number | undefined;
   parts: PaymentPart[];
 }
 
@@ -129,7 +131,10 @@ export class PrepaidService {
       assertPrepaidMinutes(input.minutes);
       requireOpenShift(db, clubId(db));
       const session = this.open(input);
-      const price = prepaidPrice(now, input.minutes, session.tariff, session.timezone);
+      // A recent quote stands: across a rate change the price moves every few seconds.
+      const q = input.quotedAt;
+      const at = q !== undefined && q >= now - PREPAID_QUOTE_TTL_MS && q <= now + 5_000 ? q : now;
+      const price = prepaidPrice(at, input.minutes, session.tariff, session.timezone);
       const money = (a: number) => formatMoney(a, session.tariff.currency);
       if (price !== input.amount) {
         throw new HubError(409, 'PREPAID_PRICE_CHANGED', `Цена изменилась: ${money(price)} — назовите гостю новую сумму`);

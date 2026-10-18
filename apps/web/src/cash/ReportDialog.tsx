@@ -1,9 +1,9 @@
-import { createPortal } from 'react-dom';
 import type { HubState, Minor, PaymentMethod, ShiftReport } from '@bills/domain';
 import { formatMoney, PAYMENT_METHODS } from '@bills/domain';
 import { formatClock } from '../format.ts';
 import { describeDifference, formatDateTime, METHOD_LABEL } from './format.ts';
 import { FormError, Modal } from './Modal.tsx';
+import { printShiftReport } from './print/ShiftReportForm.tsx';
 
 const ROWS: Array<[label: string, key: PaymentMethod | 'total']> = [
   ...PAYMENT_METHODS.map((m): [string, PaymentMethod] => [METHOD_LABEL[m], m]),
@@ -26,40 +26,34 @@ export function ReportDialog({
 }) {
   const title = (report?.kind ?? kind) === 'Z' ? 'Z-отчёт' : 'X-отчёт';
   return (
-    <>
-      <Modal
-        title={title}
-        onClose={onClose}
-        className="modal-wide"
-        footer={
-          <div className="modal-actions">
-            <button type="button" className="btn btn-ghost" onClick={onClose}>
-              Закрыть
-            </button>
-            <button type="button" className="btn btn-primary" disabled={!report} onClick={() => window.print()}>
-              Печать
-            </button>
-          </div>
-        }
-      >
-        {report ? (
-          <ReportBody report={report} club={club} />
-        ) : error ? (
-          <FormError error={error} />
-        ) : (
-          <p className="muted">Загрузка…</p>
-        )}
-      </Modal>
-      {/* A plain copy in <body> for printing: @media print shows only this. */}
-      {report &&
-        createPortal(
-          <div className="print-root">
-            <h1>{title}</h1>
-            <ReportBody report={report} club={club} />
-          </div>,
-          document.body,
-        )}
-    </>
+    <Modal
+      title={title}
+      onClose={onClose}
+      className="modal-wide"
+      footer={
+        <div className="modal-actions">
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Закрыть
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={!report}
+            onClick={() => report && printShiftReport(report, club)}
+          >
+            Печать
+          </button>
+        </div>
+      }
+    >
+      {report ? (
+        <ReportBody report={report} club={club} />
+      ) : error ? (
+        <FormError error={error} />
+      ) : (
+        <p className="muted">Загрузка…</p>
+      )}
+    </Modal>
   );
 }
 

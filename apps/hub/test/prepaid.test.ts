@@ -89,7 +89,7 @@ async function openTimed(hub: TestHub, table: string, minutes: number): Promise<
 function openPrepaid(
   hub: TestHub,
   table: string,
-  body: { minutes: number; amount: number; parts: Part[]; tariffId?: string },
+  body: { minutes: number; amount: number; parts: Part[]; tariffId?: string; quotedAt?: number },
   key?: string,
 ) {
   return send<OpenPrepaidResponse>(hub, `/api/tables/${tableId(hub, table)}/open-prepaid`, body, key);
@@ -337,6 +337,28 @@ test('paid prepaid time is refused when the price is not the HUB price', async (
   const high = await openPrepaid(hub, T1, { minutes: 60, amount: 2100_00, parts: [{ method: 'CASH', amount: 2100_00 }] });
   assertError(high, 409, 'PREPAID_PRICE_CHANGED');
   assertNothingCreated(hub, T1);
+});
+
+test('a price quoted less than a minute ago stands even when a rate change moves it', async (t) => {
+  const h = harness(t);
+  const hub = await h.start();
+  await openShift(hub, 1000_00);
+  // Monday 17:30 in Almaty: the next hour crosses into the 18:00 evening rate, so the
+  // price of "1 hour from now" grows every few seconds.
+  const quotedAt = MONDAY_NOON + 330 * MINUTE;
+  h.clock.set(quotedAt + 30_000);
+  // Half an hour at 2 000 ₸/h + half an hour at 3 000 ₸/h, as shown to the guest.
+  const parts: Part[] = [{ method: 'CASH', amount: 2500_00 }];
+
+  assertError(await openPrepaid(hub, T1, { minutes: 60, amount: 2500_00, parts }), 409, 'PREPAID_PRICE_CHANGED');
+  const stale = await openPrepaid(hub, T1, { minutes: 60, amount: 2500_00, parts, quotedAt: quotedAt - 60_000 });
+  assertError(stale, 409, 'PREPAID_PRICE_CHANGED');
+  assertNothingCreated(hub, T1);
+
+  const quoted = await openPrepaid(hub, T1, { minutes: 60, amount: 2500_00, parts, quotedAt });
+  assert.equal(quoted.status, 201);
+  assert.equal(quoted.body.check.total, 2500_00);
+  assert.equal(quoted.body.session.prepaid?.amount, 2500_00);
 });
 
 test('paid prepaid time must be paid in full, by card no more than the price', async (t) => {

@@ -22,10 +22,14 @@ import {
   parseMoney,
   PAYMENT_METHODS,
 } from '@bills/domain';
+import { getJson } from '../api.ts';
 import type { Desk, DeskProps } from './desk.ts';
 import { useAction, useDesk, useLoad } from './desk.ts';
 import { currencySymbol, describeDifference, formatWhen, METHOD_LABEL } from './format.ts';
 import { FormError, Modal, MoneyField, TextField } from './Modal.tsx';
+import { PaperSwitch } from './print/PaperSwitch.tsx';
+import { printReceipt } from './print/Receipt.tsx';
+import { printShiftReport } from './print/ShiftReportForm.tsx';
 import { RefundDialog } from './RefundDialog.tsx';
 import { ReportDialog } from './ReportDialog.tsx';
 
@@ -42,6 +46,13 @@ export function ShiftPanel(props: DeskProps) {
   const { shift, club, serverNow } = desk.state;
   const [dialog, setDialog] = useState<ShiftDialog | null>(null);
   const close = () => setDialog(null);
+  const xPrint = useAction();
+
+  // Straight to the printer, without opening the report.
+  const printX = (shiftId: string) =>
+    void xPrint.run(async () => {
+      printShiftReport(await getJson<ShiftReport>(`/api/shifts/${shiftId}/report`), club);
+    });
 
   return (
     <>
@@ -80,6 +91,19 @@ export function ShiftPanel(props: DeskProps) {
               Чеки смены
             </button>
           </div>
+          <div className="shift-print">
+            <PaperSwitch />
+            <button
+              type="button"
+              className="btn btn-small"
+              title="Печать X-отчёта"
+              disabled={xPrint.pending}
+              onClick={() => printX(shift.id)}
+            >
+              Печать X
+            </button>
+          </div>
+          <FormError error={xPrint.error?.message} />
           <button type="button" className="btn btn-outline-danger" onClick={() => setDialog({ kind: 'close', shift })}>
             Закрыть смену
           </button>
@@ -331,11 +355,21 @@ function ShiftChecksDialog({ desk, shiftId, onClose }: { desk: Desk; shiftId: st
                     </span>
                   )}
                   {c.refunded > 0 && <span className="sc-refunded">Возвращено {money(c.refunded)}</span>}
-                  {refundable && (
-                    <button type="button" className="btn btn-small btn-outline-danger" onClick={() => setRefundFor(c)}>
-                      Возврат
+                  <div className="row wrap sc-actions">
+                    <button
+                      type="button"
+                      className="btn btn-small"
+                      aria-label={`Печать счёта №${c.number}`}
+                      onClick={() => printReceipt(c, club)}
+                    >
+                      Печать
                     </button>
-                  )}
+                    {refundable && (
+                      <button type="button" className="btn btn-small btn-outline-danger" onClick={() => setRefundFor(c)}>
+                        Возврат
+                      </button>
+                    )}
+                  </div>
                 </li>
               );
             })}

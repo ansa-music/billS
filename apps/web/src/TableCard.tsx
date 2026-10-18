@@ -3,6 +3,8 @@ import type { AlertView, HubState, SessionView, TableView, TariffConfig } from '
 import { calculateCharge, formatMoney, nextPriceChange, priceAt } from '@bills/domain';
 import { formatClock, formatDuration, KIND_LABEL } from './format.ts';
 import { hasProblem, tablePhase } from './hall.ts';
+import { DurationSelect, PrepaidButton } from './prepaid/OpenControls.tsx';
+import { PrepaidBadge } from './prepaid/PrepaidBadge.tsx';
 
 const HOUR = 60 * 60 * 1000;
 /** After this long without a lamp confirmation staff are told the HUB is retrying. */
@@ -16,7 +18,12 @@ interface Props {
   serverNow: number;
   busy: boolean;
   alert: AlertView | undefined;
-  onOpen: (tariffId: string) => void;
+  /** A cash shift is open: prepaid games can be paid. */
+  shiftOpen: boolean;
+  /** `prepaidMinutes` opens it for a fixed time (paid after); null — no limit. */
+  onOpen: (tariffId: string, prepaidMinutes: number | null) => void;
+  /** Opens the prepaid dialog with the tariff and time picked on the card. */
+  onPrepaid: (tariffId: string, minutes: number | null) => void;
   onStop: (sessionId: string) => void;
 }
 
@@ -107,8 +114,9 @@ export function TableCard(props: Props) {
   );
 }
 
-function FreeBody({ table, tariffs, timezone, currency, serverNow, busy, onOpen }: Props) {
+function FreeBody({ table, tariffs, timezone, currency, serverNow, busy, shiftOpen, onOpen, onPrepaid }: Props) {
   const [tariffId, setTariffId] = useState(table.defaultTariffId);
+  const [minutes, setMinutes] = useState<number | null>(null);
   const [picking, setPicking] = useState(false);
   const tariff = tariffs.find((t) => t.id === tariffId) ?? tariffs.find((t) => t.id === table.defaultTariffId);
   const custom = tariffId !== table.defaultTariffId;
@@ -150,9 +158,11 @@ function FreeBody({ table, tariffs, timezone, currency, serverNow, busy, onOpen 
       )}
 
       <div className="actions">
-        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onOpen(tariffId)}>
+        <DurationSelect value={minutes} onChange={setMinutes} disabled={busy} />
+        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onOpen(tariffId, minutes)}>
           {custom && tariff ? `Открыть · ${tariff.name}` : 'Открыть'}
         </button>
+        <PrepaidButton shiftOpen={shiftOpen} disabled={busy} onClick={() => onPrepaid(tariffId, minutes)} />
         {tariffs.length > 1 && !picking && (
           <button type="button" className="link" onClick={() => setPicking(true)} disabled={busy}>
             {custom ? 'Сменить тариф' : 'Другой тариф'}
@@ -163,13 +173,16 @@ function FreeBody({ table, tariffs, timezone, currency, serverNow, busy, onOpen 
   );
 }
 
-function OpeningBody({ session, serverNow, busy, onStop }: Props & { session: SessionView }) {
+function OpeningBody({ session, serverNow, currency, busy, onStop }: Props & { session: SessionView }) {
   const waited = Math.max(0, serverNow - session.requestedAt);
   return (
     <div className="card-body">
       <p className="status">
         <span className="spinner" aria-hidden="true" /> Включаем свет… {Math.floor(waited / 1000)} с
       </p>
+      {session.prepaid && (
+        <PrepaidBadge prepaid={session.prepaid} serverNow={serverNow} timezone={session.timezone} currency={currency} />
+      )}
       <p className="hint">
         {waited >= SLOW_LAMP_MS
           ? 'Контроллер отвечает медленно — HUB повторяет команду'
@@ -199,7 +212,11 @@ function PlayingBody({
     return () => clearTimeout(t);
   }, [confirming]);
 
-  const end = Math.max(serverNow, startedAt);
+  const prepaid = session.prepaid ?? null;
+  // Paid upfront: the running amount is not what the guest owes.
+  const paidUpfront = prepaid?.amount != null;
+  // A timed game ends at its deadline even if the HUB's stop has not reached the screen yet.
+  const end = Math.max(Math.min(serverNow, prepaid?.until ?? serverNow), startedAt);
   const charge = calculateCharge(startedAt, end, session.tariff, session.timezone);
   const { freeMinutes, minimumMinutes } = session.tariff;
   const inFreeMinutes = freeMinutes > 0 && charge.billedSeconds === 0;
@@ -216,10 +233,15 @@ function PlayingBody({
       <p className="timer" aria-label="Время игры">
         {formatDuration(end - startedAt)}
       </p>
-      <p className="amount">
-        {amount}
-        {note && <span className="amount-note">{note}</span>}
-      </p>
+      {prepaid && (
+        <PrepaidBadge prepaid={prepaid} serverNow={serverNow} timezone={session.timezone} currency={currency} />
+      )}
+      {!paidUpfront && (
+        <p className="amount">
+          {amount}
+          {note && <span className="amount-note">{note}</span>}
+        </p>
+      )}
       <p className="card-meta">
         с {formatClock(startedAt, session.timezone)} · открыл {session.openedBy}
       </p>
@@ -231,13 +253,13 @@ function PlayingBody({
         at={end}
         emphasizeNext
       />
-      {inFreeMinutes && <p className="tip">Ошиблись столом? «Стоп» сейчас — без оплаты.</p>}
+      {inFreeMinutes && !paidUpfront && <p className="tip">Ошиблись столом? «Стоп» сейчас — без оплаты.</p>}
 
       <div className="actions">
         {confirming ? (
           <>
             <button type="button" className="btn btn-danger" disabled={busy} onClick={() => onStop(session.id)}>
-              Остановить · {amount}
+              {paidUpfront ? 'Остановить досрочно' : `Остановить · ${amount}`}
             </button>
             <button type="button" className="btn btn-ghost btn-narrow" onClick={() => setConfirming(false)}>
               Нет
