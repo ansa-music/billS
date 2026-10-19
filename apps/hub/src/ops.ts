@@ -133,7 +133,7 @@ export interface IntegrityReport {
   messages: string[];
   schemaVersion: number | null;
   sizeBytes: number;
-  /** Present only for a billS database (has schema_migrations). */
+  /** Present only for a TS database (has schema_migrations). */
   counts?: {
     tables: number;
     sessionsLive: number;
@@ -253,7 +253,7 @@ export function restoreDatabase(source: string, dbPath: string, now = Date.now()
   const plan = planRestore(source, dbPath, now);
   const check = integrityCheck(plan.source);
   if (!check.ok) throw new Error(`Копия повреждена, восстановление отменено: ${check.messages.join('; ')}`);
-  if (check.schemaVersion === null) throw new Error(`Это не база billS (нет schema_migrations): ${plan.source}`);
+  if (check.schemaVersion === null) throw new Error(`Это не база TS (нет schema_migrations): ${plan.source}`);
 
   mkdirSync(dirname(plan.target), { recursive: true });
   if (plan.keepPreviousAs) {

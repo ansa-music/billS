@@ -1,8 +1,8 @@
-# billS — ночной бэкап базы HUB. Запускается таймером bills-backup.timer.
+# TS — ночной бэкап базы HUB. Запускается таймером bills-backup.timer.
 # Вручную: systemctl start bills-backup.service  (или: bills backup)
 
 [Unit]
-Description=billS: резервная копия базы HUB
+Description=TS: резервная копия базы HUB
 Documentation=https://github.com/ansa-music/billS
 After=bills-hub.service
 

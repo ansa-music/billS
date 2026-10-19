@@ -26,6 +26,7 @@ import { OrdersPage } from './pages/Orders.tsx';
 import { OwnerPage } from './pages/Owner.tsx';
 import { PlatformPage } from './pages/Platform.tsx';
 import { StaffPage } from './pages/Staff.tsx';
+import { BrandMark } from './BrandMark.tsx';
 
 /** Route path → page. The table of routes (titles, icons, permissions) lives in router.tsx. */
 const PAGES: Record<string, (query: URLSearchParams) => ReactNode> = {
@@ -72,7 +73,7 @@ export function App() {
   const title = route?.title ?? 'Страницы нет';
 
   useEffect(() => {
-    document.title = `${title} — ${display?.title ?? state?.club.name ?? 'Billiard Control'}`;
+    document.title = `${title} — ${display?.title ?? state?.club.name ?? 'TS'}`;
   }, [title, display?.title, state?.club.name]);
 
   // Hall screen settings from the club → <html>, where the CSS picks them up.
@@ -103,9 +104,7 @@ export function App() {
   if (!state) {
     return (
       <main className="boot">
-        <span className="ball boot-ball" aria-hidden="true">
-          8
-        </span>
+        <BrandMark className="boot-mark" />
         <p>{hub.online ? 'Загрузка…' : 'Подключаемся к HUB клуба…'}</p>
       </main>
     );

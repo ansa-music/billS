@@ -1,9 +1,9 @@
-# billS HUB — сервер контроля бильярдного клуба.
+# TS HUB — сервер контроля бильярдного клуба.
 # Устанавливается скриптом deploy/linux/install.sh в /etc/systemd/system/.
 # Настройки HUB — в /etc/bills/hub.env. Логи: journalctl -u bills-hub -f
 
 [Unit]
-Description=billS HUB (сервер бильярдного клуба)
+Description=TS HUB (сервер бильярдного клуба)
 Documentation=https://github.com/ansa-music/billS
 After=network-online.target
 Wants=network-online.target

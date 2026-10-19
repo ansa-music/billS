@@ -1,4 +1,4 @@
-// Генератор иконок PWA: буквы «TS» на зелёном фоне.
+// Генератор иконок PWA: монограмма «TS» в палитре BrandMark.tsx (тёмная плашка, белые буквы).
 // Без зависимостей и без сети: буквы строятся геометрически (прямоугольники и
 // дуги), картинка растеризуется с supersampling 4×4, PNG кодируется вручную
 // (zlib из Node).
@@ -18,8 +18,8 @@ const OUT_DIR = join(ROOT, "apps", "web", "public", "icons");
 
 // ---------- цвета ----------
 
-const BG_LIGHT = hex("#2a9a63"); // блик слева-сверху (чуть светлее --accent)
-const BG_DARK = hex("#17563a"); // края (между --felt и --felt-dark)
+const BG_LIGHT = hex("#1c2e26"); // лёгкий блик слева-сверху
+const BG_DARK = hex("#14211b"); // фон монограммы, как в BrandMark.tsx и favicon
 const INK = hex("#ffffff"); // буквы
 
 function hex(s) {
@@ -224,11 +224,12 @@ function svgIcon() {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}">
   <defs>
     <radialGradient id="bg" gradientUnits="userSpaceOnUse" cx="${f(S * 0.3)}" cy="${f(S * 0.25)}" r="${f(S * 0.95)}">
-      <stop offset="0" stop-color="#2a9a63"/>
-      <stop offset="1" stop-color="#17563a"/>
+      <stop offset="0" stop-color="#1c2e26"/>
+      <stop offset="1" stop-color="#14211b"/>
     </radialGradient>
   </defs>
-  <rect width="${S}" height="${S}" rx="${f(S * 0.2)}" fill="url(#bg)"/>
+  <rect width="${S}" height="${S}" rx="${f(S * 0.25)}" fill="url(#bg)"/>
+  <rect x="${f(S * 0.0234)}" y="${f(S * 0.0234)}" width="${f(S * 0.9531)}" height="${f(S * 0.9531)}" rx="${f(S * 0.2266)}" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="${f(S * 0.047)}"/>
   <g fill="#ffffff">
     ${tBar}
     ${tStem}

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# update.sh — обновление billS HUB до нужного коммита с автоматическим откатом.
+# update.sh — обновление TS HUB до нужного коммита с автоматическим откатом.
 # Запуск от root:
 #   sudo bills update                       — до origin/main
 #   sudo bills update --ref v0.2.0          — до тега/ветки/коммита

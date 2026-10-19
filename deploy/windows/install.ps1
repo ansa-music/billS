@@ -2,7 +2,7 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-  Установка billS HUB на Windows (запасной вариант ОС). Идемпотентна: можно запускать повторно.
+  Установка TS HUB на Windows (запасной вариант ОС). Идемпотентна: можно запускать повторно.
 
 .DESCRIPTION
   powershell -ExecutionPolicy Bypass -File install.ps1 [-Ref main] [-Root C:\bills] [-HubHost 0.0.0.0] [-Port 4310]
@@ -223,7 +223,7 @@ $registerParams = @{
     Action      = $hubAction
     Trigger     = $hubTrigger
     Settings    = $hubSettings
-    Description = "billS HUB — сервер клуба. Обёртка: $($Paths.RunCmd). Лог: $(Join-Path $Paths.Logs 'hub.log')"
+    Description = "TS HUB — сервер клуба. Обёртка: $($Paths.RunCmd). Лог: $(Join-Path $Paths.Logs 'hub.log')"
     Force       = $true
 }
 if ($RunAs) {
@@ -257,7 +257,7 @@ if ($HubHost -eq '127.0.0.1' -or $HubHost -eq 'localhost') {
     Write-Info 'HUB_HOST=127.0.0.1 — HUB доступен только с этого ПК, правило брандмауэра не требуется.'
 } else {
     New-NetFirewallRule -DisplayName $script:FirewallRuleName -Direction Inbound -Action Allow -Protocol TCP `
-        -LocalPort $Port -Profile @('Private', 'Domain') -Description 'billS HUB: доступ планшетов и экрана зала из локальной сети' | Out-Null
+        -LocalPort $Port -Profile @('Private', 'Domain') -Description 'TS HUB: доступ планшетов и экрана зала из локальной сети' | Out-Null
     Write-Info "Открыт TCP $Port для профилей «Частная» и «Доменная» сеть."
     Write-Warn 'HUB НЕ должен быть доступен из интернета: не пробрасывайте порт на роутере, не включайте профиль «Общедоступная».'
     Write-Warn 'Если сеть клуба определена Windows как «Общедоступная» — переключите её на «Частная» (Параметры → Сеть и Интернет → свойства сети).'
@@ -278,7 +278,7 @@ $backupSettings = New-ScheduledTaskSettingsSet -Compatibility Win8 -MultipleInst
 $backupPrincipal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 Register-ScheduledTask -TaskName $script:BackupTaskName -Action $backupAction -Trigger $backupTrigger `
     -Settings $backupSettings -Principal $backupPrincipal -Force `
-    -Description "billS: ежедневный бэкап базы в $($Paths.Backups). Лог: $(Join-Path $Paths.Logs 'backup.log')" | Out-Null
+    -Description "TS: ежедневный бэкап базы в $($Paths.Backups). Лог: $(Join-Path $Paths.Logs 'backup.log')" | Out-Null
 Write-Info "powershell.exe $backupArgs"
 
 # ---------------------------------------------------------------------------
@@ -299,7 +299,7 @@ Write-Info "HUB работает: $(Format-Health -Health $health)"
 # ---------------------------------------------------------------------------
 $lan = @(Get-LanAddresses)
 Write-Host ''
-Write-Host '================= billS HUB установлен =================' -ForegroundColor Green
+Write-Host '================= TS HUB установлен =================' -ForegroundColor Green
 Write-Host "Версия кода:        $sha ($Ref)"
 if ($HubHost -eq '127.0.0.1' -or $HubHost -eq 'localhost') {
     Write-Host "Адрес (только ПК):  http://127.0.0.1:$Port/"

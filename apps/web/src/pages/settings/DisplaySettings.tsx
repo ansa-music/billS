@@ -3,6 +3,7 @@ import type { CardSize, ClubAdminView, DisplaySettings as Display, Theme, Waiter
 import { Field, Section, Segmented } from '../../ui.tsx';
 import type { SectionProps } from './shared.tsx';
 import { SaveBar, useDraft } from './shared.tsx';
+import { BrandMark } from '../../BrandMark.tsx';
 
 const LOGO_LIMIT = 200 * 1024;
 
@@ -72,7 +73,7 @@ export function DisplaySettings({ club, online, isBusy, run, onSaved, canEdit }:
         </div>
         <div className="logo-row">
           <div className="logo-preview" aria-label="Предпросмотр логотипа">
-            {logo && logoValid ? <img src={logo} alt="" /> : <span className="ball">8</span>}
+            {logo && logoValid ? <img src={logo} alt="" /> : <BrandMark />}
             <span>{(draft.title ?? '').trim() || club.name}</span>
           </div>
           <label className={`btn btn-small${disabled ? ' is-disabled' : ''}`}>

@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  Бэкап базы billS HUB: cli.ts backup → zip → удаление старых → (опц.) вторая копия и rclone.
+  Бэкап базы TS HUB: cli.ts backup → zip → удаление старых → (опц.) вторая копия и rclone.
 
 .DESCRIPTION
   backup.ps1 [-Root C:\bills] [-KeepDays 30] [-SecondDir E:\bills-backups] [-RcloneRemote remote:bills-backups]

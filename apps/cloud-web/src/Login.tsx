@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import type { OwnerView } from '@bills/domain';
 import { CloudRequestError, login } from './api.ts';
+import { BrandMark } from './BrandMark.tsx';
 
 export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
   const [email, setEmail] = useState('');
@@ -28,12 +29,10 @@ export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
     <main className="login-page">
       <form className="login" onSubmit={submit}>
         <div className="brand">
-          <span className="ball" aria-hidden="true">
-            8
-          </span>
+          <BrandMark />
           <div>
             <h1>Кабинет владельца</h1>
-            <p className="muted">Billiard Control</p>
+            <p className="muted">TS</p>
           </div>
         </div>
         <label className="field">

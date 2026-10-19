@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# backup.sh — резервная копия базы billS HUB.
+# backup.sh — резервная копия базы TS HUB.
 # Запускается таймером bills-backup.timer от пользователя bills (окружение из EnvironmentFile),
 # либо вручную: sudo bills backup   или   sudo /opt/bills/bin/backup.sh
 #

@@ -8,6 +8,7 @@ import { Overview } from './Overview.tsx';
 import { OfflineBanner } from './shared.tsx';
 import { Shifts } from './Shifts.tsx';
 import { Tariffs } from './Tariffs.tsx';
+import { BrandMark } from './BrandMark.tsx';
 
 type Auth = { status: 'loading' } | { status: 'anonymous' } | { status: 'ok'; owner: OwnerView };
 
@@ -84,9 +85,7 @@ export function App() {
     <div className="app">
       <header className="topbar">
         <a className="brand" href="#/">
-          <span className="ball" aria-hidden="true">
-            8
-          </span>
+          <BrandMark />
           <div>
             <h1>{owner.company.name}</h1>
             <p className="muted">Кабинет владельца</p>

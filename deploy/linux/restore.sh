@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# restore.sh — восстановление базы billS HUB из резервной копии.
+# restore.sh — восстановление базы TS HUB из резервной копии.
 # Запуск от root:
 #   sudo bills restore                         — показать последние бэкапы
 #   sudo bills restore <файл.db|файл.db.gz>    — восстановить (спросит подтверждение)

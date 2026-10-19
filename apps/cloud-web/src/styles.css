@@ -139,29 +139,12 @@ a {
   font-size: 14px;
 }
 
-.ball {
+.brand-mark {
+  display: block;
   width: 40px;
   height: 40px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: radial-gradient(circle at 35% 30%, #3b3b3b, #050505 70%);
-  color: #111;
-  font-weight: 800;
-  font-size: 13px;
-  position: relative;
-  isolation: isolate;
   flex: none;
-}
-
-.ball::before {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #f4f4f4;
+  border-radius: 10px;
 }
 
 .topbar-right {

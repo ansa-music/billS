@@ -207,7 +207,7 @@ sudo ufw status verbose
 **SSH на HUB — только ключи.** Отдельный пользователь `bills-admin` с sudo (служба HUB работает от пользователя `bills` без права входа):
 
 ```bash
-sudo adduser --disabled-password --gecos "billS support" bills-admin
+sudo adduser --disabled-password --gecos "TS support" bills-admin
 sudo usermod -aG sudo bills-admin
 sudo mkdir -p /home/bills-admin/.ssh
 echo '<публичный SSH-ключ поддержки>' | sudo tee -a /home/bills-admin/.ssh/authorized_keys

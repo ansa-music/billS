@@ -9,42 +9,25 @@
   color: var(--muted);
 }
 
-.ball {
+.brand-mark {
+  display: block;
   width: 40px;
   height: 40px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: radial-gradient(circle at 35% 30%, #444, #050505 70%);
-  color: #111;
-  font-weight: 800;
-  font-size: 13px;
-  position: relative;
-  isolation: isolate;
   flex: none;
+  border-radius: 10px;
   box-shadow: 0 4px 14px rgb(0 0 0 / 0.35);
 }
 
-.ball::before {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  width: 48%;
-  height: 48%;
-  border-radius: 50%;
-  background: #f4f4f4;
-}
-
-.boot-ball {
+.boot-mark {
   width: 64px;
   height: 64px;
-  font-size: 18px;
+  border-radius: 16px;
   animation: boot-roll 1.6s ease-in-out infinite;
 }
 
 @keyframes boot-roll {
   50% {
-    transform: translateY(-8px) rotate(12deg);
+    transform: translateY(-8px);
   }
 }
 
@@ -249,11 +232,11 @@
   text-overflow: ellipsis;
 }
 
-.topbar-ball {
+.topbar-mark {
   display: none;
   width: 34px;
   height: 34px;
-  font-size: 11px;
+  border-radius: 9px;
 }
 
 .topbar-tools {
@@ -556,8 +539,8 @@
     gap: 8px;
   }
 
-  .topbar-ball {
-    display: grid;
+  .topbar-mark {
+    display: block;
   }
 
   .topbar-title h1 {
@@ -641,7 +624,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .boot-ball,
+  .boot-mark,
   .bell[data-active] .icon {
     animation: none;
   }
