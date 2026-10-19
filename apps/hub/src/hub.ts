@@ -7,6 +7,8 @@ import type { Db } from './db.ts';
 import { afterCommit, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import { HubEvents } from './events.ts';
+import type { LicenseOptions } from './license.ts';
+import { LicenseService } from './license.ts';
 import { purgeIdempotencyKeys } from './idempotency.ts';
 import { record } from './journal.ts';
 import type { LampOptions } from './lamps/controller.ts';
@@ -57,6 +59,10 @@ export interface HubDeps {
   powerActions?: PowerActions;
   /** Cloud sync (stage 6); omitted = standalone club, the outbox just accumulates. */
   sync?: SyncOptions;
+  /** Licenses (packages/domain license.ts); omitted = not enforced (tests, demo). Call `hub.license.init()` before serving. */
+  license?: LicenseOptions;
+  /** Public demo club: four-digit demo keys and a softer login throttle (never on a real club). */
+  demo?: boolean;
 }
 
 /** The club server: wires storage, lamps and game rules together. */
@@ -82,6 +88,8 @@ export class Hub {
   readonly reports: ReportService;
   /** Access keys and login sessions. */
   readonly auth: AuthService;
+  /** The branch's license: what the HUB allows (decide) and the banner. */
+  readonly license: LicenseService;
   readonly #reconcileIntervalMs: number;
   readonly #isManager: (actor: string) => boolean;
   #reconcileTimer: NodeJS.Timeout | undefined;
@@ -126,7 +134,10 @@ export class Hub {
     });
     this.checks = new CheckService({ db: deps.db, clock: deps.clock, events: this.events, sessions: this.sessions });
     this.shifts = new ShiftService({ db: deps.db, clock: deps.clock, events: this.events });
-    this.sync = deps.sync ? new SyncWorker({ db: deps.db, clock: deps.clock, events: this.events, ...deps.sync }) : undefined;
+    this.license = new LicenseService({ db: deps.db, clock: deps.clock, events: this.events, options: deps.license });
+    this.sync = deps.sync
+      ? new SyncWorker({ db: deps.db, clock: deps.clock, events: this.events, license: this.license, ...deps.sync })
+      : undefined;
     this.prepaid = new PrepaidService({
       db: deps.db,
       clock: deps.clock,
@@ -136,11 +147,12 @@ export class Hub {
       lamps: this.lamps,
     });
     const common = { db: deps.db, clock: deps.clock, events: this.events };
-    this.settings = new SettingsService(common);
+    const limits = () => this.license.limits();
+    this.settings = new SettingsService({ ...common, limits });
     this.bar = new BarService(common);
-    this.staff = new StaffService(common);
+    this.staff = new StaffService({ ...common, limits });
     this.reports = new ReportService(common);
-    this.auth = new AuthService(common);
+    this.auth = new AuthService({ ...common, demo: deps.demo === true });
   }
 
   /** Restores lamps and pending commands after a (re)start. */
@@ -166,7 +178,13 @@ export class Hub {
   }
 
   state(): HubState {
-    return buildState(this.db, this.clock.now(), this.power.view(), this.sync ? this.sync.status() : syncStatus(this.db, false));
+    return buildState(
+      this.db,
+      this.clock.now(),
+      this.power.view(),
+      this.sync ? this.sync.status() : syncStatus(this.db, false),
+      this.license.shown(),
+    );
   }
 
   resolveAlert(alertId: string, actor: string): { id: string } {
@@ -231,7 +249,7 @@ export class Hub {
    */
   setManualMode(input: { enabled: boolean; reason?: string | undefined; actor: string; by?: Actor | undefined }): ManualMode {
     const by = input.by;
-    const isManager = (name: string) => (by && by.id !== null ? can(by.role, 'lamps.manual_off') : this.#isManager(name));
+    const isManager = (name: string) => (by && by.id !== null ? can(by.roles, 'lamps.manual_off') : this.#isManager(name));
     const mode = setManualMode(this.db, this.clock.now(), this.events, {
       enabled: input.enabled,
       reason: input.reason,

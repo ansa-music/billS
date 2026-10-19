@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ClubAdminView } from '@bills/domain';
 import { fetchJson } from '../api.ts';
-import { useAuth } from '../auth.ts';
 import { navigate, useLocation } from '../router.tsx';
 import { Loading, Page, Toast, useToast } from '../ui.tsx';
 import { useCommands, useHub } from '../useHub.tsx';
 import { ClubSection } from './settings/ClubSection.tsx';
 import { DisplaySettings } from './settings/DisplaySettings.tsx';
+import { LicenseSection } from './settings/LicenseSection.tsx';
 import { RulesSettings } from './settings/RulesSettings.tsx';
 import { TablesEditor } from './settings/TablesEditor.tsx';
 import { TariffsEditor } from './settings/TariffEditor.tsx';
@@ -18,6 +18,7 @@ const TABS = [
   { id: 'tariffs', title: 'Тарифы' },
   { id: 'display', title: 'Экран зала' },
   { id: 'rules', title: 'Правила' },
+  { id: 'license', title: 'Лицензия' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
 
@@ -27,10 +28,11 @@ function isTab(value: string | null): value is TabId {
 
 /** #/settings?tab=tables — club, tables, tariffs, hall screen look, house rules. */
 export function ClubSettingsPage() {
-  const { state, online } = useHub();
-  const { can } = useAuth();
+  const { state, online, version, license, canNow: can, can: roleCan } = useHub();
+  const tabs = TABS.filter((t) => t.id !== 'license' || roleCan('license.view'));
   const { query } = useLocation();
-  const tab: TabId = isTab(query.get('tab')) ? (query.get('tab') as TabId) : 'club';
+  const asked = query.get('tab');
+  const tab: TabId = isTab(asked) && tabs.some((t) => t.id === asked) ? asked : 'club';
   const { toast, show, clear } = useToast();
   const { isBusy, run } = useCommands(show);
   const [club, setClub] = useState<ClubAdminView | null>(null);
@@ -80,13 +82,15 @@ export function ClubSettingsPage() {
         return <DisplaySettings {...props} canEdit={can('display.edit')} />;
       case 'rules':
         return <RulesSettings {...props} canEdit={can('rules.edit')} />;
+      case 'license':
+        return null; // rendered below: it does not need GET /api/club
     }
   })();
 
   return (
     <Page title="Настройки клуба" subtitle={club ? `${club.name} · ${club.companyName}` : undefined}>
       <nav className="settings-tabs" aria-label="Разделы настроек">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.id}
             type="button"
@@ -98,8 +102,19 @@ export function ClubSettingsPage() {
           </button>
         ))}
       </nav>
-      {!club && !loadError && <Loading online={online} />}
-      {!club && loadError && <p className="empty">Не удалось загрузить настройки: {loadError}</p>}
+      {license?.readOnly && tab !== 'license' && (
+        <p className="blocked-note">Только чтение: {license.message ?? 'лицензия не активна'} Настройки сейчас не сохраняются.</p>
+      )}
+      {tab === 'license' && (
+        <LicenseSection
+          version={version}
+          timeZone={state.club.timezone}
+          online={online}
+          canInstall={roleCan('license.install')}
+        />
+      )}
+      {tab !== 'license' && !club && !loadError && <Loading online={online} />}
+      {tab !== 'license' && !club && loadError && <p className="empty">Не удалось загрузить настройки: {loadError}</p>}
       {club && !online && <p className="settings-offline">Нет связи с HUB — изменения пока нельзя сохранить.</p>}
       {section}
       <Toast message={toast} onClose={clear} />

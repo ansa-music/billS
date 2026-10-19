@@ -242,3 +242,57 @@
     flex: 1;
   }
 }
+
+/* «Лицензия» (settings/LicenseSection.tsx); also used on the platform page. */
+.license-facts {
+  display: grid;
+  gap: 10px;
+}
+
+.license-state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+}
+
+.license-facts code,
+.license-preview code {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.license-install {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.license-text {
+  width: 100%;
+  min-height: 96px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.license-preview {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.license-preview h4 {
+  margin: 0;
+  font-size: 14px;
+}
+
+@media (max-width: 600px) {
+  .license-facts .facts,
+  .license-preview .facts {
+    grid-template-columns: 1fr;
+  }
+}

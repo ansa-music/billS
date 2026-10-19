@@ -89,7 +89,7 @@ export const ROUTES: RouteDef[] = [
   { path: '/journal', title: 'Журнал', icon: 'journal', action: 'audit.view' },
   { path: '/equipment', title: 'Оборудование', short: 'Техника', icon: 'equipment', action: 'equipment.view' },
   { path: '/settings', title: 'Настройки клуба', short: 'Клуб', icon: 'settings', action: 'settings.view' },
-  { path: '/owner', title: 'Кабинет владельца', short: 'Кабинет', icon: 'owner', action: 'reports.view' },
+  { path: '/owner', title: 'Кабинет управляющего', short: 'Кабинет', icon: 'owner', action: 'reports.view' },
   { path: '/platform', title: 'Платформа', icon: 'platform', action: 'platform.view' },
   // Installers for the owner phone and the cash-desk computer; linked from the staff menu in the top bar.
   { path: '/apps', title: 'Приложения', icon: 'download', action: null, hidden: true },

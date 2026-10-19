@@ -195,7 +195,7 @@ export function registerMoneyRoutes(app: FastifyInstance, hub: Hub): void {
       ),
   );
 
-  // A cashier performs the refund; the approving manager is named in the body and checked by the domain rules.
+  // A refund is a senior's call (refund.approve); the approving manager is still named in the body and checked by the domain rules.
   app.post<{ Params: { checkId: string }; Body: RefundRequest }>(
     '/api/checks/:checkId/refund',
     {
@@ -217,7 +217,7 @@ export function registerMoneyRoutes(app: FastifyInstance, hub: Hub): void {
           status: 200,
           body: hub.checks.refund({ checkId: req.params.checkId, ...req.body, actor }),
         }),
-        'payment.take',
+        'refund.approve',
       ),
   );
 

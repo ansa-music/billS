@@ -455,8 +455,48 @@
 }
 
 .shell-main > .hall-offline,
+.shell-main > .license-banner,
 .shell-main > .pwa-banner {
   margin: 12px 24px 0;
+}
+
+/* License (license.tsx): yellow before the end, red in read-only mode. */
+.license-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in oklab, var(--warn) 60%, transparent);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--warn) 16%, var(--surface));
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.license-banner[data-tone='danger'] {
+  border-color: color-mix(in oklab, var(--danger) 60%, transparent);
+  background: color-mix(in oklab, var(--danger) 16%, var(--surface));
+}
+
+.license-banner-text {
+  margin: 0;
+  min-width: 0;
+}
+
+.license-banner-text strong {
+  font-weight: 650;
+  color: color-mix(in oklab, var(--warn) 65%, var(--text));
+}
+
+.license-banner[data-tone='danger'] .license-banner-text strong {
+  color: color-mix(in oklab, var(--danger) 70%, var(--text));
+}
+
+/* "Why is this switched off" under a hidden button. */
+.blocked-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 /* PWA strips under the top bar (pwa.tsx): a waiting update (blue) and an install hint (plain). */
@@ -585,6 +625,7 @@
   }
 
   .shell-main > .hall-offline,
+  .shell-main > .license-banner,
   .shell-main > .pwa-banner {
     margin: 10px 12px 0;
   }
@@ -665,6 +706,43 @@
   text-align: left;
 }
 
+.demo-keys-group {
+  margin-top: 12px;
+}
+
+.demo-keys-title {
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.demo-keys-group .demo-keys-list {
+  margin-top: 6px;
+}
+
 .demo-key-role {
   font-weight: 600;
+}
+
+/* Demo: big one-tap sign-in buttons for presentations. */
+.demo-keys-big .demo-key {
+  min-height: 64px;
+  font-size: 1.05rem;
+}
+
+.demo-keys-big .demo-key code {
+  font-size: 1.4rem;
+  letter-spacing: 0.15em;
+}
+
+/* Role on top, the key below in large type, never broken mid-key. */
+.demo-keys-big .demo-key {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4px;
+}
+
+.demo-keys-big .demo-key code {
+  white-space: nowrap;
 }

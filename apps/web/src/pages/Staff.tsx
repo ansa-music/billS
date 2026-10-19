@@ -1,29 +1,39 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { CreateStaffRequest, Role, StaffListResponse, StaffView, UpdateStaffRequest } from '@bills/domain';
-import { ASSIGNABLE_ROLES, ROLE_LABEL, canAssignRole } from '@bills/domain';
+import { ROLES, ROLE_LABEL, canAssignRoles, isPlatformRole, normalizeRoles, rolesLabel } from '@bills/domain';
 import { fetchJson } from '../api.ts';
 import { useAuth } from '../auth.ts';
 import { Confirm, Empty, Field, Loading, Modal, Page, Section, Toast, useToast } from '../ui.tsx';
 import { useCommands, useHub, useServerNow } from '../useHub.tsx';
 import { KeysModal } from './staff/KeysModal.tsx';
+import { LoginAttempts } from './staff/LoginAttempts.tsx';
 import './staff.css';
 
 const PIN_RE = /^\d{4,6}$/;
 
 interface FormState {
   name: string;
-  role: Role;
+  roles: Role[];
   pin: string;
   tableIds: string[];
 }
 
-/** Staff of the club: roles, access keys, PINs, assigned tables. Editing needs staff.edit. */
+/** Manager and the platform: they do not count against the license's staff limit. */
+const isLead = (r: Role) => r === 'manager' || isPlatformRole(r);
+
+/**
+ * Staff of the club: role sets, access keys, PINs, assigned tables, the login
+ * log. Editing needs staff.edit (and a license that is not read-only).
+ */
 export function StaffPage() {
-  const { state } = useHub();
-  const { staff: me, role: myRole, can } = useAuth();
+  const { state, canNow, blockedReason, license } = useHub();
+  const { staff: me, roles: myRoles, can } = useAuth();
   const { toast, show, clear } = useToast();
   const { run, isBusy } = useCommands(show);
+  // Errors of the add / edit form go into the form: a toast would sit under the dialog's backdrop.
+  const [formError, setFormError] = useState<string | null>(null);
+  const formCmd = useCommands(setFormError);
   const now = useServerNow();
 
   const [staff, setStaff] = useState<StaffView[] | null>(null);
@@ -48,26 +58,35 @@ export function StaffPage() {
     void load();
   }, [load, state?.serverNow]);
 
-  const canEdit = can('staff.edit');
+  /** The role allows it; the license may still put the club in read-only mode. */
+  const roleCanEdit = can('staff.edit');
+  const canEdit = canNow('staff.edit');
+  const editBlocked = roleCanEdit ? blockedReason('staff.edit') : null;
   const tables = state?.tables ?? [];
   const tableName = useMemo(() => new Map(tables.map((t) => [t.id, t.name])), [tables]);
-  const assignable = myRole ? ASSIGNABLE_ROLES[myRole] : [];
-  /** May the current user touch this row? The platform row is for the platform only. */
-  const rowEditable = (s: StaffView) => canEdit && canAssignRole(myRole, s.role);
-  /** Keys are issued top-down: only to roles the viewer may assign. One's own row is always visible. */
-  const rowKeysVisible = (s: StaffView) => rowEditable(s) || me?.id === s.id;
+  /** Roles the viewer may give, one by one (the HUB checks the whole set again). */
+  const assignable = useMemo(() => ROLES.filter((r) => canAssignRoles(myRoles, [r])), [myRoles]);
+  /** The viewer may manage this person at all (roles top-down). */
+  const manages = (s: StaffView) => roleCanEdit && canAssignRoles(myRoles, s.roles);
+  /** People from the manager's cloud cabinet are edited there. */
+  const rowEditable = (s: StaffView) => canEdit && s.origin !== 'cloud' && manages(s);
+  /** Keys: the people one manages, and one's own row. */
+  const rowKeysVisible = (s: StaffView) => manages(s) || me?.id === s.id;
+  const activeCount = staff?.filter((s) => s.isActive && !s.roles.some(isLead)).length ?? 0;
+  const maxStaff = license?.maxStaff ?? null;
 
   const submitForm = async (form: FormState): Promise<boolean> => {
-    const tableIds = form.role === 'waiter' ? form.tableIds : [];
+    setFormError(null);
+    const tableIds = form.roles.includes('waiter') ? form.tableIds : [];
     if (editing === 'new') {
-      const body: CreateStaffRequest = { name: form.name.trim(), role: form.role, tableIds };
+      const body: CreateStaffRequest = { name: form.name.trim(), roles: form.roles, tableIds };
       if (form.pin) body.pin = form.pin;
-      const created = await run<StaffView>('create', '/api/staff', body);
+      const created = await formCmd.run<StaffView>('create', '/api/staff', body);
       if (!created) return false;
       show(`Сотрудник «${created.name}» добавлен`);
     } else if (editing) {
-      const body: UpdateStaffRequest = { name: form.name.trim(), role: form.role, tableIds };
-      const updated = await run<StaffView>(`update:${editing.id}`, `/api/staff/${editing.id}/update`, body);
+      const body: UpdateStaffRequest = { name: form.name.trim(), roles: form.roles, tableIds };
+      const updated = await formCmd.run<StaffView>(`update:${editing.id}`, `/api/staff/${editing.id}/update`, body);
       if (!updated) return false;
       show('Изменения сохранены');
     }
@@ -95,22 +114,34 @@ export function StaffPage() {
     await load();
   };
 
+  const timeZone = state?.club.timezone ?? 'UTC';
+  const atLimit = maxStaff !== null && activeCount >= maxStaff;
+
   return (
     <Page
       title="Сотрудники и роли"
       subtitle="Кто работает в клубе и что ему можно."
       actions={
         canEdit && (
-          <button type="button" className="btn btn-primary" onClick={() => setEditing('new')} disabled={!state}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => setEditing('new')}
+            disabled={!state}
+            title={atLimit ? 'Лимит сотрудников по лицензии исчерпан' : undefined}
+          >
             Добавить сотрудника
           </button>
         )
       }
     >
       <p className="staff-hint">
-        Вход — по ключу доступа. Техподдержка выдаёт ключи владельцу, владелец — управляющим, управляющий — кассирам
-        и официантам. PIN остаётся для быстрой разблокировки планшета (этап 3).
+        Сотрудники входят по простому ключу из 6 цифр — он работает только в этом филиале. Управляющий входит по
+        длинному ключу (MGR-…). Ролей у человека может быть несколько, например «официант + кассир»: права
+        складываются. Сотрудников, заведённых в облачном кабинете, меняют там.
+        {maxStaff !== null && ` По лицензии — до ${maxStaff} работающих сотрудников, сейчас ${activeCount}.`}
       </p>
+      {editBlocked && <p className="blocked-note">{editBlocked}</p>}
 
       <Section>
         {loadError && <p className="field-error">{loadError}</p>}
@@ -132,10 +163,15 @@ export function StaffPage() {
                       {s.name}
                       {self && <span className="muted"> (вы)</span>}
                     </span>
-                    <span className="staff-role">{ROLE_LABEL[s.role]}</span>
+                    <span className="staff-role">{rolesLabel(s.roles)}</span>
                   </div>
                   <div className="staff-tags">
-                    <span className={`tag ${s.role === 'superadmin' ? 'tag-warn' : 'tag-muted'}`}>{ROLE_LABEL[s.role]}</span>
+                    {s.origin === 'cloud' && (
+                      <span className="tag tag-muted" title="Заведён в облачном кабинете управляющего — меняется там">
+                        из кабинета
+                      </span>
+                    )}
+                    {s.roles.some(isLead) && <span className="tag tag-warn">{rolesLabel(s.roles)}</span>}
                     <span className={`tag ${s.activeKeys > 0 ? 'tag-ok' : 'tag-warn'}`}>
                       {s.activeKeys > 0 ? `ключей: ${s.activeKeys}` : 'нет ключа'}
                     </span>
@@ -143,7 +179,7 @@ export function StaffPage() {
                     <span className={`tag ${s.isActive ? 'tag-ok' : 'tag-muted'}`}>{s.isActive ? 'работает' : 'уволен'}</span>
                   </div>
                   <div className="staff-tables">
-                    {s.role === 'waiter' ? (
+                    {s.roles.includes('waiter') ? (
                       s.tableIds.length === 0 ? (
                         <span>все столы</span>
                       ) : (
@@ -197,15 +233,21 @@ export function StaffPage() {
         )}
       </Section>
 
+      {can('staff.view') && <LoginAttempts timeZone={timeZone} />}
+
       {editing && (
         <StaffForm
           key={editing === 'new' ? 'new' : editing.id}
           staff={editing === 'new' ? null : editing}
           roles={assignable}
           tables={tables}
-          busy={isBusy('create') || (editing !== 'new' && isBusy(`update:${editing.id}`))}
+          busy={formCmd.isBusy('create') || (editing !== 'new' && formCmd.isBusy(`update:${editing.id}`))}
+          serverError={formError}
           onSubmit={submitForm}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            setEditing(null);
+            setFormError(null);
+          }}
         />
       )}
 
@@ -224,10 +266,15 @@ export function StaffPage() {
           key={keysFor.id}
           staff={staff?.find((s) => s.id === keysFor.id) ?? keysFor}
           canIssue={rowEditable(keysFor)}
-          timeZone={state?.club.timezone ?? 'UTC'}
+          issueBlocked={
+            !manages(keysFor)
+              ? null
+              : keysFor.origin === 'cloud'
+                ? 'Сотрудник заведён в облачном кабинете — ключи ему выдаются там.'
+                : editBlocked
+          }
+          timeZone={timeZone}
           now={now}
-          run={run}
-          isBusy={isBusy}
           onChanged={() => void load()}
           onClose={() => setKeysFor(null)}
         />
@@ -253,41 +300,59 @@ export function StaffPage() {
   );
 }
 
-/** Add or edit: name, role, PIN (on add only), tables for a waiter. */
+/** Add or edit: name, roles (a set), PIN (on add only), tables for a waiter. */
 function StaffForm({
   staff,
   roles,
   tables,
   busy,
+  serverError,
   onSubmit,
   onClose,
 }: {
   staff: StaffView | null;
+  /** Roles the editor may give. */
   roles: readonly Role[];
   tables: Array<{ id: string; name: string }>;
   busy: boolean;
+  /** The HUB refused (LICENSE_STAFF_LIMIT, a role that cannot be given…). */
+  serverError: string | null;
   onSubmit: (form: FormState) => Promise<boolean>;
   onClose: () => void;
 }) {
   const [form, setForm] = useState<FormState>(() => ({
     name: staff?.name ?? '',
-    role: staff?.role ?? roles[roles.length - 1] ?? 'waiter',
+    roles: staff ? [...staff.roles] : roles.includes('waiter') ? ['waiter'] : roles.slice(-1),
     pin: '',
     tableIds: staff?.tableIds ?? [],
   }));
   const [error, setError] = useState<string | null>(null);
 
-  // The row's current role stays selectable even if the editor could not assign it anew.
-  const roleOptions = staff && !roles.includes(staff.role) ? [staff.role, ...roles] : roles;
+  // The person's current roles stay visible, even one the editor could not give anew.
+  const roleOptions = ROLES.filter((r) => roles.includes(r) || form.roles.includes(r));
+
+  const toggleRole = (r: Role) =>
+    setForm((f) => {
+      if (f.roles.includes(r)) return { ...f, roles: f.roles.filter((x) => x !== r) };
+      // Manager and the platform roles stand alone: picking one clears the rest, and the other way round.
+      const kept: Role[] = isLead(r) ? [] : f.roles.filter((x) => !isLead(x));
+      return { ...f, roles: ROLES.filter((x) => x === r || kept.includes(x)) };
+    });
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const name = form.name.trim();
     if (!name) return setError('Укажите имя');
     if (name.length > 80) return setError('Имя — не длиннее 80 символов');
+    const checked = normalizeRoles(form.roles);
+    if (!checked.ok) return setError(checked.message);
+    const added = checked.roles.filter((r) => !staff?.roles.includes(r));
+    if (added.some((r) => !roles.includes(r))) {
+      return setError('Эту роль вы назначить не можете');
+    }
     if (form.pin && !PIN_RE.test(form.pin)) return setError('PIN — от 4 до 6 цифр');
     setError(null);
-    if (await onSubmit({ ...form, name })) onClose();
+    if (await onSubmit({ ...form, name, roles: checked.roles })) onClose();
   };
 
   const toggleTable = (id: string) =>
@@ -295,6 +360,8 @@ function StaffForm({
       ...f,
       tableIds: f.tableIds.includes(id) ? f.tableIds.filter((x) => x !== id) : [...f.tableIds, id],
     }));
+
+  const shown = error ?? serverError;
 
   return (
     <Modal open title={staff ? 'Изменить сотрудника' : 'Новый сотрудник'} onClose={onClose}>
@@ -309,17 +376,24 @@ function StaffForm({
             onChange={(e) => setForm({ ...form, name: e.target.value })}
           />
         </Field>
-        <Field label="Роль">
-          <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>
-            {roleOptions.map((r) => (
-              <option key={r} value={r}>
-                {ROLE_LABEL[r]}
-              </option>
-            ))}
-          </select>
+        <Field
+          label="Роли"
+          hint={form.roles.length > 0 ? `Права складываются: ${rolesLabel(form.roles)}` : 'Отметьте хотя бы одну роль'}
+        >
+          <div className="role-picker" role="group" aria-label="Роли">
+            {roleOptions.map((r) => {
+              const allowed = roles.includes(r);
+              return (
+                <label key={r} className="role-option" data-disabled={allowed ? undefined : ''}>
+                  <input type="checkbox" checked={form.roles.includes(r)} disabled={!allowed} onChange={() => toggleRole(r)} />
+                  <span>{ROLE_LABEL[r]}</span>
+                </label>
+              );
+            })}
+          </div>
         </Field>
         {!staff && (
-          <Field label="PIN" hint="4–6 цифр, можно задать позже">
+          <Field label="PIN" hint="4–6 цифр, можно задать позже. Это не ключ входа — ключ выдаётся кнопкой «Ключи».">
             <input
               className="pin-input"
               type="password"
@@ -332,7 +406,7 @@ function StaffForm({
             />
           </Field>
         )}
-        {form.role === 'waiter' && (
+        {form.roles.includes('waiter') && (
           <Field
             label="Столы официанта"
             hint={form.tableIds.length === 0 ? 'Ничего не выбрано — все столы' : `Выбрано: ${form.tableIds.length}`}
@@ -353,12 +427,16 @@ function StaffForm({
             </div>
           </Field>
         )}
-        {error && <p className="field-error">{error}</p>}
+        {shown && (
+          <p className="field-error" role="alert">
+            {shown}
+          </p>
+        )}
         <div className="form-actions modal-actions">
           <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>
             Отмена
           </button>
-          <button type="submit" className="btn btn-primary" disabled={busy}>
+          <button type="submit" className="btn btn-primary" disabled={busy || form.roles.length === 0}>
             {staff ? 'Сохранить' : 'Добавить'}
           </button>
         </div>

@@ -1,7 +1,19 @@
 import { useEffect, useState } from 'react';
-import type { OwnerView } from '@bills/domain';
+import type { OwnerView, PlatformMe } from '@bills/domain';
 import { AppsPage } from './Apps.tsx';
-import { CloudRequestError, SUPABASE_MODE, fetchMe, logout, subscribeAlerts, subscribeApi } from './api.ts';
+import {
+  CloudRequestError,
+  SUPABASE_MODE,
+  logout,
+  platformLogout,
+  restoreSession,
+  subscribeAlerts,
+  subscribeApi,
+} from './api.ts';
+import type { Identity } from './api.ts';
+import { CompanyPage } from './Company.tsx';
+import { PlatformCabinet } from './Platform.tsx';
+import { StaffPage } from './Staff.tsx';
 import { ClubPage } from './ClubPage.tsx';
 import { clubHref, requestRefresh, useHashRoute } from './hooks.ts';
 import { Login } from './Login.tsx';
@@ -14,7 +26,20 @@ import { Phone } from './Phone.tsx';
 import { enablePhonePush, resetPhonePush } from './phonePush.ts';
 import { nativeBridge } from './platform.ts';
 
-type Auth = { status: 'loading' } | { status: 'anonymous' } | { status: 'ok'; owner: OwnerView };
+type Auth =
+  | { status: 'loading' }
+  | { status: 'anonymous' }
+  /** `platform`: the same person is in the TS team too (Supabase e-mail sign-in) — a switch to that cabinet. */
+  | { status: 'ok'; owner: OwnerView; platform: PlatformMe | null }
+  /** Owner or tech of TS: the platform cabinet; `owner` when they also manage a client. */
+  | { status: 'platform'; me: PlatformMe; owner: OwnerView | null };
+
+/** Platform first: someone in the TS team lands in the platform cabinet. */
+function authOf(id: Identity): Auth {
+  if (id.platform) return { status: 'platform', me: id.platform, owner: id.owner };
+  if (id.owner) return { status: 'ok', owner: id.owner, platform: null };
+  return { status: 'anonymous' };
+}
 
 function useAuth() {
   const [auth, setAuth] = useState<Auth>({ status: 'loading' });
@@ -31,8 +56,8 @@ function useAuth() {
         return;
       }
       try {
-        const owner = await fetchMe();
-        if (!cancelled) setAuth({ status: 'ok', owner });
+        const id = await restoreSession();
+        if (!cancelled) setAuth(authOf(id));
       } catch (e) {
         if (cancelled) return;
         const err = e as CloudRequestError;
@@ -158,12 +183,32 @@ export function App() {
     return (
       <>
         <OfflineBanner online={online} />
-        <Login onLogin={(owner) => setAuth({ status: 'ok', owner })} />
+        <Login onLogin={(id) => setAuth(authOf(id))} />
       </>
     );
   }
 
-  const { owner } = auth;
+  if (auth.status === 'platform') {
+    const signOutPlatform = async () => {
+      try {
+        await platformLogout();
+      } catch {
+        // The session may already be gone; either way back to the login form.
+      }
+      setAuth({ status: 'anonymous' });
+    };
+    const asManager = auth.owner;
+    return (
+      <PlatformCabinet
+        me={auth.me}
+        online={online}
+        onSignOut={() => void signOutPlatform()}
+        onSwitchToManager={asManager ? () => setAuth({ status: 'ok', owner: asManager, platform: auth.me }) : undefined}
+      />
+    );
+  }
+
+  const { owner, platform } = auth;
 
   async function signOut() {
     try {
@@ -182,7 +227,7 @@ export function App() {
           <BrandMark />
           <div>
             <h1>{owner.company.name}</h1>
-            <p className="muted">Кабинет владельца</p>
+            <p className="muted">Кабинет управляющего</p>
           </div>
         </a>
         <div className="topbar-right">
@@ -195,6 +240,25 @@ export function App() {
           <span className="owner" title={owner.email}>
             {owner.name || owner.email}
           </span>
+          {platform && (
+            <button
+              type="button"
+              className="btn btn-small btn-link"
+              onClick={() => {
+                location.hash = '#/';
+                setAuth({ status: 'platform', me: platform, owner });
+              }}
+            >
+              Кабинет платформы
+            </button>
+          )}
+          <a
+            className="btn btn-small btn-link"
+            href="#/company"
+            aria-current={route.kind === 'company' ? 'page' : undefined}
+          >
+            Компания и сотрудники
+          </a>
           <a
             className="btn btn-small btn-link"
             href="#/phone"
@@ -216,6 +280,8 @@ export function App() {
       {route.kind === 'club' && <ClubPage key={route.id} id={route.id} />}
       {route.kind === 'tariffs' && <Tariffs key={route.id} id={route.id} />}
       {route.kind === 'shifts' && <Shifts key={route.id} id={route.id} />}
+      {route.kind === 'staff' && <StaffPage key={route.id} clubId={route.id} />}
+      {route.kind === 'company' && <CompanyPage />}
       {route.kind === 'phone' && <Phone />}
     </div>
   );

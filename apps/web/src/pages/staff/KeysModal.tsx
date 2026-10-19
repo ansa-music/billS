@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { AccessKeyView, IssueKeyRequest, IssueKeyResponse, KeyListResponse, StaffView } from '@bills/domain';
+import { SHORT_KEY_LENGTH, isShortKeyShape, isWeakShortKey, usesLongKey } from '@bills/domain';
 import { fetchJson } from '../../api.ts';
 import { hrefFor } from '../../router.tsx';
 import { Confirm, Empty, Field, Loading, Modal, formatDate, formatDateTime } from '../../ui.tsx';
+import { useCommands } from '../../useHub.tsx';
 
 const EXPIRY_OPTIONS: Array<{ value: string; label: string }> = [
   { value: '', label: 'Бессрочно' },
+  { value: '1', label: '1 день' },
+  { value: '7', label: '7 дней' },
   { value: '30', label: '30 дней' },
   { value: '90', label: '90 дней' },
   { value: '365', label: '365 дней' },
@@ -29,33 +33,44 @@ function sortKeys(keys: AccessKeyView[], now: number): AccessKeyView[] {
   return [...keys].sort((a, b) => rank(a) - rank(b) || b.createdAt - a.createdAt);
 }
 
+/** "MGR-7K3Q-…" for a long key; a short one's prefix ("••••42") is already a mask. */
+function shownPrefix(k: AccessKeyView): string {
+  return k.kind === 'short' ? k.prefix : `${k.prefix}-…`;
+}
+
+/** "318 540" — easier to read out and type. */
+function spacedShortKey(key: string): string {
+  return isShortKeyShape(key) ? `${key.slice(0, 3)} ${key.slice(3)}` : key;
+}
+
 /** Login link with the key prefilled, for a QR code or a message to the employee. */
 function loginLinkFor(key: string): string {
   return `${window.location.origin}${window.location.pathname}${hrefFor('/login', { key })}`;
 }
 
 /**
- * Access keys of one employee: the list, revoking, and issuing a new one.
- * A freshly issued key is shown once; the HUB keeps only its hash.
+ * Access keys of one person: the list, revoking, replacing, and issuing a new
+ * one. Staff get a short key (6 digits, this branch only), a manager or the
+ * platform a long one — the HUB picks the kind by the roles. A freshly issued
+ * key is shown once; the HUB keeps only its hash.
  */
 export function KeysModal({
   staff,
   canIssue,
+  issueBlocked,
   timeZone,
   now,
-  run,
-  isBusy,
   onChanged,
   onClose,
 }: {
   staff: StaffView;
-  /** The viewer may issue and revoke keys of this employee. */
+  /** The viewer may issue and revoke keys of this person right now. */
   canIssue: boolean;
+  /** Why keys cannot be issued now (cloud staff, read-only license); shown instead of the form. */
+  issueBlocked: string | null;
   timeZone: string;
   /** The HUB clock (ms), for "expired". */
   now: number;
-  run: <T>(key: string, path: string, body?: object) => Promise<T | undefined>;
-  isBusy: (key: string) => boolean;
   /** Called after a key was issued or revoked so the staff list can refresh its counters. */
   onChanged: () => void;
   onClose: () => void;
@@ -64,6 +79,12 @@ export function KeysModal({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [issued, setIssued] = useState<IssueKeyResponse | null>(null);
   const [revoking, setRevoking] = useState<AccessKeyView | null>(null);
+  /** «Сменить»: the new key replaces this one (it is revoked once the new key is issued). */
+  const [replacing, setReplacing] = useState<AccessKeyView | null>(null);
+  // Errors stay inside the dialog: a page toast would sit under its backdrop.
+  const [error, setError] = useState<string | null>(null);
+  const { run, isBusy } = useCommands(setError);
+  const long = usesLongKey(staff.roles);
 
   const load = useCallback(async () => {
     try {
@@ -80,9 +101,14 @@ export function KeysModal({
   }, [load]);
 
   const issue = async (body: IssueKeyRequest): Promise<boolean> => {
+    setError(null);
     const r = await run<IssueKeyResponse>(`issue:${staff.id}`, `/api/staff/${staff.id}/keys`, body);
     if (!r) return false;
     setIssued(r);
+    if (replacing) {
+      await run<AccessKeyView>(`revoke:${replacing.id}`, `/api/keys/${replacing.id}/revoke`);
+      setReplacing(null);
+    }
     await load();
     onChanged();
     return true;
@@ -90,6 +116,7 @@ export function KeysModal({
 
   const revoke = async () => {
     if (!revoking) return;
+    setError(null);
     const r = await run<AccessKeyView>(`revoke:${revoking.id}`, `/api/keys/${revoking.id}/revoke`);
     setRevoking(null);
     if (!r) return;
@@ -98,6 +125,7 @@ export function KeysModal({
   };
 
   const sorted = keys ? sortKeys(keys, now) : null;
+  const issuing = canIssue && staff.isActive && !issueBlocked;
 
   return (
     <Modal open title={`Ключи доступа — ${staff.name}`} onClose={onClose}>
@@ -114,7 +142,8 @@ export function KeysModal({
               return (
                 <li key={k.id} className="key-row" data-status={status}>
                   <div className="key-main">
-                    <span className="key-prefix">{k.prefix}-…</span>
+                    <span className="key-prefix">{shownPrefix(k)}</span>
+                    <span className="tag tag-muted">{k.kind === 'short' ? '6 цифр' : 'длинный'}</span>
                     <span className={`tag ${STATUS_TAG[status]}`}>{STATUS_LABEL[status]}</span>
                     {k.label && <span className="key-label">{k.label}</span>}
                   </div>
@@ -144,8 +173,19 @@ export function KeysModal({
                       </div>
                     )}
                   </dl>
-                  {canIssue && status === 'active' && (
+                  {issuing && status === 'active' && (
                     <div className="key-actions">
+                      <button
+                        type="button"
+                        className="btn btn-small"
+                        onClick={() => {
+                          setReplacing(k);
+                          setError(null);
+                        }}
+                        disabled={replacing?.id === k.id}
+                      >
+                        Сменить
+                      </button>
                       <button
                         type="button"
                         className="btn btn-small btn-ghost"
@@ -162,12 +202,25 @@ export function KeysModal({
           </ul>
         )}
 
-        {canIssue && staff.isActive && (
-          <IssueForm busy={isBusy(`issue:${staff.id}`)} onSubmit={issue} />
+        {error && (
+          <p className="field-error" role="alert">
+            {error}
+          </p>
+        )}
+
+        {issuing && (
+          <IssueForm
+            long={long}
+            replacing={replacing}
+            busy={isBusy(`issue:${staff.id}`)}
+            onSubmit={issue}
+            onCancelReplace={() => setReplacing(null)}
+          />
         )}
         {canIssue && !staff.isActive && (
           <p className="hint">Сотрудник уволен — новые ключи ему не выдаются. Верните его в штат, чтобы выдать ключ.</p>
         )}
+        {issueBlocked && <p className="blocked-note">{issueBlocked}</p>}
       </div>
 
       <Confirm
@@ -175,7 +228,7 @@ export function KeysModal({
         title="Отозвать ключ?"
         text={
           revoking
-            ? `Ключ ${revoking.prefix}-… перестанет работать сразу; все входы по нему закроются. Если он нужен, выдайте новый.`
+            ? `Ключ ${shownPrefix(revoking)} перестанет работать сразу; все входы по нему закроются. Если он нужен, выдайте новый.`
             : undefined
         }
         confirmLabel="Отозвать"
@@ -188,32 +241,98 @@ export function KeysModal({
   );
 }
 
-/** Label and lifetime for a new key. */
-function IssueForm({ busy, onSubmit }: { busy: boolean; onSubmit: (body: IssueKeyRequest) => Promise<boolean> }) {
+/**
+ * Lifetime and label for a new key. A short key is random, or six digits the
+ * manager picks (checked for weak ones before sending; the HUB checks again).
+ */
+function IssueForm({
+  long,
+  replacing,
+  busy,
+  onSubmit,
+  onCancelReplace,
+}: {
+  long: boolean;
+  replacing: AccessKeyView | null;
+  busy: boolean;
+  onSubmit: (body: IssueKeyRequest) => Promise<boolean>;
+  onCancelReplace: () => void;
+}) {
   const [label, setLabel] = useState('');
   const [expires, setExpires] = useState('');
+  const [own, setOwn] = useState(false);
+  const [digits, setDigits] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const ownProblem = !own
+    ? null
+    : digits.length !== SHORT_KEY_LENGTH
+      ? `Нужно ровно ${SHORT_KEY_LENGTH} цифр`
+      : isWeakShortKey(digits)
+        ? 'Слишком простой ключ: не берите одинаковые цифры, подряд (123456) или повторы (121212)'
+        : null;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (ownProblem) return setError(ownProblem);
+    setError(null);
     const body: IssueKeyRequest = {};
     const l = label.trim();
     if (l) body.label = l;
     if (expires) body.expiresInDays = Number(expires);
-    if (await onSubmit(body)) setLabel('');
+    if (!long && own) body.key = digits;
+    if (await onSubmit(body)) {
+      setLabel('');
+      setDigits('');
+    }
   };
+
+  const title = replacing
+    ? `Сменить ключ ${replacing.kind === 'short' ? replacing.prefix : `${replacing.prefix}-…`}`
+    : long
+      ? 'Выдать длинный ключ'
+      : 'Выдать простой ключ';
 
   return (
     <form className="form keys-issue" onSubmit={(e) => void submit(e)}>
-      <h3>Выдать новый ключ</h3>
+      <h3>{title}</h3>
+      {replacing && <p className="hint">Старый ключ отзовётся сразу после выдачи нового.</p>}
+      {long ? (
+        <p className="hint">Управляющий входит длинным ключом вида MGR-XXXX-XXXX-XXXX-XXXX — он работает во всех филиалах.</p>
+      ) : (
+        <>
+          <p className="hint">Простой ключ — 6 цифр, работает только в этом филиале. Удобно вводить на планшете.</p>
+          <div className="seg-chips" role="radiogroup" aria-label="Какой ключ">
+            <button type="button" className="chip" role="radio" aria-checked={!own} aria-pressed={!own} onClick={() => setOwn(false)}>
+              Случайный
+            </button>
+            <button type="button" className="chip" role="radio" aria-checked={own} aria-pressed={own} onClick={() => setOwn(true)}>
+              Свои 6 цифр
+            </button>
+          </div>
+          {own && (
+            <Field label="Ключ" error={digits.length === SHORT_KEY_LENGTH ? ownProblem : null}>
+              <input
+                className="short-key-input"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                autoComplete="off"
+                maxLength={SHORT_KEY_LENGTH}
+                value={digits}
+                placeholder="______"
+                onChange={(e) => {
+                  setDigits(e.target.value.replace(/\D/g, '').slice(0, SHORT_KEY_LENGTH));
+                  setError(null);
+                }}
+              />
+            </Field>
+          )}
+        </>
+      )}
       <div className="form-row">
         <Field label="Подпись" hint="Необязательно: «планшет у бара», «телефон»">
-          <input
-            type="text"
-            value={label}
-            maxLength={80}
-            autoComplete="off"
-            onChange={(e) => setLabel(e.target.value)}
-          />
+          <input type="text" value={label} maxLength={80} autoComplete="off" onChange={(e) => setLabel(e.target.value)} />
         </Field>
         <Field label="Срок действия">
           <select value={expires} onChange={(e) => setExpires(e.target.value)}>
@@ -225,10 +344,16 @@ function IssueForm({ busy, onSubmit }: { busy: boolean; onSubmit: (body: IssueKe
           </select>
         </Field>
       </div>
+      {error && <p className="field-error">{error}</p>}
       <div className="form-actions">
-        <button type="submit" className="btn btn-primary" disabled={busy}>
-          {busy ? 'Выдаём…' : 'Выдать ключ'}
+        <button type="submit" className="btn btn-primary" disabled={busy || (own && !long && ownProblem !== null)}>
+          {busy ? 'Выдаём…' : replacing ? 'Выдать новый вместо старого' : long ? 'Выдать ключ' : 'Выдать простой ключ'}
         </button>
+        {replacing && (
+          <button type="button" className="btn btn-ghost" onClick={onCancelReplace} disabled={busy}>
+            Не менять
+          </button>
+        )}
       </div>
     </form>
   );
@@ -237,10 +362,16 @@ function IssueForm({ busy, onSubmit }: { busy: boolean; onSubmit: (body: IssueKe
 /** The one-time reveal of a new key, with copy buttons for the key and a login link. */
 function IssuedKey({ issued, onDone }: { issued: IssueKeyResponse; onDone: () => void }) {
   const link = loginLinkFor(issued.key);
+  const short = isShortKeyShape(issued.key);
   return (
     <section className="key-issued" aria-live="polite">
       <h3>Новый ключ выдан</h3>
-      <CopyBox value={issued.key} label="Ключ доступа" big />
+      {short && (
+        <p className="short-key-reveal" aria-label={`Ключ ${issued.key.split('').join(' ')}`}>
+          {spacedShortKey(issued.key)}
+        </p>
+      )}
+      <CopyBox value={issued.key} label="Ключ доступа" big={!short} />
       <p className="key-warning">Ключ показывается один раз. Передайте его сотруднику лично.</p>
       <CopyBox value={link} label="Ссылка для входа (ключ уже подставлен)" />
       <div className="form-actions">

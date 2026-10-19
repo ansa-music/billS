@@ -16,6 +16,11 @@ declare module '@ts-hub/seed.ts' {
   export function seedDemo(db: unknown, now: number, timezone?: string): boolean;
 }
 
+declare module '@ts-hub/demo-license.ts' {
+  export const DEMO_LICENSE_KEYS: Readonly<Record<string, string>>;
+  export function installDemoLicense(license: unknown, now: number): Promise<boolean>;
+}
+
 declare module '@ts-hub/lamps/simulator.ts' {
   export class SimulatorLampDriver {
     constructor(options?: { latencyMs?: number });
@@ -37,13 +42,17 @@ declare module '@ts-hub/hub.ts' {
       clock: { now(): number };
       lampDriver: unknown;
       ups?: unknown;
+      /** Omitted: licenses are not enforced. */
+      license?: { mode: 'enforce' | 'off'; publicKeys: Readonly<Record<string, string>>; hubId?: string };
+      demo?: boolean;
     });
+    readonly license: { init(): Promise<void> };
     readonly events: {
       on(event: 'changed', listener: (e: ChangeEvent) => void): unknown;
       off(event: 'changed', listener: (e: ChangeEvent) => void): unknown;
     };
     readonly auth: {
-      issueFixedKeys(keys: ReadonlyArray<{ role: string; key: string }>): unknown[];
+      issueFixedKeys(keys: ReadonlyArray<{ roles: readonly string[]; name: string; key: string }>): unknown[];
     };
     start(): void;
     close(): void;

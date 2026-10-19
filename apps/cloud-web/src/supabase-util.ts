@@ -79,7 +79,43 @@ export function describeAuthError(err: { status?: number; code?: string; message
 
 /** `https://<ref>.supabase.co` + `/owner/clubs/1/tariffs` → the `owner` Edge Function URL. */
 export function edgeUrl(supabaseUrl: string, path: string): string {
-  return `${supabaseUrl.replace(/\/+$/, '')}/functions/v1/owner${path.startsWith('/') ? path : `/${path}`}`;
+  return edgeFunctionUrl(supabaseUrl, 'owner', path);
+}
+
+/** `${SUPABASE_URL}/functions/v1/<fn><path>` — e.g. ('platform', '/platform/clients'). */
+export function edgeFunctionUrl(supabaseUrl: string, fn: string, path: string): string {
+  return `${supabaseUrl.replace(/\/+$/, '')}/functions/v1/${fn}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+/** An Edge Function's error body (`{error:{code,message}}` or a gateway's `{code,message}`) → code and text. */
+export function edgeErrorOf(status: number, data: unknown): { code: string; message: string } {
+  let code = 'HTTP_ERROR';
+  let message = `Облако ответило ошибкой ${status}`;
+  if (data && typeof data === 'object') {
+    const d = data as { error?: unknown; code?: unknown; message?: unknown; msg?: unknown };
+    if (d.error && typeof d.error === 'object') {
+      const e = d.error as { code?: unknown; message?: unknown };
+      if (typeof e.code === 'string') code = e.code;
+      if (typeof e.message === 'string') message = e.message;
+    } else {
+      if (typeof d.code === 'string') code = d.code;
+      if (typeof d.message === 'string') message = d.message;
+      else if (typeof d.msg === 'string') message = d.msg;
+    }
+  }
+  return { code, message };
+}
+
+/** Platform session as kept in localStorage; null when absent, broken or expired. */
+export function parsePlatformSession(raw: string | null, now: number): { token: string; expiresAt: number } | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as { token?: unknown; expiresAt?: unknown };
+    if (typeof v.token !== 'string' || !v.token || typeof v.expiresAt !== 'number') return null;
+    return v.expiresAt > now ? { token: v.token, expiresAt: v.expiresAt } : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Where a magic link returns: the cabinet's own page (respecting the base path), no query, no hash. */

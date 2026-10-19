@@ -1,4 +1,21 @@
 import type {
+  BlockClientRequest,
+  BranchView,
+  ClientView,
+  CloudKeyView,
+  CloudStaffView,
+  CreateBranchRequest,
+  CreateBranchResponse,
+  CreateClientRequest,
+  CreateClientResponse,
+  CreateCloudStaffRequest,
+  IssueCloudKeyRequest,
+  IssueCloudKeyResponse,
+  IssuedLongKey,
+  LicenseTermsRequest,
+  LicenseView,
+  PlatformMe,
+  UpdateCloudStaffRequest,
   ClubDetails,
   CloudSessionView,
   CreateOwnerKeyResponse,
@@ -13,7 +30,7 @@ import type {
   UpdateTariffsResponse,
 } from '@bills/domain';
 import * as http from './api-http.ts';
-import type { RegisterDeviceBody } from './api-core.ts';
+import type { CloudRequestError, RegisterDeviceBody } from './api-core.ts';
 import type { AlertEvent } from './api-supabase.ts';
 import { SUPABASE_MODE } from './config.ts';
 
@@ -130,4 +147,148 @@ export function subscribeAlerts(listener: (alert: AlertEvent) => void): () => vo
     cancelled = true;
     stop?.();
   };
+}
+
+// --- platform cabinet (owner / tech of TS) ------------------------------------
+
+const PLATFORM_HINT_KEY = 'ts.cabinet.platform';
+
+function setPlatformHint(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(PLATFORM_HINT_KEY, '1');
+    else localStorage.removeItem(PLATFORM_HINT_KEY);
+  } catch {
+    // storage blocked: after a reload the cabinet asks the manager session first
+  }
+}
+
+/**
+ * Was the last sign-in here a platform one? The self-hosted cookie is HttpOnly, so the shell
+ * remembers which cabinet to restore; with Supabase — a platform token or any Supabase session
+ * (the platform owner may sign in by e-mail).
+ */
+export async function platformSessionLikely(): Promise<boolean> {
+  if (SUPABASE_MODE) return (await sb()).hasPlatformSession();
+  try {
+    return localStorage.getItem(PLATFORM_HINT_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export async function platformLogin(key: string): Promise<PlatformMe> {
+  const res = SUPABASE_MODE ? await (await sb()).platformLogin(key) : await http.platformLogin(key);
+  setPlatformHint(true);
+  return res.me;
+}
+
+export async function platformMe(): Promise<PlatformMe> {
+  try {
+    return SUPABASE_MODE ? await (await sb()).platformMe() : await http.platformMe();
+  } catch (e) {
+    if ((e as CloudRequestError).status === 401) setPlatformHint(false);
+    throw e;
+  }
+}
+
+export async function platformLogout(): Promise<void> {
+  try {
+    return SUPABASE_MODE ? await (await sb()).platformLogout() : await http.platformLogout();
+  } finally {
+    setPlatformHint(false);
+  }
+}
+
+export async function listClients(): Promise<ClientView[]> {
+  return SUPABASE_MODE ? (await sb()).listClients() : http.listClients();
+}
+
+export async function createClient(body: CreateClientRequest): Promise<CreateClientResponse> {
+  return SUPABASE_MODE ? (await sb()).createClient(body) : http.createClient(body);
+}
+
+/** Extend or change the terms; the cloud re-signs the license. */
+export async function setLicense(companyId: string, terms: LicenseTermsRequest): Promise<ClientView> {
+  return SUPABASE_MODE ? (await sb()).setLicense(companyId, terms) : http.setLicense(companyId, terms);
+}
+
+export async function blockClient(companyId: string, blocked: boolean, reason?: string): Promise<ClientView> {
+  const body: BlockClientRequest = reason ? { blocked, reason } : { blocked };
+  return SUPABASE_MODE ? (await sb()).blockClient(companyId, body) : http.blockClient(companyId, body);
+}
+
+export async function issueManagerKey(companyId: string): Promise<IssuedLongKey> {
+  return SUPABASE_MODE ? (await sb()).issueManagerKey(companyId) : http.issueManagerKey(companyId);
+}
+
+// --- manager cabinet: license, branches, staff ------------------------------------
+
+export async function companyLicense(): Promise<LicenseView | null> {
+  return SUPABASE_MODE ? (await sb()).companyLicense() : http.companyLicense();
+}
+
+export async function listBranches(): Promise<BranchView[]> {
+  return SUPABASE_MODE ? (await sb()).listBranches() : http.listBranches();
+}
+
+export async function createBranch(body: CreateBranchRequest): Promise<CreateBranchResponse> {
+  return SUPABASE_MODE ? (await sb()).createBranch(body) : http.createBranch(body);
+}
+
+export async function listStaff(clubId?: string): Promise<CloudStaffView[]> {
+  return SUPABASE_MODE ? (await sb()).listStaff(clubId) : http.listStaff(clubId);
+}
+
+export async function createStaff(body: CreateCloudStaffRequest): Promise<CloudStaffView> {
+  return SUPABASE_MODE ? (await sb()).createStaff(body) : http.createStaff(body);
+}
+
+export async function updateStaff(id: string, body: UpdateCloudStaffRequest): Promise<CloudStaffView> {
+  return SUPABASE_MODE ? (await sb()).updateStaff(id, body) : http.updateStaff(id, body);
+}
+
+export async function issueStaffKey(staffId: string, body: IssueCloudKeyRequest): Promise<IssueCloudKeyResponse> {
+  return SUPABASE_MODE ? (await sb()).issueStaffKey(staffId, body) : http.issueStaffKey(staffId, body);
+}
+
+export async function revokeKey(keyId: string): Promise<CloudKeyView> {
+  return SUPABASE_MODE ? (await sb()).revokeKey(keyId) : http.revokeKey(keyId);
+}
+
+// --- who is signed in: the manager, the platform, or (Supabase) both --------------
+
+export interface Identity {
+  owner: OwnerView | null;
+  platform: PlatformMe | null;
+}
+
+/**
+ * E-mail and password. With Supabase one account may be a manager, a member of the platform
+ * team, or both; the self-hosted cloud signs in managers only (the platform uses a key).
+ */
+export async function loginEmail(email: string, password: string): Promise<Identity> {
+  if (SUPABASE_MODE) return (await sb()).loginEmail(email, password);
+  return { owner: await http.login(email, password), platform: null };
+}
+
+/** The stored session on start. Throws 401 when nobody is signed in, anything else to retry. */
+export async function restoreSession(): Promise<Identity> {
+  if (SUPABASE_MODE) {
+    const api = await sb();
+    const platform = await api.platformMeOrNull();
+    const owner = await api.ownerMeOrNull();
+    if (!owner && !platform) {
+      // A Supabase account matching nobody: fetchMe signs it out and words the error.
+      return { owner: await api.fetchMe(), platform: null };
+    }
+    return { owner, platform };
+  }
+  if (await platformSessionLikely()) {
+    try {
+      return { owner: null, platform: await platformMe() };
+    } catch (e) {
+      if ((e as CloudRequestError).status !== 401) throw e;
+    }
+  }
+  return { owner: await http.fetchMe(), platform: null };
 }

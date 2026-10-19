@@ -6,6 +6,7 @@ import { openDatabase } from './db/open.ts';
 import { buildApp } from './http/app.ts';
 import type { PushSender } from './push.ts';
 import { DisabledSender, FcmSender, loadServiceAccount, PushDispatcher, runWatchdogs } from './push.ts';
+import { licenseSignerFromEnv } from './license.ts';
 import { seedDemo } from './seed.ts';
 
 const config = loadConfig();
@@ -16,6 +17,7 @@ const { db, kind } = await openDatabase(config);
 const account = loadServiceAccount();
 let log: (message: string) => void = (message) => console.log(message);
 const sender: PushSender = account ? new FcmSender(account) : new DisabledSender((m) => log(m));
+const licenseSigner = licenseSignerFromEnv(process.env, (m) => log(m));
 const push = new PushDispatcher(db, sender, () => systemClock.now(), { maxAgeMs: config.pushMaxAgeMs, log: (m) => log(m) });
 
 const app = buildApp({
@@ -26,13 +28,14 @@ const app = buildApp({
   staticDir: config.webDistPath,
   push,
   publicUrl: config.publicUrl,
+  licenseSigner,
 });
 log = (message) => app.log.info(message);
 
 const applied = await migrate(db, Date.now());
 if (applied.length) app.log.info({ applied }, 'Миграции применены');
 let seeded = false;
-if (config.demoSeed) seeded = await seedDemo(db, Date.now(), (message) => app.log.info(message));
+if (config.demoSeed) seeded = await seedDemo(db, Date.now(), (message) => app.log.info(message)); // demo license: always the dev key
 
 await app.listen({ host: config.host, port: config.port });
 const webDistServed = existsSync(config.webDistPath);

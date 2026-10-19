@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { HubState, JournalCategory, JournalEntry } from '@bills/domain';
-import { formatMoney, ROLE_LABEL } from '@bills/domain';
+import { formatMoney, isRole, rolesLabel } from '@bills/domain';
 import type { Role } from '@bills/domain';
 import { fetchJournal } from '../api.ts';
 import { EmptyState, SectionCard } from '../components.tsx';
@@ -32,6 +32,11 @@ interface Described {
 }
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
+/** "Официант + кассир" from a role or a list of roles in an entry; '' when there is none. */
+const rolesOf = (v: unknown): string => {
+  const list: Role[] = (Array.isArray(v) ? v : [v]).filter(isRole);
+  return list.length ? rolesLabel(list) : '';
+};
 const METHOD_WORD: Record<string, string> = { CASH: 'наличные', CARD: 'карта', QR: 'QR' };
 const num = (v: unknown) => (typeof v === 'number' ? v : 0);
 
@@ -118,7 +123,7 @@ function describe(e: JournalEntry, state: HubState): Described {
     case 'tariff.updated':
       return { title: `Тариф изменён${str(d.name) ? `: «${str(d.name)}»` : ''}`, detail: Object.keys(d).join(', '), icon: 'tariffs', cat: 'club' };
     case 'staff.created':
-      return { title: `Новый сотрудник: ${str(d.name)}`, detail: str(d.role) ? `роль: ${str(d.role)}` : undefined, icon: 'staff', cat: 'club' };
+      return { title: `Новый сотрудник: ${str(d.name)}`, detail: rolesOf(d.roles ?? d.role) ? `роли: ${rolesOf(d.roles ?? d.role)}` : undefined, icon: 'staff', cat: 'club' };
     case 'staff.updated':
       return { title: 'Сотрудник изменён', detail: Object.keys(d).join(', '), icon: 'staff', cat: 'club' };
     case 'staff.pin_checked':
@@ -228,7 +233,7 @@ function describe(e: JournalEntry, state: HubState): Described {
     case 'key.issued':
       return {
         title: 'Выдан ключ доступа',
-        detail: [ROLE_LABEL[str(d.forRole) as Role], str(d.label)].filter(Boolean).join(' · ') || undefined,
+        detail: [rolesOf(d.forRoles ?? d.forRole), str(d.label)].filter(Boolean).join(' · ') || undefined,
         icon: 'staff',
         cat: 'club',
       };

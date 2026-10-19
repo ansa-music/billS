@@ -1,4 +1,6 @@
 import type { SqlDriver } from '../db/driver.ts';
+import type { LicenseSigner } from '../license.ts';
+import { licenseSignerFromEnv, signPendingLicenses } from '../license.ts';
 import type { Log, PushSender, WatchdogOptions } from '../push.ts';
 import { PushDispatcher, pushSenderFromEnv, RoutingSender } from '../push.ts';
 
@@ -20,6 +22,27 @@ export interface EdgeContext {
   jwtSecret: string | null;
   /** Origins allowed to call `owner` from a browser; empty → any (`*`), the token is the guard. */
   corsOrigins: string[];
+  /** Signs client licenses: LICENSE_SIGNING_KEY + LICENSE_KEY_ID, the dev key (logged) without them. */
+  licenseSigner: LicenseSigner;
+  /**
+   * Checks a Supabase Auth access token and returns its user, or null when the token is not
+   * valid. Built from SUPABASE_URL + SUPABASE_ANON_KEY (GET /auth/v1/user); null when they are
+   * missing. Used by `platform` (verify_jwt = false), which must check signatures itself.
+   */
+  authUser: AuthUserLookup | null;
+}
+
+export type AuthUserLookup = (accessToken: string) => Promise<{ id: string; email: string | null } | null>;
+
+/** The Auth API of the project answers GET /auth/v1/user only for a valid, unexpired token. */
+export function authApiLookup(supabaseUrl: string, anonKey: string, fetchFn: typeof fetch = fetch): AuthUserLookup {
+  const url = `${supabaseUrl.replace(/\/+$/, '')}/auth/v1/user`;
+  return async (token) => {
+    const res = await fetchFn(url, { headers: { authorization: `Bearer ${token}`, apikey: anonKey } });
+    if (!res.ok) return null;
+    const user = (await res.json()) as { id?: unknown; email?: unknown };
+    return typeof user.id === 'string' ? { id: user.id, email: typeof user.email === 'string' ? user.email : null } : null;
+  };
 }
 
 export type Env = Record<string, string | undefined>;
@@ -40,7 +63,8 @@ export interface EdgeContextOptions {
  * Builds the context from Supabase secrets / environment:
  * NOTIFY_SECRET, TS_CABINET_URL, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT, NTFY_TOKEN,
  * NTFY_DISABLED, CLOUD_FCM_SERVICE_ACCOUNT_JSON, SUPABASE_JWT_SECRET (optional), TS_CORS_ORIGINS,
- * CLOUD_HUB_OFFLINE_MINUTES (10), CLOUD_SHIFT_OPEN_HOURS (20), CLOUD_PUSH_MAX_AGE_MINUTES (120).
+ * CLOUD_HUB_OFFLINE_MINUTES (10), CLOUD_SHIFT_OPEN_HOURS (20), CLOUD_PUSH_MAX_AGE_MINUTES (120),
+ * LICENSE_SIGNING_KEY (PKCS#8 Ed25519; the dev key when missing), LICENSE_KEY_ID ('ts-2026').
  */
 export function edgeContext(db: SqlDriver, env: Env, options: EdgeContextOptions = {}): EdgeContext {
   const log = options.log ?? ((m: string) => console.log(m));
@@ -67,7 +91,21 @@ export function edgeContext(db: SqlDriver, env: Env, options: EdgeContextOptions
       .split(',')
       .map((s) => s.trim().replace(/\/+$/, ''))
       .filter(Boolean),
+    licenseSigner: licenseSignerFromEnv(env, log),
+    authUser:
+      env.SUPABASE_URL?.trim() && env.SUPABASE_ANON_KEY?.trim()
+        ? authApiLookup(env.SUPABASE_URL.trim(), env.SUPABASE_ANON_KEY.trim())
+        : null,
   };
+}
+
+/** Signs licenses written unsigned by SQL (ts_seed_demo_cloud); a failure is only logged. */
+export async function signPendingQuietly(ctx: Pick<EdgeContext, 'db' | 'licenseSigner' | 'log'>): Promise<void> {
+  try {
+    await signPendingLicenses(ctx.db, ctx.licenseSigner, ctx.log);
+  } catch (e) {
+    ctx.log(`Подпись лицензий: ${(e as Error).message}`);
+  }
 }
 
 /** Sends what is queued; a failure is logged, never turned into an error for the caller. */

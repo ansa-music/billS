@@ -251,7 +251,7 @@ function PausedSection({
         </p>
       )}
       <div className="drawer-actions">
-        {!resuming && (
+        {!resuming && hub.canNow('table.continue') && (
           <button
             type="button"
             className="btn btn-primary btn-large"
@@ -320,6 +320,8 @@ export function TableDrawer({
   const phase = tablePhase(table);
   const session = table.session;
   const busy = hub.isBusy(table.id) || !hub.online;
+  const openBlocked = hub.blockedReason('table.open');
+  const canContinue = hub.canNow('table.continue');
   const [tariffId, setTariffId] = useState(table.defaultTariffId);
   const [minutes, setMinutes] = useState<number | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -429,6 +431,10 @@ export function TableDrawer({
             currency={currency}
             defaultId={table.defaultTariffId}
           />
+          {openBlocked ? (
+            <p className="blocked-note">{openBlocked}</p>
+          ) : (
+          <>
           <div className="drawer-actions">
             <DurationSelect value={minutes} onChange={setMinutes} disabled={busy} />
             <button
@@ -446,6 +452,8 @@ export function TableDrawer({
             Свет включится сразу, время пойдёт, когда лампа подтвердит включение.
             {minutes != null && ' Игра на время: HUB остановит её сам, оплата после.'}
           </p>
+          </>
+          )}
         </section>
       )}
 
@@ -523,7 +531,7 @@ export function TableDrawer({
             />
           )}
           <div className="drawer-actions">
-            {!confirming && (
+            {!confirming && canContinue && (
               <button
                 type="button"
                 className="btn btn-ghost btn-large"
@@ -535,13 +543,13 @@ export function TableDrawer({
               </button>
             )}
             {stopButtons(charge.amount)}
-            {!confirming && (
+            {!confirming && canContinue && (
               <button type="button" className="btn btn-ghost btn-large" disabled={busy} onClick={() => setMoving((v) => !v)}>
                 {moving ? 'Не переносить' : 'Перенести'}
               </button>
             )}
           </div>
-          {refusal && !confirming && <p className="hint">{refusal}</p>}
+          {refusal && !confirming && canContinue && <p className="hint">{refusal}</p>}
         </section>
       )}
 

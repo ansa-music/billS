@@ -19,6 +19,7 @@ import { emptyBody, guard, runCommand } from './command.ts';
 import { registerHallRoutes } from './hall-routes.ts';
 import { registerMoneyRoutes } from './money-routes.ts';
 import { registerBarRoutes } from './routes/bar.ts';
+import { registerLicenseRoutes } from './routes/license.ts';
 import { registerReportRoutes } from './routes/reports.ts';
 import { registerSettingsRoutes } from './routes/settings.ts';
 import { registerStaffRoutes } from './routes/staff.ts';
@@ -60,7 +61,7 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof HubError) {
-      return reply.status(err.status).send({ error: { code: err.code, message: err.message } });
+      return reply.status(err.status).send({ error: { ...err.extra, code: err.code, message: err.message } });
     }
     if (err instanceof BillingError) {
       return reply.status(422).send({ error: { code: err.code, message: err.message } });
@@ -182,7 +183,7 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
           status: 200,
           body: hub.sessions.pause({ sessionId: req.params.sessionId, actor }),
         }),
-        'table.stop',
+        'table.continue',
       ),
   );
 
@@ -198,7 +199,7 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
           status: 200,
           body: hub.sessions.resume({ sessionId: req.params.sessionId, actor }),
         }),
-        'table.open',
+        'table.continue',
       ),
   );
 
@@ -223,7 +224,7 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
           status: 200,
           body: hub.sessions.transfer({ sessionId: req.params.sessionId, toTableId: req.body.toTableId, actor }),
         }),
-        'table.open',
+        'table.continue',
       ),
   );
 
@@ -310,6 +311,7 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   registerBarRoutes(app, hub);
   registerStaffRoutes(app, hub);
   registerReportRoutes(app, hub);
+  registerLicenseRoutes(app, hub);
 
   // Server-sent events: screens refetch /api/state when something changes.
   app.get('/api/events', (req, reply) => {

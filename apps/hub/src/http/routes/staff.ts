@@ -5,6 +5,13 @@ import type { Hub } from '../../hub.ts';
 import { guard, runCommand } from '../command.ts';
 
 const roleSchema = { type: 'string', enum: [...ROLES] } as const;
+const rolesSchema = { type: 'array', minItems: 1, maxItems: ROLES.length, items: { type: 'string', maxLength: 20 } } as const;
+
+/** `roles` (the set); `role` alone is still accepted from older screens. */
+function rolesOfBody(body: { roles?: readonly unknown[]; role?: string }): readonly unknown[] | undefined {
+  if (body.roles !== undefined) return body.roles;
+  return body.role !== undefined ? [body.role] : undefined;
+}
 const tableIdsSchema = { type: 'array', maxItems: 200, items: { type: 'string', minLength: 1, maxLength: 100 } } as const;
 
 interface AuditQueryString {
@@ -19,22 +26,23 @@ interface AuditQueryString {
 
 /**
  * Routes for staff, PIN, audit log: see api.ts (StaffView, AuditListResponse, …).
- * Role limits by the actor's own role (ASSIGNABLE_ROLES) are enforced in the UI
- * only until PIN login makes the actor trustworthy (stage 3).
+ * Who may hire whom (canAssignRoles) is checked in StaffService for the
+ * signed-in person.
  */
 export function registerStaffRoutes(app: FastifyInstance, hub: Hub): void {
   app.get('/api/staff', { preHandler: guard('staff.view') }, async (): Promise<StaffListResponse> => ({ staff: hub.staff.list() }));
 
-  app.post<{ Body: CreateStaffRequest }>(
+  app.post<{ Body: CreateStaffRequest & { role?: string } }>(
     '/api/staff',
     {
       schema: {
         body: {
           type: 'object',
           additionalProperties: false,
-          required: ['name', 'role'],
+          required: ['name'],
           properties: {
             name: { type: 'string', minLength: 1, maxLength: 200 },
+            roles: rolesSchema,
             role: roleSchema,
             pin: { type: 'string', maxLength: 20 },
             tableIds: tableIdsSchema,
@@ -47,7 +55,7 @@ export function registerStaffRoutes(app: FastifyInstance, hub: Hub): void {
         status: 201,
         body: hub.staff.create({
           name: req.body.name,
-          role: req.body.role,
+          roles: rolesOfBody(req.body) ?? [],
           pin: req.body.pin,
           tableIds: req.body.tableIds,
           actor,
@@ -56,7 +64,7 @@ export function registerStaffRoutes(app: FastifyInstance, hub: Hub): void {
       }), 'staff.edit'),
   );
 
-  app.post<{ Params: { staffId: string }; Body: UpdateStaffRequest }>(
+  app.post<{ Params: { staffId: string }; Body: UpdateStaffRequest & { role?: string } }>(
     '/api/staff/:staffId/update',
     {
       schema: {
@@ -65,6 +73,7 @@ export function registerStaffRoutes(app: FastifyInstance, hub: Hub): void {
           additionalProperties: false,
           properties: {
             name: { type: 'string', minLength: 1, maxLength: 200 },
+            roles: rolesSchema,
             role: roleSchema,
             pin: { type: ['string', 'null'], maxLength: 20 },
             isActive: { type: 'boolean' },
@@ -80,7 +89,7 @@ export function registerStaffRoutes(app: FastifyInstance, hub: Hub): void {
           staffId: req.params.staffId,
           by: by.id ? by : undefined,
           name: req.body.name,
-          role: req.body.role,
+          roles: rolesOfBody(req.body),
           pin: req.body.pin,
           isActive: req.body.isActive,
           tableIds: req.body.tableIds,

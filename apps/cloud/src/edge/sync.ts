@@ -1,10 +1,11 @@
 import type { SyncEventsRequest, SyncSnapshotRequest } from '@bills/domain';
+import { accessPackage } from '../access.ts';
 import { CloudError } from '../errors.ts';
 import { hubBackOnline } from '../push.ts';
 import type { HubRow } from '../sync.ts';
 import { acceptEvents, acceptSnapshot, findHubByKey, loadClub, settingsSince } from '../sync.ts';
 import type { EdgeContext } from './context.ts';
-import { flushQuietly, reportPushConfigured } from './context.ts';
+import { flushQuietly, reportPushConfigured, signPendingQuietly } from './context.ts';
 import type { EdgeRequest, Schema } from './http.ts';
 import { bearerToken, errorResponse, json, notFound, readJson, routeOf, validate } from './http.ts';
 
@@ -86,6 +87,7 @@ async function requireHub(ctx: EdgeContext, req: EdgeRequest, hubId: string): Pr
 
 export async function handleSync(req: EdgeRequest, ctx: EdgeContext): Promise<Response> {
   try {
+    await signPendingQuietly(ctx);
     const { path, query } = routeOf(req.url);
 
     if (req.method === 'POST' && path === '/sync/events') {
@@ -122,6 +124,21 @@ export async function handleSync(req: EdgeRequest, ctx: EdgeContext): Promise<Re
       const res = await settingsSince(ctx.db, club, since);
       await flushQuietly(ctx);
       await reportPushConfigured(ctx);
+      return json(200, res);
+    }
+
+    if (req.method === 'GET' && path === '/sync/access') {
+      const hub = await hubByKey(ctx, req);
+      const hubId = query.get('hubId');
+      if (hubId !== null && hubId !== hub.id) throw new CloudError(403, 'HUB_MISMATCH', 'Ключ выдан другому HUB');
+      const club = await loadClub(ctx.db, hub.club_id);
+      if (!club) throw new CloudError(500, 'CLUB_MISSING', 'Клуб этого HUB не найден');
+      await ctx.db.transaction(async (tx) => {
+        await tx.run('UPDATE hubs SET last_seen_at = ? WHERE id = ?', [ctx.now(), hub.id]);
+        await hubBackOnline(tx, ctx.now(), hub, club.name);
+      });
+      const res = await accessPackage(ctx.db, hub);
+      await flushQuietly(ctx);
       return json(200, res);
     }
 

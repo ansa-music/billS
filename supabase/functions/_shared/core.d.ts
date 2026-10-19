@@ -25,4 +25,5 @@ export function createPostgresDriver(pool: PgPoolLike): SqlDriver;
 export function edgeContext(db: SqlDriver, env: Record<string, string | undefined>): EdgeContext;
 export function handleSync(req: Request, ctx: EdgeContext): Promise<Response>;
 export function handleOwner(req: Request, ctx: EdgeContext): Promise<Response>;
+export function handlePlatform(req: Request, ctx: EdgeContext): Promise<Response>;
 export function handleNotify(req: Request, ctx: EdgeContext): Promise<Response>;

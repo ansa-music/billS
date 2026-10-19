@@ -20,12 +20,15 @@ import { afterCommit, all, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import type { HubEvents } from './events.ts';
 import { record } from './journal.ts';
+import type { LicenseLimits } from './staff.ts';
 import { clubId, loadSettings } from './views.ts';
 
 export interface SettingsServiceDeps {
   db: Db;
   clock: Clock;
   events: HubEvents;
+  /** License limits in force (maxTables); null or omitted = no limit. */
+  limits?: LicenseLimits | undefined;
 }
 
 interface TableRow {
@@ -222,6 +225,7 @@ export class SettingsService {
       this.#assertTableNameFree(club, name, null);
       this.#assertLampChannelFree(club, lampChannel, null);
       this.#assertTariffActive(club, input.defaultTariffId);
+      this.#assertTableLimit(club, null);
 
       const id = randomUUID();
       const sortOrder =
@@ -313,6 +317,7 @@ export class SettingsService {
         if (!input.isActive && row.busy === 1) {
           throw new HubError(409, 'TABLE_BUSY', `${row.name}: идёт игра, стол нельзя отключить`);
         }
+        if (input.isActive) this.#assertTableLimit(club, row.id);
         sets.push('is_active = ?');
         params.push(input.isActive ? 1 : 0);
         changed.isActive = input.isActive;
@@ -473,6 +478,16 @@ export class SettingsService {
       freeMinutes: config.freeMinutes,
       roundingMinor: config.roundingMinor,
     };
+  }
+
+  /** 409 LICENSE_TABLE_LIMIT when the club already has the license's maxTables active tables. */
+  #assertTableLimit(club: string, exceptId: string | null): void {
+    const max = this.deps.limits?.()?.maxTables;
+    if (max === null || max === undefined) return;
+    const n =
+      one<{ n: number }>(this.deps.db, 'SELECT COUNT(*) AS n FROM billiard_tables WHERE club_id = ? AND is_active = 1 AND id <> ?', club, exceptId ?? '')
+        ?.n ?? 0;
+    if (n >= max) throw new HubError(409, 'LICENSE_TABLE_LIMIT', `По лицензии в клубе не больше ${max} столов. Расширьте лицензию или отключите неиспользуемый стол.`);
   }
 
   #assertTableNameFree(club: string, name: string, exceptId: string | null): void {

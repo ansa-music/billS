@@ -45,6 +45,10 @@ verify_jwt = false
 [functions.owner]
 verify_jwt = true
 
+# The platform cabinet (owner and support of TS): its own session token from a long key, not a Supabase JWT.
+[functions.platform]
+verify_jwt = false
+
 # Called by pg_cron with the x-ts-cron secret.
 [functions.notify]
 verify_jwt = false

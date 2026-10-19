@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import type { Action, HubState, MeResponse, OpenTableRequest, Role } from '@bills/domain';
+import type { Action, HubState, LicenseStatus, MeResponse, OpenTableRequest, Role } from '@bills/domain';
 import { HubRequestError, UNAUTHORIZED_EVENT, command, fetchJson, fetchState, getAuthToken, hubUrl } from './api.ts';
 import { AUTH_CHANGED_EVENT, actorName, readAuth, writeAuth } from './auth.ts';
 
@@ -179,9 +179,18 @@ export interface HubContextValue {
   refresh: () => Promise<void>;
   /** Who is logged in on this screen (the session names the actor on the HUB; the name goes to logs). */
   actor: string;
+  /** primaryRole(roles), for display. */
   role: Role | null;
-  /** Permission check for the current role (see packages/domain permissions.ts). */
+  /** Everything the signed-in person holds; rights are the union. */
+  roles: readonly Role[];
+  /** Role check only (see packages/domain permissions.ts): pages, what to show at all. */
   can: (action: Action) => boolean;
+  /** License of this branch (state.license); null when not enforced. */
+  license: LicenseStatus | null;
+  /** Role AND license (`canNow`): buttons the HUB would refuse in read-only mode or without the module. */
+  canNow: (action: Action) => boolean;
+  /** Why `action` is not available right now (role, read-only, module), or null. */
+  blockedReason: (action: Action) => string | null;
   /** Runs a command with a busy flag under `keys` (a transfer locks both tables); errors go to the toast. */
   run: (keys: string | string[], fn: () => Promise<unknown>) => Promise<boolean>;
   isBusy: (key: string) => boolean;

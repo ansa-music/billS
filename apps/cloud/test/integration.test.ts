@@ -111,6 +111,9 @@ test('HUB offline → events pile up → cloud comes up → everything arrives o
   await c.app.listen({ host: '127.0.0.1', port });
 
   await sync(hub1).tick();
+  // The first answer carries a new accessVersion: the HUB pulls /sync/access and journals what it
+  // applied (new outbox events), which go out on the next tick.
+  await sync(hub1).tick();
   status = hub1.hub.state().sync;
   assert.equal(status.pending, 0, 'everything delivered');
   assert.equal(status.lastError, null);
@@ -140,6 +143,7 @@ test('HUB offline → events pile up → cloud comes up → everything arrives o
   const hub2 = await startHub(h2, url, HUB2);
   const game2 = await playGame(hub2, h2, 'Стол 1', 2 * HOUR); // 4000 ₸
   await sync(hub2).tick();
+  await sync(hub2).tick(); // the access package it applied on the first tick is journaled too
   assert.equal(undelivered(hub2), 0);
   rows = await cloudSessions(c, HUB2.id);
   assert.deepEqual(rows.map((r) => [r.id, r.amount]), [[game2, 4000_00]]);

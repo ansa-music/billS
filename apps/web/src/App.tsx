@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
+import type { Action } from '@bills/domain';
+import { canNow, decide, licenseGateOf } from '@bills/domain';
+import { LicenseBanner, blockedReason } from './license.tsx';
 import type { ReactNode } from 'react';
 import { setManualMode } from './api.ts';
 import { useAuth } from './auth.ts';
@@ -56,7 +59,7 @@ const PAGES: Record<string, (query: URLSearchParams) => ReactNode> = {
 export function App() {
   const hub = useHubConnection();
   const { path, query } = useLocation();
-  const { staff, role, can, logout } = useAuth();
+  const { staff, role, roles, can, logout } = useAuth();
   const now = useNow();
   const { theme, cycle } = useTheme();
   const [toast, setToast] = useState<string | null>(null);
@@ -87,9 +90,15 @@ export function App() {
     const cards = display?.cardSize ?? 'normal';
     if (cards === 'normal') delete html.dataset.cards;
     else html.dataset.cards = cards;
-    if (role === 'waiter' && display?.waiterSees === 'time') html.dataset.hideAmounts = '';
+    // Only a plain waiter: a waiter who is also a cashier sees the money.
+    const onlyWaiter = roles.length > 0 && roles.every((r) => r === 'waiter');
+    if (onlyWaiter && display?.waiterSees === 'time') html.dataset.hideAmounts = '';
     else delete html.dataset.hideAmounts;
-  }, [theme, display?.theme, display?.cardSize, display?.waiterSees, role]);
+  }, [theme, display?.theme, display?.cardSize, display?.waiterSees, roles]);
+
+  const license = hub.state?.license ?? null;
+  const allowedNow = useCallback((action: Action) => canNow(roles, action, licenseGateOf(license)), [roles, license]);
+  const whyBlocked = useCallback((action: Action) => blockedReason(roles, action, license), [roles, license]);
 
   const closeToast = useCallback(() => setToast(null), []);
 
@@ -123,7 +132,11 @@ export function App() {
     refresh: hub.refresh,
     actor,
     role,
+    roles,
     can,
+    license,
+    canNow: allowedNow,
+    blockedReason: whyBlocked,
     run: commands.run,
     isBusy: commands.isBusy,
     notify: setToast,
@@ -135,7 +148,12 @@ export function App() {
     resolveAlert: commands.resolveAlert,
   };
 
-  const visible = ROUTES.filter((r) => !r.hidden && r.action !== null && can(r.action));
+  // Pages follow the role; a module the license lacks hides its pages too. Read-only mode keeps every page.
+  const pageAllowed = (action: Action) => {
+    const d = decide(roles, action, licenseGateOf(license));
+    return d === 'ok' || d === 'read_only';
+  };
+  const visible = ROUTES.filter((r) => !r.hidden && r.action !== null && pageAllowed(r.action));
   const lampProblems = state.tables.filter((t) => t.lamp.reported === 'UNKNOWN').length;
   const powerProblem = state.power.configured && (!state.power.reachable || state.power.onBattery) ? 1 : 0;
   const badges: NavBadges = {
@@ -153,9 +171,16 @@ export function App() {
         </p>
       </Page>
     );
-  } else if (route.action && !can(route.action)) {
+  } else if (route.action && !pageAllowed(route.action)) {
     content = (
-      <Page title="Нет доступа" subtitle={`Раздел «${route.title}» недоступен для вашей роли.`}>
+      <Page
+        title="Нет доступа"
+        subtitle={
+          can(route.action)
+            ? `Раздел «${route.title}» не входит в лицензию клуба.`
+            : `Раздел «${route.title}» недоступен для вашей роли.`
+        }
+      >
         <p>
           <Link to="/">На экран зала</Link> или <Link to="/login">войти под другим сотрудником</Link>.
         </p>
@@ -193,6 +218,7 @@ export function App() {
             canResolveAlerts={can('alert.resolve')}
             busy={commands.anyBusy}
           />
+          <LicenseBanner license={license} />
           <DemoBanner />
           <OfflineBanner online={hub.online} />
           <PwaBanners />

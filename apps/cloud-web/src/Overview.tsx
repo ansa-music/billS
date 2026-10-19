@@ -4,6 +4,7 @@ import { formatClock, formatDateTime, localDay } from './format.ts';
 import { clubHref, usePoll } from './hooks.ts';
 import { AlertList, Difference, HubBadge, Section, StatTile, gamesLabel, loadingText } from './shared.tsx';
 import { ShiftsTable } from './Shifts.tsx';
+import { LicenseBanner, useCompanyLicense } from './Company.tsx';
 
 function tablesLabel(n: number): string {
   const mod10 = n % 10;
@@ -94,6 +95,7 @@ function ClubCard({ club, now }: { club: ClubSummary; now: number }) {
 
 export function Overview() {
   const { data, error } = usePoll(fetchOverview, 30_000);
+  const lic = useCompanyLicense();
 
   if (!data) {
     return <p className="boot-inline">{loadingText(error, 'обзор')}</p>;
@@ -108,6 +110,7 @@ export function Overview() {
 
   return (
     <>
+      <LicenseBanner license={lic.data ? lic.data.license : undefined} />
       <section className="totals" aria-label="Итоги по сети">
         <h2 className="section-title">
           {data.company.name}

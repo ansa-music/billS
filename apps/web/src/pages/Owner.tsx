@@ -81,7 +81,7 @@ export function OwnerPage() {
 
   return (
     <Page
-      title="Кабинет владельца"
+      title="Кабинет управляющего"
       wide
       subtitle={
         summary && tz

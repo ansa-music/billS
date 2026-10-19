@@ -1,7 +1,26 @@
 /** Self-hosted backend: the apps/cloud HTTP API (same origin in the browser, bearer token in the phone app). */
 import type {
   ApiError,
+  BlockClientRequest,
+  BranchView,
+  ClientView,
   ClubDetails,
+  CloudKeyView,
+  CloudStaffView,
+  CreateBranchRequest,
+  CreateBranchResponse,
+  CreateClientRequest,
+  CreateClientResponse,
+  CreateCloudStaffRequest,
+  IssueCloudKeyRequest,
+  IssueCloudKeyResponse,
+  IssuedLongKey,
+  LicenseTermsRequest,
+  LicenseView,
+  PlatformLoginRequest,
+  PlatformLoginResponse,
+  PlatformMe,
+  UpdateCloudStaffRequest,
   CloudKeyLoginRequest,
   CloudLoginResponse,
   CloudSessionView,
@@ -67,7 +86,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (res.status === 401) {
     const error = await toError(res);
     // The phone's token is dead (expired, signed out elsewhere): forget it, the shell shows the login form.
-    if (bridge && bridge.token() && !path.startsWith('/api/auth/login') && !path.startsWith('/api/auth/key')) {
+    if (bridge && bridge.token() && !path.startsWith('/api/auth/') && !path.startsWith('/api/platform/')) {
       await bridge.setToken(null).catch(() => undefined);
     }
     emit({ type: 'unauthorized' });
@@ -182,4 +201,76 @@ export async function removeDevice(id: string): Promise<void> {
 
 export function sendTestPush(): Promise<TestPushResponse> {
   return request<TestPushResponse>('/api/owner/push/test', { method: 'POST' });
+}
+
+// --- platform cabinet (owner / tech of TS; cookie `ts_platform`) -------------
+
+const enc = encodeURIComponent;
+
+export function platformLogin(key: string): Promise<PlatformLoginResponse> {
+  const body: PlatformLoginRequest = { key };
+  return request<PlatformLoginResponse>('/api/platform/login', json('POST', body));
+}
+
+export function platformMe(): Promise<PlatformMe> {
+  return request<PlatformMe>('/api/platform/me');
+}
+
+export async function platformLogout(): Promise<void> {
+  await request<unknown>('/api/platform/logout', { method: 'POST' });
+}
+
+export async function listClients(): Promise<ClientView[]> {
+  return (await request<{ clients: ClientView[] }>('/api/platform/clients')).clients;
+}
+
+export function createClient(body: CreateClientRequest): Promise<CreateClientResponse> {
+  return request<CreateClientResponse>('/api/platform/clients', json('POST', body));
+}
+
+export function setLicense(companyId: string, terms: LicenseTermsRequest): Promise<ClientView> {
+  return request<ClientView>(`/api/platform/clients/${enc(companyId)}/license`, json('POST', terms));
+}
+
+export function blockClient(companyId: string, body: BlockClientRequest): Promise<ClientView> {
+  return request<ClientView>(`/api/platform/clients/${enc(companyId)}/block`, json('POST', body));
+}
+
+export function issueManagerKey(companyId: string): Promise<IssuedLongKey> {
+  return request<IssuedLongKey>(`/api/platform/clients/${enc(companyId)}/manager-key`, { method: 'POST' });
+}
+
+// --- manager cabinet: license, branches, staff, short keys -------------------
+
+export async function companyLicense(): Promise<LicenseView | null> {
+  return (await request<{ license: LicenseView | null }>('/api/company/license')).license;
+}
+
+export async function listBranches(): Promise<BranchView[]> {
+  return (await request<{ branches: BranchView[] }>('/api/company/branches')).branches;
+}
+
+export function createBranch(body: CreateBranchRequest): Promise<CreateBranchResponse> {
+  return request<CreateBranchResponse>('/api/company/branches', json('POST', body));
+}
+
+export async function listStaff(clubId?: string): Promise<CloudStaffView[]> {
+  const q = clubId ? `?clubId=${enc(clubId)}` : '';
+  return (await request<{ staff: CloudStaffView[] }>(`/api/company/staff${q}`)).staff;
+}
+
+export function createStaff(body: CreateCloudStaffRequest): Promise<CloudStaffView> {
+  return request<CloudStaffView>('/api/company/staff', json('POST', body));
+}
+
+export function updateStaff(id: string, body: UpdateCloudStaffRequest): Promise<CloudStaffView> {
+  return request<CloudStaffView>(`/api/company/staff/${enc(id)}/update`, json('POST', body));
+}
+
+export function issueStaffKey(staffId: string, body: IssueCloudKeyRequest): Promise<IssueCloudKeyResponse> {
+  return request<IssueCloudKeyResponse>(`/api/company/staff/${enc(staffId)}/keys`, json('POST', body));
+}
+
+export function revokeKey(keyId: string): Promise<CloudKeyView> {
+  return request<CloudKeyView>(`/api/company/keys/${enc(keyId)}/revoke`, { method: 'POST' });
 }

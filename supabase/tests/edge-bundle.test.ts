@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { DEMO_HUBS, seedDemo } from '../../apps/cloud/src/seed.ts';
+import { DEMO_ACCESS_VERSION, DEMO_HUBS, seedDemo } from '../../apps/cloud/src/seed.ts';
 import { createSupabaseDb } from './harness.ts';
 
 const ROOT = new URL('../../', import.meta.url);
@@ -35,7 +35,7 @@ test('bundle: scripts/bundle-edge.mjs builds core.js that Deno can load (node:* 
     ctx,
   );
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { lastAcceptedId: null, inserted: 0, settingsVersion: 0 });
+  assert.deepEqual(await res.json(), { lastAcceptedId: null, inserted: 0, settingsVersion: 0, accessVersion: DEMO_ACCESS_VERSION });
   const notify = await core.handleNotify(new Request('http://edge.local/notify', { method: 'POST', headers: { 'x-ts-cron': 'x'.repeat(20) } }), ctx);
   assert.equal(notify.status, 200);
   assert.equal((await core.handleOwner(new Request('http://edge.local/owner/push'), ctx)).status, 401);

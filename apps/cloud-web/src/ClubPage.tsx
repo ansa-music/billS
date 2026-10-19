@@ -44,6 +44,9 @@ export function ClubHeader({ club, now, tab }: { club: ClubSummary; now: number;
           <a href={clubHref(club.id, 'tariffs')} aria-current={tab === 'tariffs' ? 'page' : undefined}>
             Тарифы
           </a>
+          <a href={clubHref(club.id, 'staff')} aria-current={tab === 'staff' ? 'page' : undefined}>
+            Сотрудники
+          </a>
         </nav>
       </div>
     </header>

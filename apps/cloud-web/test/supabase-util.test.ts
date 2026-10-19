@@ -5,7 +5,10 @@ import {
   authErrorFromHash,
   base64UrlToBytes,
   describeAuthError,
+  edgeErrorOf,
+  edgeFunctionUrl,
   edgeUrl,
+  parsePlatformSession,
   isIos,
   isVapidPublicKey,
   magicLinkRedirect,
@@ -115,4 +118,23 @@ test('isIos', () => {
   assert.equal(isIos('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)', 5), true);
   assert.equal(isIos('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)', 0), false);
   assert.equal(isIos('Mozilla/5.0 (Linux; Android 14)', 5), false);
+});
+
+test('edgeFunctionUrl: platform and owner company paths', () => {
+  assert.equal(edgeFunctionUrl('https://x.supabase.co/', 'platform', '/platform/clients'), 'https://x.supabase.co/functions/v1/platform/platform/clients');
+  assert.equal(edgeUrl('https://x.supabase.co', '/owner/company/branches'), 'https://x.supabase.co/functions/v1/owner/owner/company/branches');
+});
+
+test('edgeErrorOf: our error body, a gateway body, nothing', () => {
+  assert.deepEqual(edgeErrorOf(409, { error: { code: 'LICENSE_CLUB_LIMIT', message: 'Лимит' } }), { code: 'LICENSE_CLUB_LIMIT', message: 'Лимит' });
+  assert.deepEqual(edgeErrorOf(401, { code: 'UNAUTHORIZED', msg: 'no' }), { code: 'UNAUTHORIZED', message: 'no' });
+  assert.equal(edgeErrorOf(500, null).code, 'HTTP_ERROR');
+});
+
+test('parsePlatformSession: valid, expired, broken', () => {
+  assert.deepEqual(parsePlatformSession(JSON.stringify({ token: 't', expiresAt: 200 }), 100), { token: 't', expiresAt: 200 });
+  assert.equal(parsePlatformSession(JSON.stringify({ token: 't', expiresAt: 100 }), 100), null);
+  assert.equal(parsePlatformSession('{', 0), null);
+  assert.equal(parsePlatformSession(null, 0), null);
+  assert.equal(parsePlatformSession(JSON.stringify({ expiresAt: 5 }), 0), null);
 });

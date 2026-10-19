@@ -64,6 +64,7 @@ export class Harness {
       trustActorHeader: !secure,
     });
     await app.ready();
+    await hub.license.init();
     hub.start();
     this.current = { dbPath: this.dbPath, db, clock: this.clock, driver, hub, app };
     return this.current;

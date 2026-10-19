@@ -20,7 +20,8 @@ interface Target {
 
 /** Waiter's screen (#/orders): pick a table with a game, compose an order, see the game's orders. */
 export function OrdersPage() {
-  const { state, online } = useHub();
+  const { state, online, blockedReason } = useHub();
+  const orderBlocked = blockedReason('order.create');
   const serverNow = useServerNow();
   const { can } = useAuth();
   const { toast, show, clear } = useToast();
@@ -173,7 +174,7 @@ export function OrdersPage() {
   ]);
   const afterGame = state.orders.filter((o) => !onFloor.has(o.sessionId)).sort((a, b) => b.createdAt - a.createdAt);
   const afterGameOwed = afterGame.reduce((sum, o) => (o.status === 'OPEN' ? sum + o.total : sum), 0);
-  const canCancel = can('order.cancel');
+  const canCancel = blockedReason('order.cancel') === null;
   const checksLink = can('checks.view') ? <Link to="/checks">«Счета»</Link> : '«Счета»';
 
   return (
@@ -183,6 +184,7 @@ export function OrdersPage() {
       wide
     >
       <OfflineBanner online={online} />
+      {orderBlocked && <p className="blocked-note">{orderBlocked}</p>}
       {catalogError && <p className="bar-error">{catalogError}</p>}
 
       <Section title="Столы с игрой" aside={<span className="muted">{targets.length}</span>}>
@@ -322,7 +324,8 @@ export function OrdersPage() {
                 <button
                   type="button"
                   className="btn btn-primary"
-                  disabled={locked || cartLines.length === 0 || cartLines.some((l) => !l.product)}
+                  disabled={locked || orderBlocked !== null || cartLines.length === 0 || cartLines.some((l) => !l.product)}
+                  title={orderBlocked ?? undefined}
                   onClick={() => void submit()}
                 >
                   {isBusy('order') ? 'Отправляем…' : `Отправить заказ · ${selected.tableName}`}

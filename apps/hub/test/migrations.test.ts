@@ -5,6 +5,7 @@
  * ones on top, the way a future release will.
  */
 import { test } from 'node:test';
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { copyFileSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -156,4 +157,58 @@ test('a failing migration is rolled back whole and the old data stays usable', a
   const rolledBack = await h.start();
   assert.equal(sessionStatus(rolledBack, opened.body.id), 'ACTIVE');
   await waitFor(() => tableState(rolledBack, 'Стол 1').lamp.reported === 'ON');
+});
+
+test('013: old single roles become role sets, keys and sessions survive the staff rebuild', async (t) => {
+  const h = harness(t);
+  // The database as the previous release left it: migrations up to 012 only.
+  const oldDir = join(h.dir, 'migrations-012');
+  mkdirSync(oldDir);
+  for (const f of readdirSync(MIGRATIONS_DIR)) if (Number.parseInt(f, 10) <= 12) copyFileSync(new URL(f, MIGRATIONS_DIR), join(oldDir, f));
+  const old = openDb(h.dbPath, h.clock.now(), { migrationsDir: pathToFileURL(oldDir + '/') });
+  const now = h.clock.now();
+  old.prepare("INSERT INTO companies (id, name, created_at) VALUES ('co', 'Старая компания', ?)").run(now);
+  old.prepare("INSERT INTO clubs (id, company_id, name, timezone, currency, created_at) VALUES ('club', 'co', 'Старый клуб', 'Asia/Almaty', 'KZT', ?)").run(now);
+  const people = [
+    ['s-super', 'Платформа', 'superadmin'],
+    ['s-owner', 'Владелец', 'owner'],
+    ['s-manager', 'Управляющий', 'manager'],
+    ['s-cashier', 'Кассир', 'cashier'],
+    ['s-waiter', 'Официант', 'waiter'],
+  ];
+  for (const [id, name, role] of people) {
+    old.prepare("INSERT INTO staff (id, club_id, name, role, pin_hash, is_active, table_ids, created_at, updated_at) VALUES (?, 'club', ?, ?, NULL, 1, '[]', ?, ?)").run(id!, name!, role!, now, now);
+  }
+  const ownerKey = 'OWNER-ABCD-EFGH-JKMN-PQRS';
+  old
+    .prepare("INSERT INTO access_keys (id, club_id, staff_id, key_hash, prefix, created_at, created_by) VALUES ('k1', 'club', 's-owner', ?, 'OWNER-ABCD', ?, 'system')")
+    .run(createHash('sha256').update(ownerKey).digest('hex'), now);
+  old
+    .prepare("INSERT INTO auth_sessions (token_hash, staff_id, key_id, created_at, last_seen_at, expires_at) VALUES ('tok', 's-owner', 'k1', ?, ?, ?)")
+    .run(now, now, now + HOUR);
+  old.close();
+
+  const hub = await h.start(undefined, { secure: true });
+  const rows = all<{ id: string; role: string; roles: string; scope: string; origin: string }>(
+    hub.db,
+    'SELECT id, role, roles, scope, origin FROM staff ORDER BY id',
+  ).map((r) => ({ ...r, roles: JSON.parse(r.roles) as string[] }));
+  assert.deepEqual(rows, [
+    { id: 's-cashier', role: 'cashier', roles: ['cashier'], scope: 'club', origin: 'hub' },
+    { id: 's-manager', role: 'admin', roles: ['admin', 'senior'], scope: 'club', origin: 'hub' },
+    { id: 's-owner', role: 'manager', roles: ['manager'], scope: 'company', origin: 'hub' },
+    { id: 's-super', role: 'tech', roles: ['tech'], scope: 'platform', origin: 'hub' },
+    { id: 's-waiter', role: 'waiter', roles: ['waiter'], scope: 'club', origin: 'hub' },
+  ]);
+  const key = all<{ kind: string; origin: string }>(hub.db, "SELECT kind, origin FROM access_keys WHERE id = 'k1'")[0];
+  assert.deepEqual({ ...key }, { kind: 'long', origin: 'hub' });
+  assert.equal(all(hub.db, "SELECT token_hash FROM auth_sessions WHERE token_hash = 'tok'").length, 1);
+  assert.deepEqual(all(hub.db, 'PRAGMA foreign_key_check'), []);
+  // The FK to staff still holds after the rename.
+  assert.throws(() => hub.db.prepare("INSERT INTO access_keys (id, club_id, staff_id, kind, key_hash, prefix, created_at, created_by) VALUES ('x', 'club', 'nobody', 'long', 'h', 'p', 0, 's')").run(), /FOREIGN KEY/);
+
+  // The old owner's key still logs in — now as the client's manager.
+  const login = await hub.app.inject({ method: 'POST', url: '/api/auth/login', payload: { key: ownerKey } });
+  assert.equal(login.statusCode, 200);
+  assert.deepEqual(login.json().staff.roles, ['manager']);
 });

@@ -1,14 +1,16 @@
 import type { RegisterDeviceRequest, UpdatePushRulesRequest, UpdateTariffsRequest } from '@bills/domain';
 import { DEVICE_PLATFORMS, isNtfyTopicUrl, isPushKind, parseWebPushToken } from '@bills/domain';
+import { companyLicense, createBranch, createStaff, issueStaffKey, listBranches, listStaff, revokeStaffKey, updateStaff } from '../company.ts';
+import type { ManagerRef } from '../company.ts';
 import { CloudError } from '../errors.ts';
 import { b64urlDecode, registerDevice, removeDevice, saveRules } from '../push.ts';
 import { clubOfCompany } from '../reports.ts';
 import type { ClubRow } from '../settings.ts';
 import { updateTariffs } from '../sync.ts';
 import type { EdgeContext } from './context.ts';
-import { reportPushConfigured } from './context.ts';
+import { reportPushConfigured, signPendingQuietly } from './context.ts';
 import type { EdgeRequest, Schema } from './http.ts';
-import { bearerToken, errorResponse, json, notFound, readJson, routeOf, validate } from './http.ts';
+import { bearerToken, errorResponse, json, notFound, readJson, readOptionalJson, routeOf, validate } from './http.ts';
 
 /**
  * Edge Function `owner` (verify_jwt = true): what the cabinet cannot do through
@@ -22,6 +24,16 @@ import { bearerToken, errorResponse, json, notFound, readJson, routeOf, validate
  *   PUT    /owner/push/rules          UpdatePushRulesRequest → PushSettingsView
  *   POST   /owner/devices             RegisterDeviceRequest → DeviceView
  *   DELETE /owner/devices/:id         → { ok: true }
+ *
+ * The manager cabinet (owners rows are the client's managers), as /api/company/… of apps/cloud:
+ *   GET  /owner/company/license                → { license: LicenseView | null }
+ *   GET  /owner/company/branches               → { branches: BranchView[] }
+ *   POST /owner/company/branches               CreateBranchRequest → CreateBranchResponse (409 LICENSE_CLUB_LIMIT, 403 LICENSE_READ_ONLY)
+ *   GET  /owner/company/staff?clubId=          → { staff: CloudStaffView[] }
+ *   POST /owner/company/staff                  CreateCloudStaffRequest → CloudStaffView (409 LICENSE_STAFF_LIMIT)
+ *   POST /owner/company/staff/:id/update       UpdateCloudStaffRequest → CloudStaffView
+ *   POST /owner/company/staff/:id/keys         IssueCloudKeyRequest → IssueCloudKeyResponse (422 KEY_WEAK, 409 KEY_TAKEN)
+ *   POST /owner/company/keys/:id/revoke        → CloudKeyView
  */
 
 const tariffsSchema: Schema = {
@@ -133,7 +145,7 @@ function checkDeviceToken(req: RegisterDeviceRequest): void {
   }
 }
 
-function corsHeaders(req: EdgeRequest, ctx: EdgeContext): Record<string, string> {
+export function corsHeaders(req: EdgeRequest, ctx: Pick<EdgeContext, 'corsOrigins'>): Record<string, string> {
   const origin = req.headers.get('origin');
   const allowed = ctx.corsOrigins.length === 0 ? '*' : origin && ctx.corsOrigins.includes(origin) ? origin : null;
   if (!allowed) return {};
@@ -146,14 +158,42 @@ function corsHeaders(req: EdgeRequest, ctx: EdgeContext): Record<string, string>
   };
 }
 
+const companyNotFound = (): CloudError => new CloudError(404, 'NOT_FOUND', 'Такого адреса нет');
+
+/** /owner/company/<rest>: the manager cabinet. */
+async function handleCompany(req: EdgeRequest, ctx: EdgeContext, rest: string): Promise<unknown> {
+  const m = req.method;
+  const staffAction = /^\/staff\/([^/]+)\/(update|keys)$/.exec(rest);
+  const revoke = /^\/keys\/([^/]+)\/revoke$/.exec(rest);
+  const known = (m === 'GET' && ['/license', '/branches', '/staff'].includes(rest)) || (m === 'POST' && (['/branches', '/staff'].includes(rest) || staffAction || revoke));
+  if (!known) throw companyNotFound();
+  const owner = await requireOwner(req, ctx);
+  const me: ManagerRef = { id: owner.id, companyId: owner.company_id };
+  const now = ctx.now();
+  if (m === 'GET' && rest === '/license') return companyLicense(ctx.db, now, me);
+  if (m === 'GET' && rest === '/branches') return listBranches(ctx.db, me);
+  if (m === 'GET' && rest === '/staff') return listStaff(ctx.db, me, routeOf(req.url).query.get('clubId') || null);
+  if (rest === '/branches') return createBranch(ctx.db, ctx.licenseSigner, now, me, await readJson(req));
+  if (rest === '/staff') return createStaff(ctx.db, now, me, await readJson(req));
+  if (staffAction) {
+    const id = decodeURIComponent(staffAction[1]!);
+    if (staffAction[2] === 'update') return updateStaff(ctx.db, now, me, id, await readJson(req));
+    return issueStaffKey(ctx.db, now, me, id, await readOptionalJson(req));
+  }
+  return revokeStaffKey(ctx.db, now, me, decodeURIComponent(revoke![1]!));
+}
+
 export async function handleOwner(req: EdgeRequest, ctx: EdgeContext): Promise<Response> {
   const cors = corsHeaders(req, ctx);
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
   try {
+    await signPendingQuietly(ctx);
     // The cabinet calls `/functions/v1/owner/owner/...`: the function name may come twice.
     const path = routeOf(req.url).path.replace(/^\/owner(?=\/owner(\/|$))/, '');
     const m = req.method;
     const tariffs = /^\/owner\/clubs\/([^/]+)\/tariffs$/.exec(path);
+
+    if (path.startsWith('/owner/company/')) return json(200, await handleCompany(req, ctx, path.slice('/owner/company'.length)), cors);
     const device = /^\/owner\/devices\/([^/]+)$/.exec(path);
 
     if (m === 'PUT' && tariffs) {

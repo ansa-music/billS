@@ -40,12 +40,14 @@ test('GET /api/staff lists the demo staff with hasPin and never the PIN hash', a
   const h = harness(t);
   const hub = await h.start();
   const staff = await listStaff(hub);
-  assert.equal(staff.length, 5);
+  assert.equal(staff.length, 4);
   assert.deepEqual(
     staff.map((s) => s.role).sort(),
-    ['cashier', 'manager', 'owner', 'superadmin', 'waiter'],
+    ['admin', 'cashier', 'manager', 'waiter'],
   );
   for (const s of staff) {
+    assert.deepEqual(s.roles, [s.role]);
+    assert.equal(s.origin, 'hub');
     assert.equal(s.hasPin, true);
     assert.equal(s.isActive, true);
     assert.ok(!('pin' in s) && !('pinHash' in s) && !('pin_hash' in s), 'no PIN field is exposed');
@@ -59,7 +61,7 @@ test('GET /api/staff lists the demo staff with hasPin and never the PIN hash', a
 test('a new employee with a PIN can be verified; a wrong PIN is refused', async (t) => {
   const h = harness(t);
   const hub = await h.start();
-  const created = await createStaff(hub, { name: 'Ержан Кассир', role: 'cashier', pin: '2468' });
+  const created = await createStaff(hub, { name: 'Ержан Кассир', roles: ['cashier'], pin: '2468' });
   assert.equal(created.status, 201);
   assert.equal(created.body.hasPin, true);
   assert.equal(created.body.tableIds.length, 0);
@@ -75,7 +77,7 @@ test('a new employee with a PIN can be verified; a wrong PIN is refused', async 
   );
   assert.deepEqual(entries.map((e) => e.action), ['staff.created', 'staff.pin_checked', 'staff.pin_checked']);
   for (const e of entries) assert.ok(!e.data.includes('2468'));
-  assert.deepEqual(JSON.parse(entries[0]!.data), { name: 'Ержан Кассир', role: 'cashier', tableIds: [], hasPin: true });
+  assert.deepEqual(JSON.parse(entries[0]!.data), { name: 'Ержан Кассир', roles: ['cashier'], tableIds: [], hasPin: true });
   assert.deepEqual(entries.slice(1).map((e) => JSON.parse(e.data).ok), [true, false]);
 });
 
@@ -83,13 +85,13 @@ test('a PIN must be 4–6 digits; an employee without a PIN never verifies', asy
   const h = harness(t);
   const hub = await h.start();
   for (const pin of ['12', '1234567', 'abcd', '12a4']) {
-    const res = await createStaff(hub, { name: `Тест ${pin}`, role: 'waiter', pin });
+    const res = await createStaff(hub, { name: `Тест ${pin}`, roles: ['waiter'], pin });
     assert.equal(res.status, 422, pin);
     assert.equal(res.body.error?.code, 'PIN_INVALID');
   }
-  assert.equal(all(hub.db, 'SELECT id FROM staff').length, 5);
+  assert.equal(all(hub.db, 'SELECT id FROM staff').length, 4);
 
-  const noPin = await createStaff(hub, { name: 'Без PIN', role: 'waiter' });
+  const noPin = await createStaff(hub, { name: 'Без PIN', roles: ['waiter'] });
   assert.equal(noPin.status, 201);
   assert.equal(noPin.body.hasPin, false);
   assert.deepEqual((await verifyPin(hub, noPin.body.id, '1234')).body, { ok: false });
@@ -110,20 +112,20 @@ test('a PIN must be 4–6 digits; an employee without a PIN never verifies', asy
   assert.equal((await verifyPin(hub, 'no-such-id', '1234')).status, 404);
 });
 
-test('the last active owner cannot be dismissed or demoted; a dismissed employee cannot log in', async (t) => {
+test('the last active manager cannot be dismissed or demoted; a dismissed employee cannot log in', async (t) => {
   const h = harness(t);
   const hub = await h.start();
-  const owner = (await listStaff(hub)).find((s) => s.role === 'owner')!;
+  const owner = (await listStaff(hub)).find((s) => s.role === 'manager')!;
 
   const fired = await updateStaff(hub, owner.id, { isActive: false });
   assert.equal(fired.status, 409);
-  assert.equal(fired.body.error?.code, 'LAST_OWNER');
-  const demoted = await updateStaff(hub, owner.id, { role: 'manager' });
+  assert.equal(fired.body.error?.code, 'LAST_MANAGER');
+  const demoted = await updateStaff(hub, owner.id, { roles: ['admin'] });
   assert.equal(demoted.status, 409);
-  assert.equal(demoted.body.error?.code, 'LAST_OWNER');
+  assert.equal(demoted.body.error?.code, 'LAST_MANAGER');
 
-  // With a second owner the first one can go.
-  const second = await createStaff(hub, { name: 'Второй владелец', role: 'owner', pin: '9999' });
+  // With a second manager the first one can go.
+  const second = await createStaff(hub, { name: 'Второй управляющий', roles: ['manager'], pin: '9999' });
   assert.equal(second.status, 201);
   const gone = await updateStaff(hub, owner.id, { isActive: false });
   assert.equal(gone.status, 200);
@@ -132,39 +134,49 @@ test('the last active owner cannot be dismissed or demoted; a dismissed employee
 
   // The row stays and the list shows active staff first.
   const staff = await listStaff(hub);
-  assert.equal(staff.length, 6);
+  assert.equal(staff.length, 5);
   assert.equal(staff[staff.length - 1]!.id, owner.id);
-  assert.ok(staff.slice(0, 5).every((s) => s.isActive));
+  assert.ok(staff.slice(0, 4).every((s) => s.isActive));
 
-  // Now the second owner is the last one.
+  // Now the second manager is the last one.
   assert.equal((await updateStaff(hub, second.body.id, { isActive: false })).status, 409);
   // Bringing the first back frees the second.
   assert.equal((await updateStaff(hub, owner.id, { isActive: true })).body.isActive, true);
-  assert.equal((await updateStaff(hub, second.body.id, { role: 'waiter' })).status, 200);
+  const demotedNow = await updateStaff(hub, second.body.id, { roles: ['waiter', 'cashier'] });
+  assert.equal(demotedNow.status, 200);
+  assert.deepEqual(demotedNow.body.roles, ['cashier', 'waiter']);
+  assert.equal(demotedNow.body.role, 'cashier');
 });
 
 test('names are unique among active staff and trimmed', async (t) => {
   const h = harness(t);
   const hub = await h.start();
-  const dup = await createStaff(hub, { name: '  Данияр   Официант ', role: 'waiter' });
+  const dup = await createStaff(hub, { name: '  Данияр   Официант ', roles: ['waiter'] });
   assert.equal(dup.status, 409);
   assert.equal(dup.body.error?.code, 'STAFF_NAME_TAKEN');
 
-  const created = await createStaff(hub, { name: '  Новый   Сотрудник ', role: 'cashier' });
+  const created = await createStaff(hub, { name: '  Новый   Сотрудник ', roles: ['cashier'] });
   assert.equal(created.status, 201);
   assert.equal(created.body.name, 'Новый Сотрудник');
 
-  const renamed = await updateStaff(hub, created.body.id, { name: 'Асель Владелец' });
+  const renamed = await updateStaff(hub, created.body.id, { name: 'Асель Администратор' });
   assert.equal(renamed.status, 409);
 
   // A dismissed employee's name can be reused.
   await updateStaff(hub, created.body.id, { isActive: false });
-  assert.equal((await createStaff(hub, { name: 'Новый Сотрудник', role: 'waiter' })).status, 201);
+  assert.equal((await createStaff(hub, { name: 'Новый Сотрудник', roles: ['waiter'] })).status, 201);
 
-  const blank = await createStaff(hub, { name: '   ', role: 'waiter' });
+  const blank = await createStaff(hub, { name: '   ', roles: ['waiter'] });
   assert.equal(blank.status, 422);
   const badRole = await createStaff(hub, { name: 'Кто-то', role: 'boss' });
   assert.equal(badRole.status, 400);
+  for (const roles of [['boss'], ['manager', 'cashier'], ['tech', 'owner']]) {
+    const res = await createStaff(hub, { name: 'Кто-то', roles });
+    assert.equal(res.status, 422, roles.join());
+    assert.equal(res.body.error?.code, 'ROLE_INVALID');
+    assert.ok((res.body.error as { message?: string } | undefined)?.message, 'a message to show');
+  }
+  assert.equal((await createStaff(hub, { name: 'Кто-то', roles: [] })).status, 400);
 });
 
 test('a waiter can be assigned only to tables of the club', async (t) => {
@@ -172,11 +184,11 @@ test('a waiter can be assigned only to tables of the club', async (t) => {
   const hub = await h.start();
   const t1 = tableId(hub, 'Стол 1');
   const t2 = tableId(hub, 'Стол 2');
-  const created = await createStaff(hub, { name: 'Официант Два', role: 'waiter', tableIds: [t1, t2, t1] });
+  const created = await createStaff(hub, { name: 'Официант Два', roles: ['waiter'], tableIds: [t1, t2, t1] });
   assert.equal(created.status, 201);
   assert.deepEqual(created.body.tableIds, [t1, t2]);
 
-  const bad = await createStaff(hub, { name: 'Официант Три', role: 'waiter', tableIds: [t1, 'nope'] });
+  const bad = await createStaff(hub, { name: 'Официант Три', roles: ['waiter'], tableIds: [t1, 'nope'] });
   assert.equal(bad.status, 422);
   assert.equal(bad.body.error?.code, 'TABLE_NOT_FOUND');
 
@@ -190,7 +202,7 @@ test('replaying POST /api/staff with the same key creates one row', async (t) =>
   const h = harness(t);
   const hub = await h.start();
   const key = randomUUID();
-  const body = { name: 'Идемпотентный', role: 'waiter', pin: '4321' };
+  const body = { name: 'Идемпотентный', roles: ['waiter'], pin: '4321' };
   const first = await createStaff(hub, body, key);
   const second = await createStaff(hub, body, key);
   assert.equal(first.status, 201);
@@ -266,4 +278,34 @@ test('the audit log filters by table, actor and action, and pages by id', async 
   assert.ok(early.entries.every((e) => e.at < h.clock.now()));
 
   assert.equal((await getJson(hub, '/api/audit?limit=0')).status, 400);
+});
+
+test('roles are a set; people synced from the cloud are edited in the cabinet only', async (t) => {
+  const h = harness(t);
+  const hub = await h.start();
+  const both = await createStaff(hub, { name: 'Официант-кассир', roles: ['waiter', 'cashier', 'waiter'] });
+  assert.equal(both.status, 201);
+  assert.deepEqual(both.body.roles, ['cashier', 'waiter']);
+  assert.equal(both.body.role, 'cashier');
+  assert.equal(both.body.origin, 'hub');
+  // The old single `role` is still understood.
+  const legacy = await createStaff(hub, { name: 'Старый экран', role: 'senior' });
+  assert.equal(legacy.status, 201);
+  assert.deepEqual(legacy.body.roles, ['senior']);
+
+  hub.db
+    .prepare(
+      `INSERT INTO staff (id, club_id, name, role, roles, origin, scope, is_active, table_ids, created_at, updated_at)
+       VALUES ('cloud-1', ?, 'Из кабинета', 'waiter', '["waiter"]', 'cloud', 'club', 1, '[]', 0, 0)`,
+    )
+    .run(hub.hub.state().club.id);
+  const edit = await updateStaff(hub, 'cloud-1', { name: 'Переименован' });
+  assert.equal(edit.status, 409);
+  assert.equal(edit.body.error?.code, 'STAFF_CLOUD_MANAGED');
+  const key = await post(hub, '/api/staff/cloud-1/keys', {});
+  assert.equal(key.status, 409);
+  assert.equal(key.body.error?.code, 'STAFF_CLOUD_MANAGED');
+  const listed = (await listStaff(hub)).find((x) => x.id === 'cloud-1')!;
+  assert.equal(listed.origin, 'cloud');
+  assert.equal(listed.name, 'Из кабинета');
 });

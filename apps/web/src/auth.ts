@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Action, AuthStaff, Role } from '@bills/domain';
-import { can, isRole } from '@bills/domain';
+import { can, isRole, normalizeAccessKey, primaryRole } from '@bills/domain';
 import { UNAUTHORIZED_EVENT, command, loginWithKey, setAuthToken } from './api.ts';
 
 /**
@@ -27,11 +27,16 @@ export const AUTH_CHANGED_EVENT = 'bills:auth-changed';
 function parseStaff(value: unknown): AuthStaff | null {
   if (!value || typeof value !== 'object') return null;
   const s = value as Partial<AuthStaff>;
-  if (typeof s.id !== 'string' || typeof s.name !== 'string' || !isRole(s.role)) return null;
+  if (typeof s.id !== 'string' || typeof s.name !== 'string') return null;
+  // Sessions stored before role sets have `role` only.
+  const roles = Array.isArray(s.roles) ? s.roles.filter(isRole) : isRole(s.role) ? [s.role] : [];
+  const role = primaryRole(roles);
+  if (!role) return null;
   return {
     id: s.id,
     name: s.name,
-    role: s.role,
+    role,
+    roles,
     clubId: typeof s.clubId === 'string' ? s.clubId : '',
     clubName: typeof s.clubName === 'string' ? s.clubName : '',
   };
@@ -107,9 +112,14 @@ export function writeDevice(device: string): void {
   }
 }
 
-/** Signs in with an access key and stores the session. Throws HubRequestError (401 KEY_INVALID) on a bad key. */
+/**
+ * Signs in with an access key — long (MGR-…) or short (6 digits) — and stores
+ * the session. Throws HubRequestError: 401 KEY_INVALID on a bad key, 429
+ * LOGIN_LOCKED (with retryAfterMs) after too many.
+ */
 export async function login(key: string, device?: string): Promise<AuthStaff> {
-  const body = device ? { key, device } : { key };
+  const k = normalizeAccessKey(key);
+  const body = device ? { key: k, device } : { key: k };
   const r = await loginWithKey(body);
   writeAuth({ token: r.token, staff: r.staff, expiresAt: r.expiresAt });
   return r.staff;
@@ -130,7 +140,11 @@ export async function logout(): Promise<void> {
 
 export function useAuth(): {
   staff: AuthStaff | null;
+  /** primaryRole(roles), for display. */
   role: Role | null;
+  /** Everything the person holds; rights are the union. */
+  roles: readonly Role[];
+  /** Role check only; screens that also mind the license use useHub().canNow. */
   can: (action: Action) => boolean;
   login: (key: string, device?: string) => Promise<AuthStaff>;
   logout: () => Promise<void>;
@@ -155,8 +169,10 @@ export function useAuth(): {
   }, []);
 
   const staff = session?.staff ?? null;
-  const role = staff?.role ?? null;
-  const allowed = useCallback((action: Action) => can(role, action), [role]);
+  const rolesKey = staff ? staff.roles.join(',') : '';
+  const roles = useMemo<readonly Role[]>(() => (rolesKey ? (rolesKey.split(',') as Role[]) : []), [rolesKey]);
+  const role = primaryRole(roles);
+  const allowed = useCallback((action: Action) => can(roles, action), [roles]);
 
-  return { staff, role, can: allowed, login, logout };
+  return { staff, role, roles, can: allowed, login, logout };
 }

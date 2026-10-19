@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Role, TariffConfig } from '@bills/domain';
-import { validateTariff } from '@bills/domain';
+import { primaryRole, validateTariff } from '@bills/domain';
+import { scopeOf } from './auth.ts';
 import type { Db } from './db.ts';
 import { all, one, run, transaction } from './db.ts';
 import { hashPin } from './staff.ts';
@@ -27,13 +28,16 @@ const SNOOKER: TariffConfig = {
   ],
 };
 
-/** Demo staff: PIN 1234 for everyone (demo only; stage 3 forces a change). */
-const DEMO_STAFF: Array<[name: string, role: Role]> = [
-  ['Асель Владелец', 'owner'],
-  ['Марат Управляющий', 'manager'],
-  ['Айгерим Кассир', 'cashier'],
-  ['Данияр Официант', 'waiter'],
-  ['Платформа TS', 'superadmin'],
+/**
+ * Demo staff: PIN 1234 for everyone (demo only). The platform (owner, tech) is
+ * not seeded: it comes from the cloud, or as the installer on first start; the
+ * public demo adds the people of DEMO_KEYS (AuthService.issueFixedKeys).
+ */
+const DEMO_STAFF: Array<[name: string, roles: Role[]]> = [
+  ['Марат Управляющий', ['manager']],
+  ['Асель Администратор', ['admin']],
+  ['Айгерим Кассир', ['cashier']],
+  ['Данияр Официант', ['waiter']],
 ];
 
 const DEMO_MENU: Array<[category: string, products: Array<[name: string, priceMinor: number]>]> = [
@@ -147,16 +151,18 @@ function seedClub(db: Db, now: number, timezone: string): boolean {
 function seedStaff(db: Db, now: number, clubId: string): void {
   if (one(db, 'SELECT id FROM staff LIMIT 1')) return;
   const tables = all<{ id: string }>(db, 'SELECT id FROM billiard_tables WHERE club_id = ? ORDER BY sort_order', clubId);
-  for (const [name, role] of DEMO_STAFF) {
-    const tableIds = role === 'waiter' ? tables.slice(0, 3).map((t) => t.id) : [];
+  for (const [name, roles] of DEMO_STAFF) {
+    const tableIds = roles.includes('waiter') ? tables.slice(0, 3).map((t) => t.id) : [];
     run(
       db,
-      `INSERT INTO staff (id, club_id, name, role, pin_hash, is_active, table_ids, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+      `INSERT INTO staff (id, club_id, name, role, roles, origin, scope, pin_hash, is_active, table_ids, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'hub', ?, ?, 1, ?, ?, ?)`,
       randomUUID(),
       clubId,
       name,
-      role,
+      primaryRole(roles)!,
+      JSON.stringify(roles),
+      scopeOf(roles),
       hashPin('1234'),
       JSON.stringify(tableIds),
       now,

@@ -19,6 +19,7 @@ import { Hub } from '@ts-hub/hub.ts';
 import { SimulatorLampDriver } from '@ts-hub/lamps/simulator.ts';
 import { SimulatorUps } from '@ts-hub/power/ups.ts';
 import { seedDemo } from '@ts-hub/seed.ts';
+import { DEMO_LICENSE_KEYS, installDemoLicense } from '@ts-hub/demo-license.ts';
 import type { MiniFastify } from './mini-fastify.ts';
 import type { DatabaseSync } from './shims/sqlite.ts';
 import { provideSqlJs } from './shims/sqlite.ts';
@@ -54,7 +55,9 @@ async function boot(): Promise<void> {
 
   const simulator = new SimulatorLampDriver();
   const ups = new SimulatorUps();
-  const hub = new Hub({ db, clock: systemClock, lampDriver: simulator, ups });
+  // Demo keys (four digits) and a trial license the HUB signs itself with the dev key on every start;
+  // a browser without Ed25519 in WebCrypto gets the demo without license checks instead.
+  const hub = new Hub({ db, clock: systemClock, lampDriver: simulator, ups, demo: true, license: { mode: 'enforce', publicKeys: DEMO_LICENSE_KEYS } });
   const app = buildApp(hub, {
     simulator,
     upsSimulator: ups,
@@ -64,7 +67,10 @@ async function boot(): Promise<void> {
     version: { version: 'demo', gitSha: null },
     demo: { resetAt: () => nextResetAt(Date.now()) },
   });
+  await hub.license.init();
+  await installDemoLicense(hub.license, Date.now());
   hub.start();
+  // The demo people of DEMO_KEYS (each with their roles) are found or created and get their fixed keys.
   hub.auth.issueFixedKeys(DEMO_KEYS);
 
   const changed = keepSaved(db, hub);

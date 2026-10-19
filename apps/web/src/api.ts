@@ -16,12 +16,36 @@ import type {
 export class HubRequestError extends Error {
   readonly code: string;
   readonly status: number;
+  /** 429 LOGIN_LOCKED: how long to wait before the next try, ms. */
+  readonly retryAfterMs: number | null;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, retryAfterMs: number | null = null) {
     super(message);
     this.status = status;
     this.code = code;
+    this.retryAfterMs = retryAfterMs;
   }
+}
+
+/**
+ * Russian text for error codes the screens care about. The HUB already answers
+ * in Russian; these are used when its message is missing or not in Russian.
+ */
+export const ERROR_TEXT: Record<string, string> = {
+  KEY_INVALID: 'Ключ не подходит. Проверьте цифры или попросите новый ключ у управляющего.',
+  KEY_WEAK: 'Слишком простой ключ (одинаковые цифры или подряд). Выберите другие 6 цифр.',
+  KEY_TAKEN: 'Такой ключ уже есть у кого-то в этом филиале. Выберите другие 6 цифр.',
+  LICENSE_STAFF_LIMIT: 'Лимит сотрудников по лицензии исчерпан. Уволенные не считаются; чтобы добавить ещё, расширьте лицензию.',
+  LICENSE_READ_ONLY: 'Лицензия не активна — режим «только чтение». Продлите доступ.',
+  LICENSE_MODULE_OFF: 'Этот модуль не входит в лицензию клуба.',
+  LICENSE_INVALID: 'Лицензия не подходит: подпись не сходится или она выдана для другого HUB.',
+  LOGIN_LOCKED: 'Слишком много попыток входа. Подождите и попробуйте снова.',
+  FORBIDDEN: 'Недостаточно прав для этого действия.',
+};
+
+function errorText(code: string, message: string | undefined): string {
+  if (message && /[а-яё]/i.test(message)) return message;
+  return ERROR_TEXT[code] ?? message ?? `Ошибка HUB: ${code}`;
 }
 
 /**
@@ -80,8 +104,15 @@ function newKey(): string {
 
 async function toError(res: Response): Promise<HubRequestError> {
   try {
-    const body = (await res.json()) as ApiError;
-    return new HubRequestError(res.status, body.error.code, body.error.message);
+    const body = (await res.json()) as ApiError & { error: { retryAfterMs?: unknown } };
+    const header = Number(res.headers.get('retry-after'));
+    const retry =
+      typeof body.error.retryAfterMs === 'number'
+        ? body.error.retryAfterMs
+        : Number.isFinite(header) && header > 0
+          ? header * 1000
+          : null;
+    return new HubRequestError(res.status, body.error.code, errorText(body.error.code, body.error.message), retry);
   } catch {
     return new HubRequestError(res.status, 'HTTP_ERROR', `HUB ответил ошибкой ${res.status}`);
   }

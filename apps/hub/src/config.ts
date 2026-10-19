@@ -1,6 +1,6 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseOrigins } from '@bills/domain';
+import { DEV_LICENSE_KEY, parseOrigins, PLATFORM_LICENSE_PUBLIC_KEYS } from '@bills/domain';
 
 export type LampDriverKind = 'simulator' | 'esp32-http' | 'modbus-tcp';
 export const LAMP_DRIVERS: readonly LampDriverKind[] = ['simulator', 'esp32-http', 'modbus-tcp'];
@@ -70,6 +70,10 @@ export interface HubConfig {
   demo: boolean;
   /** Next demo reset, epoch ms; set by src/demo.ts for the child HUB. */
   demoResetAt: number | null;
+  /** HUB_LICENSE: `enforce` (default) — the license limits the club; `off` — no checks. The demo is always off. */
+  licenseMode: 'enforce' | 'off';
+  /** Public keys licenses are checked with: the platform's, plus the dev key with HUB_LICENSE_DEV_KEY=1. */
+  licensePublicKeys: Record<string, string>;
 }
 
 function int(value: string | undefined, fallback: number, name: string): number {
@@ -93,6 +97,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
   if (coilBase !== 0 && coilBase !== 1) throw new Error('HUB_MODBUS_COIL_BASE must be 0 or 1');
   const cloudUrl = env.CLOUD_URL?.trim();
   const dbPath = env.HUB_DB_PATH ?? fileURLToPath(new URL('../data/hub.db', import.meta.url));
+  const licenseMode = (env.HUB_LICENSE?.trim().toLowerCase() || 'enforce') as 'enforce' | 'off';
+  if (licenseMode !== 'enforce' && licenseMode !== 'off') throw new Error(`HUB_LICENSE must be enforce or off, got "${env.HUB_LICENSE}"`);
   return {
     host: env.HUB_HOST ?? '127.0.0.1',
     dbPath,
@@ -135,5 +141,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
     corsOrigins: parseOrigins(env.HUB_CORS_ORIGINS),
     demo: flag(env.HUB_DEMO, false),
     demoResetAt: env.HUB_DEMO_RESET_AT ? int(env.HUB_DEMO_RESET_AT, 0, 'HUB_DEMO_RESET_AT') : null,
+    licenseMode,
+    licensePublicKeys: {
+      ...PLATFORM_LICENSE_PUBLIC_KEYS,
+      ...(flag(env.HUB_LICENSE_DEV_KEY, false) ? { [DEV_LICENSE_KEY.kid]: DEV_LICENSE_KEY.publicKey } : {}),
+    },
   };
 }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { SyncEvent } from '@bills/domain';
 import { handleSync } from '../../apps/cloud/src/edge/sync.ts';
 import { handleOwner } from '../../apps/cloud/src/edge/owner.ts';
-import { DEMO_HUBS } from '../../apps/cloud/src/seed.ts';
+import { DEMO_ACCESS_VERSION, DEMO_HUBS } from '../../apps/cloud/src/seed.ts';
 import { createTestCloud } from '../../apps/cloud/test/helpers.ts';
 import { clubIdOf, edgeTest, HOUR, linkOwner, MONDAY_NOON, userJwt } from './edge-helpers.ts';
 
@@ -54,7 +54,7 @@ test('sync: auth errors, events, duplicates — same answers as the Fastify clou
   const mismatch = await both('POST', '/sync/events', auth(HUB2.key), empty);
   assert.equal(mismatch.body.error.code, 'HUB_MISMATCH');
   const ok = await both('POST', '/sync/events', auth(HUB1.key), empty);
-  assert.deepEqual(ok.body, { lastAcceptedId: null, inserted: 0, settingsVersion: 0 });
+  assert.deepEqual(ok.body, { lastAcceptedId: null, inserted: 0, settingsVersion: 0, accessVersion: DEMO_ACCESS_VERSION });
 
   // Invalid bodies are 400 BAD_REQUEST, validated before auth (like Fastify's schema).
   await both('POST', '/sync/events', auth(HUB1.key), { hubId: HUB1.id, events: [] });
@@ -65,9 +65,9 @@ test('sync: auth errors, events, duplicates — same answers as the Fastify clou
 
   const events = game(1, 'game-1', 'table-1', MONDAY_NOON, MONDAY_NOON + HOUR, 2000_00);
   const first = await both('POST', '/sync/events', auth(HUB1.key), { hubId: HUB1.id, settingsVersion: 0, events: [...events, events[0]] });
-  assert.deepEqual(first.body, { lastAcceptedId: 3, inserted: 3, settingsVersion: 0 });
+  assert.deepEqual(first.body, { lastAcceptedId: 3, inserted: 3, settingsVersion: 0, accessVersion: DEMO_ACCESS_VERSION });
   const again = await both('POST', '/sync/events', auth(HUB1.key), { hubId: HUB1.id, settingsVersion: 0, events });
-  assert.deepEqual(again.body, { lastAcceptedId: 3, inserted: 0, settingsVersion: 0 });
+  assert.deepEqual(again.body, { lastAcceptedId: 3, inserted: 0, settingsVersion: 0, accessVersion: DEMO_ACCESS_VERSION });
   // Coercion like Fastify's Ajv: a numeric string is accepted as an integer, extra top-level fields are dropped.
   await both('POST', '/sync/events', auth(HUB2.key), { hubId: HUB2.id, settingsVersion: '0', extra: true, events: [ev(1, MONDAY_NOON, 'lamp.on', 't', {})] });
 

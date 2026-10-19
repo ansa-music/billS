@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { DemoInfo, HubState } from '@bills/domain';
-import { DEMO_KEYS, zonedParts } from '@bills/domain';
+import type { DemoInfo, HubState, LicenseResponse } from '@bills/domain';
+import { DEMO_KEYS, DEMO_LOGIN_THROTTLE, ROLES, zonedParts } from '@bills/domain';
+import { DEMO_LICENSE_KEYS, installDemoLicense } from '../src/demo-license.ts';
 import { loadConfig } from '../src/config.ts';
 import { nextDemoReset, wipeDemoDatabase } from '../src/demo.ts';
 import { buildApp } from '../src/http/app.ts';
@@ -11,9 +12,12 @@ import { Harness, MONDAY_NOON } from './helpers.ts';
 
 const ORIGIN = 'https://ts-demo.pages.dev';
 
-async function demoHub(t: { after(fn: () => Promise<void>): void }) {
+async function demoHub(t: { after(fn: () => Promise<void>): void }, license = false) {
   const h = new Harness();
-  const { hub } = await h.start();
+  const { hub } = await h.start(undefined, {
+    demo: true,
+    ...(license ? { license: { mode: 'enforce' as const, publicKeys: DEMO_LICENSE_KEYS } } : {}),
+  });
   const app = buildApp(hub, { corsOrigins: ['https://*.pages.dev'], demo: { resetAt: () => MONDAY_NOON + 1000 } });
   await app.ready();
   t.after(async () => {
@@ -23,16 +27,65 @@ async function demoHub(t: { after(fn: () => Promise<void>): void }) {
   return { h, hub, app };
 }
 
-test('demo keys: each role signs in with its simple key; issuing twice adds nothing', async (t) => {
+test('demo keys: each demo person signs in with a four-digit key and has their roles; issuing twice adds nothing', async (t) => {
   const { hub, app } = await demoHub(t);
   const issued = hub.auth.issueFixedKeys(DEMO_KEYS);
-  assert.deepEqual(issued.map((k) => k.role).sort(), ['cashier', 'manager', 'owner', 'waiter']);
+  assert.deepEqual(issued.map((k) => k.key), DEMO_KEYS.map((k) => k.key));
   assert.deepEqual(hub.auth.issueFixedKeys(DEMO_KEYS), []);
   for (const k of DEMO_KEYS) {
-    const res = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { key: k.key.toLowerCase() } });
+    const typed = ` ${k.key.slice(0, 2)} ${k.key.slice(2)} `;
+    const res = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { key: typed } });
     assert.equal(res.statusCode, 200, k.key);
-    assert.equal(res.json().staff.role, k.role);
+    assert.deepEqual(res.json().staff.roles, [...k.roles].sort((a, b) => ROLES.indexOf(a) - ROLES.indexOf(b)), k.key);
   }
+  // Seeded people are reused by role, missing ones created: one waiter+cashier, one owner of the platform.
+  const staff = hub.staff.list();
+  assert.equal(staff.filter((s) => s.roles.join() === 'cashier,waiter').length, 1);
+  assert.equal(staff.find((s) => s.roles.includes('owner'))?.name, 'Владелец TS');
+  assert.equal(staff.find((s) => s.roles.includes('manager'))?.name, 'Марат Управляющий');
+});
+
+test('a real HUB refuses the four-digit demo keys, even when their rows are in its database', async (t) => {
+  const h = new Harness();
+  t.after(() => h.dispose());
+  const { hub, app } = await h.start(undefined, { secure: true });
+  assert.equal(hub.auth.issueFixedKeys(DEMO_KEYS).length, DEMO_KEYS.length);
+  for (const k of DEMO_KEYS) {
+    const res = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { key: k.key, device: k.key } });
+    assert.equal(res.statusCode, 401, k.key);
+    assert.equal(res.json().error.code, 'KEY_INVALID');
+  }
+  const attempts = hub.auth.attempts();
+  assert.ok(attempts.every((a) => a.result === 'wrong_key' && a.prefix === null && a.kind === null));
+});
+
+test('demo: a softer login throttle, never a branch pause', async (t) => {
+  const { hub, app } = await demoHub(t);
+  hub.auth.issueFixedKeys(DEMO_KEYS);
+  const tryKey = (key: string) => app.inject({ method: 'POST', url: '/api/auth/login', payload: { key, device: 'зал' } });
+  for (let i = 0; i < DEMO_LOGIN_THROTTLE.freeFailures - 1; i++) assert.equal((await tryKey('9876')).statusCode, 401, String(i));
+  const locked = await tryKey('9876');
+  assert.equal(locked.statusCode, 429);
+  assert.equal(locked.json().error.retryAfterMs, DEMO_LOGIN_THROTTLE.baseLockMs);
+  assert.equal((await tryKey('1111')).statusCode, 429);
+});
+
+test('demo: the HUB signs itself a 7-day trial license so the manager sees one', async (t) => {
+  const { hub, app } = await demoHub(t, true);
+  assert.equal(await installDemoLicense(hub.license, MONDAY_NOON), true);
+  hub.auth.issueFixedKeys(DEMO_KEYS);
+  const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { key: '1111' } });
+  const token = login.json().token as string;
+  const res = await app.inject({ method: 'GET', url: '/api/license', headers: { authorization: `Bearer ${token}` } });
+  const body = res.json() as LicenseResponse;
+  assert.equal(body.enforced, true);
+  assert.equal(body.status.state, 'active');
+  assert.equal(body.status.plan, 'trial');
+  assert.equal(body.status.daysLeft, 7);
+  assert.equal(body.status.maxClubs, 2);
+  assert.deepEqual(body.status.modules, { bar: true, cloud: true, hardware: true });
+  const state = await app.inject({ method: 'GET', url: '/api/state', headers: { authorization: `Bearer ${token}` } });
+  assert.equal((state.json() as HubState).license?.state, 'active');
 });
 
 test('GET /api/demo is public on a demo HUB and absent otherwise', async (t) => {
@@ -42,7 +95,7 @@ test('GET /api/demo is public on a demo HUB and absent otherwise', async (t) => 
   const info = res.json() as DemoInfo;
   assert.equal(info.demo, true);
   assert.equal(info.resetAt, MONDAY_NOON + 1000);
-  assert.equal(info.keys[0]?.key, 'OWNER-2222-2222-2222-2222');
+  assert.equal(info.keys[0]?.key, '0000');
 
   const h = new Harness();
   const plain = await h.start();

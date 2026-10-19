@@ -216,7 +216,7 @@ function rules(t: TariffConfig, currency: string): string[] {
 }
 
 export function TariffsSection() {
-  const { state, serverNow, can } = useHub();
+  const { state, serverNow, canNow } = useHub();
   const { timezone, currency } = state.club;
   const minute = Math.floor(serverNow / MIN);
   // One price scale for every tariff, so the same colour means the same price.
@@ -236,7 +236,7 @@ export function TariffsSection() {
       <p className="page-lead">
         Цена зависит от дня и часа. Игра, которая переходит границу (например, с дневного тарифа на вечерний), считается по
         частям. Тариф фиксируется при открытии стола — изменения не касаются уже идущих игр.
-        {can('tariffs.edit') && (
+        {canNow('tariffs.edit') && (
           <>
             {' '}
             <a href={hrefFor('/settings', { tab: 'tariffs' })}>Изменить тарифы и окна цен — в настройках клуба.</a>

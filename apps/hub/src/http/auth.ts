@@ -1,11 +1,11 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { IssueKeyRequest, KeyListResponse, LoginRequest, MeResponse } from '@bills/domain';
+import type { IssueKeyRequest, KeyListResponse, LoginAttemptsResponse, LoginRequest, MeResponse } from '@bills/domain';
 import type { Hub } from '../hub.ts';
-import { actorOf, assertCan, emptyBody, runCommand } from './command.ts';
+import { actorOf, assertCan, emptyBody, guard, runCommand } from './command.ts';
 
 export interface AuthHookOptions {
   /**
-   * Tests only: without a Bearer token, the request acts as an owner named by
+   * Tests only: without a Bearer token, the request acts as a manager named by
    * the X-Actor header (or "test"). Never enabled by main.ts.
    */
   trustActorHeader?: boolean;
@@ -47,6 +47,7 @@ function actorHeaderOf(req: FastifyRequest): string | null {
  */
 export function registerAuth(app: FastifyInstance, hub: Hub, options: AuthHookOptions = {}): void {
   app.addHook('onRequest', async (req) => {
+    req.license = hub.license;
     const token = bearerOf(req);
     if (token) {
       const resolved = hub.auth.resolve(token);
@@ -57,8 +58,8 @@ export function registerAuth(app: FastifyInstance, hub: Hub, options: AuthHookOp
       }
     }
     if (options.trustActorHeader) {
-      // Tests: X-Actor names the actor; without it the request is an anonymous owner.
-      req.actor = { id: null, name: actorHeaderOf(req) ?? 'test', role: 'owner' };
+      // Tests: X-Actor names the actor; without it the request is an anonymous manager.
+      req.actor = { id: null, name: actorHeaderOf(req) ?? 'test', role: 'manager', roles: ['manager'] };
       return;
     }
     if (!isPublic(req.url)) actorOf(req); // throws 401
@@ -77,7 +78,7 @@ export function registerAuth(app: FastifyInstance, hub: Hub, options: AuthHookOp
       },
     },
     async (req, reply) => {
-      const result = hub.auth.login(req.body.key, req.body.device);
+      const result = hub.auth.login({ key: req.body.key, device: req.body.device, ip: req.ip });
       return reply.status(200).send(result);
     },
   );
@@ -89,10 +90,30 @@ export function registerAuth(app: FastifyInstance, hub: Hub, options: AuthHookOp
       // X-Actor test mode has no session: answer with what we know.
       const actor = actorOf(req);
       const club = hub.state().club;
-      return { staff: { id: actor.id ?? '', name: actor.name, role: actor.role, clubId: club.id, clubName: club.name }, expiresAt: 0 };
+      return {
+        staff: { id: actor.id ?? '', name: actor.name, role: actor.role, roles: actor.roles, clubId: club.id, clubName: club.name },
+        expiresAt: 0,
+        license: hub.license.shown(),
+      };
     }
-    return { staff: resolved.staff, expiresAt: resolved.expiresAt };
+    return { staff: resolved.staff, expiresAt: resolved.expiresAt, license: hub.license.shown() };
   });
+
+  // Every login attempt of the branch, newest first (the key itself is never stored).
+  app.get<{ Querystring: { limit?: number; before?: number } }>(
+    '/api/auth/attempts',
+    {
+      preHandler: guard('staff.view'),
+      schema: {
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { limit: { type: 'integer', minimum: 1, maximum: 500 }, before: { type: 'integer', minimum: 1 } },
+        },
+      },
+    },
+    async (req): Promise<LoginAttemptsResponse> => ({ attempts: hub.auth.attempts(req.query.limit ?? 100, req.query.before) }),
+  );
 
   app.post('/api/auth/logout', { schema: { body: emptyBody } }, async (req, reply) => {
     const actor = actorOf(req);
@@ -115,7 +136,11 @@ export function registerAuth(app: FastifyInstance, hub: Hub, options: AuthHookOp
         body: {
           type: 'object',
           additionalProperties: false,
-          properties: { label: { type: 'string', maxLength: 80 }, expiresInDays: { type: 'integer', minimum: 1, maximum: 3650 } },
+          properties: {
+            label: { type: 'string', maxLength: 80 },
+            expiresInDays: { type: 'integer', minimum: 1, maximum: 3650 },
+            key: { type: 'string', maxLength: 20 },
+          },
         },
       },
     },
@@ -126,7 +151,13 @@ export function registerAuth(app: FastifyInstance, hub: Hub, options: AuthHookOp
         hub,
         (_name, actor) => ({
           status: 201,
-          body: hub.auth.issueKey({ staffId: req.params.staffId, label: req.body?.label, expiresInDays: req.body?.expiresInDays, actor }),
+          body: hub.auth.issueKey({
+            staffId: req.params.staffId,
+            label: req.body?.label,
+            expiresInDays: req.body?.expiresInDays,
+            key: req.body?.key,
+            actor,
+          }),
         }),
         'staff.edit',
       ),

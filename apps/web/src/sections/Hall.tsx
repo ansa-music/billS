@@ -453,7 +453,7 @@ export function HallSection() {
               ]}
             />
           )}
-          {!editing && view === 'plan' && hub.can('hall.edit') && (
+          {!editing && view === 'plan' && hub.canNow('hall.edit') && (
             <button type="button" className="btn btn-small" onClick={startEditing} disabled={!layoutView}>
               <Icon name="edit" size={16} /> Расставить столы
             </button>
@@ -537,6 +537,8 @@ export function HallSection() {
                 onResume={(sessionId) => void hub.resumeSession(table.id, sessionId)}
                 onTransfer={(sessionId, toTableId) => void hub.transferSession(table.id, sessionId, toTableId)}
                 onDetails={() => setSelectedId(table.id)}
+                openBlocked={hub.blockedReason('table.open')}
+                canContinue={hub.canNow('table.continue')}
               />
             </CardBoundary>
           ))}

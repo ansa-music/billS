@@ -1,7 +1,8 @@
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import type { AuditEntryView, AuditListResponse, Role, StaffView } from '@bills/domain';
-import { canAssignRole, ROLES } from '@bills/domain';
+import { normalizeRoles, primaryRole } from '@bills/domain';
 import type { Actor } from './auth.ts';
+import { assertMayManage, cloudManaged, rolesOf, scopeOf } from './auth.ts';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
 import { afterCommit, all, one, run, transaction } from './db.ts';
@@ -28,26 +29,31 @@ export function verifyPin(pin: string, stored: string | null): boolean {
 
 const PIN_RE = /^\d{4,6}$/;
 
+/** License limits in force; null = none (licenses not enforced, or no license). */
+export type LicenseLimits = () => { maxTables: number | null; maxStaff: number | null } | null;
+
 export interface StaffServiceDeps {
   db: Db;
   clock: Clock;
   events: HubEvents;
+  limits?: LicenseLimits | undefined;
 }
 
 export interface CreateStaffInput {
   name: string;
-  role: Role;
+  /** A set; checked by normalizeRoles (422 ROLE_INVALID). */
+  roles: readonly unknown[];
   pin?: string | undefined;
   tableIds?: string[] | undefined;
   actor: string;
-  /** The signed-in employee; limits which roles may be assigned (ASSIGNABLE_ROLES). */
+  /** The signed-in person; limits which roles may be assigned (canAssignRoles). */
   by?: Actor | undefined;
 }
 
 export interface UpdateStaffInput {
   staffId: string;
   name?: string | undefined;
-  role?: Role | undefined;
+  roles?: readonly unknown[] | undefined;
   /** A string sets a new PIN, null removes it, undefined keeps it. */
   pin?: string | null | undefined;
   isActive?: boolean | undefined;
@@ -72,6 +78,9 @@ interface StaffRow {
   club_id: string;
   name: string;
   role: Role;
+  roles: string;
+  origin: 'hub' | 'cloud';
+  scope: 'platform' | 'company' | 'club';
   pin_hash: string | null;
   is_active: number;
   table_ids: string;
@@ -102,10 +111,13 @@ function toStaffView(row: StaffRow): StaffView {
   } catch {
     // Damaged JSON must not take the staff page down: treat as "all tables".
   }
+  const roles = rolesOf(row);
   return {
     id: row.id,
     name: row.name,
-    role: row.role,
+    role: primaryRole(roles) ?? row.role,
+    roles,
+    origin: row.origin,
     isActive: row.is_active === 1,
     hasPin: row.pin_hash !== null,
     activeKeys: row.active_keys ?? 0,
@@ -134,11 +146,20 @@ function toAuditView(row: AuditRow): AuditEntryView {
   };
 }
 
+function checkRoles(input: readonly unknown[]): Role[] {
+  const r = normalizeRoles(input);
+  if (!r.ok) throw new HubError(422, 'ROLE_INVALID', r.message);
+  return r.roles;
+}
+
+const sameRoles = (a: readonly Role[], b: readonly Role[]) => JSON.stringify(a) === JSON.stringify(b);
+
 /**
  * Staff, PINs and the audit log. Every command is one transaction with an
- * audit record. The hierarchy (ASSIGNABLE_ROLES): when the signed-in actor is
- * known (`by`), they may create and edit only roles they could assign, never
- * change their own role or dismiss themselves.
+ * audit record. The hierarchy (canAssignRoles): when the signed-in actor is
+ * known (`by`), they may create and edit only people whose roles they could
+ * assign, never change their own roles or dismiss themselves. People synced
+ * from the cloud (origin 'cloud') are edited in the manager's cabinet only.
  */
 export class StaffService {
   readonly deps: StaffServiceDeps;
@@ -147,7 +168,7 @@ export class StaffService {
     this.deps = deps;
   }
 
-  /** All staff of the club, active first then by name. Inactive («уволен») rows are kept. */
+  /** Everyone of the club, active first then by name. Inactive («уволен») rows are kept. */
   list(): StaffView[] {
     const db = this.deps.db;
     return all<StaffRow>(
@@ -170,21 +191,25 @@ export class StaffService {
     return transaction(db, () => {
       const club = clubId(db);
       const name = cleanName(input.name);
-      if (!ROLES.includes(input.role)) throw new HubError(422, 'ROLE_INVALID', 'Неизвестная роль');
-      if (input.by) assertMayAssign(input.by, input.role);
+      const roles = checkRoles(input.roles);
+      if (input.by) assertMayManage(input.by, roles);
       this.#assertNameFree(club, name, null);
+      const scope = scopeOf(roles);
+      if (scope === 'club') this.#assertStaffLimit(club, null);
       const pinHash = input.pin === undefined ? null : hashPin(checkPin(input.pin));
       const tableIds = this.#checkTables(club, input.tableIds ?? []);
 
       const id = randomUUID();
       run(
         db,
-        `INSERT INTO staff (id, club_id, name, role, pin_hash, is_active, table_ids, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+        `INSERT INTO staff (id, club_id, name, role, roles, origin, scope, pin_hash, is_active, table_ids, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'hub', ?, ?, 1, ?, ?, ?)`,
         id,
         club,
         name,
-        input.role,
+        primaryRole(roles)!,
+        JSON.stringify(roles),
+        scope,
         pinHash,
         JSON.stringify(tableIds),
         now,
@@ -196,7 +221,7 @@ export class StaffService {
         action: 'staff.created',
         entityType: 'staff',
         entityId: id,
-        data: { name, role: input.role, tableIds, hasPin: pinHash !== null },
+        data: { name, roles, tableIds, hasPin: pinHash !== null },
       });
       afterCommit(db, () => this.deps.events.changed({ kind: 'staff' }));
       return this.get(id);
@@ -208,12 +233,16 @@ export class StaffService {
     const now = this.deps.clock.now();
     return transaction(db, () => {
       const row = this.#row(input.staffId);
+      if (row.origin === 'cloud') throw cloudManaged();
+      const current = rolesOf(row);
+      const nextRoles = input.roles !== undefined ? checkRoles(input.roles) : current;
+      const rolesChanged = !sameRoles(nextRoles, current);
       if (input.by) {
-        // You may edit only people whose role you could assign; your own role and employment are not yours to change.
-        if (input.by.id !== row.id) assertMayAssign(input.by, row.role);
-        if (input.role !== undefined && input.role !== row.role) {
-          if (input.by.id === row.id) throw new HubError(403, 'ROLE_NOT_ALLOWED', 'Свою роль изменить нельзя');
-          assertMayAssign(input.by, input.role);
+        // You may edit only people whose roles you could assign; your own roles and employment are not yours to change.
+        if (input.by.id !== row.id) assertMayManage(input.by, current);
+        if (rolesChanged) {
+          if (input.by.id === row.id) throw new HubError(403, 'ROLE_NOT_ALLOWED', 'Свои роли изменить нельзя');
+          assertMayManage(input.by, nextRoles);
         }
         if (input.by.id === row.id && input.isActive === false) {
           throw new HubError(403, 'ROLE_NOT_ALLOWED', 'Нельзя уволить самого себя');
@@ -232,11 +261,10 @@ export class StaffService {
           changed.name = name;
         }
       }
-      if (input.role !== undefined && input.role !== row.role) {
-        if (!ROLES.includes(input.role)) throw new HubError(422, 'ROLE_INVALID', 'Неизвестная роль');
-        sets.push('role = ?');
-        params.push(input.role);
-        changed.role = input.role;
+      if (rolesChanged) {
+        sets.push('roles = ?', 'role = ?', 'scope = ?');
+        params.push(JSON.stringify(nextRoles), primaryRole(nextRoles)!, scopeOf(nextRoles));
+        changed.roles = nextRoles;
       }
       if (input.isActive !== undefined && (input.isActive ? 1 : 0) !== row.is_active) {
         sets.push('is_active = ?');
@@ -260,15 +288,16 @@ export class StaffService {
       }
 
       // The club must always keep someone who can manage it.
-      const losesOwner =
-        row.role === 'owner' &&
-        row.is_active === 1 &&
-        ((changed.isActive === false) || (changed.role !== undefined && changed.role !== 'owner'));
-      if (losesOwner && this.#activeOwners(row.club_id, row.id) === 0) {
-        throw new HubError(409, 'LAST_OWNER', 'Нельзя убрать последнего владельца');
+      const willBeActive = input.isActive ?? row.is_active === 1;
+      const losesManager = current.includes('manager') && row.is_active === 1 && (!willBeActive || !nextRoles.includes('manager'));
+      if (losesManager && this.#activeManagers(row.club_id, row.id) === 0) {
+        throw new HubError(409, 'LAST_MANAGER', 'Нельзя убрать последнего управляющего');
       }
+      // A person who starts counting against the license's staff limit (hired back, or no longer a manager).
+      const counted = (active: boolean, roles: Role[]) => active && scopeOf(roles) === 'club';
+      if (counted(willBeActive, nextRoles) && !counted(row.is_active === 1, current)) this.#assertStaffLimit(row.club_id, row.id);
 
-      if (sets.length === 0) return toStaffView(row);
+      if (sets.length === 0) return this.get(row.id);
 
       sets.push('updated_at = ?');
       params.push(now);
@@ -284,6 +313,23 @@ export class StaffService {
       return this.get(row.id);
     });
   }
+
+  /** 409 LICENSE_STAFF_LIMIT when the branch already has the license's maxStaff active staff (managers and the platform do not count). */
+  #assertStaffLimit(club: string, exceptId: string | null): void {
+    const max = this.deps.limits?.()?.maxStaff;
+    if (max === null || max === undefined) return;
+    const n =
+      one<{ n: number }>(
+        this.deps.db,
+        "SELECT COUNT(*) AS n FROM staff WHERE club_id = ? AND is_active = 1 AND scope = 'club' AND id <> ?",
+        club,
+        exceptId ?? '',
+      )?.n ?? 0;
+    if (n >= max) {
+      throw new HubError(409, 'LICENSE_STAFF_LIMIT', `По лицензии в филиале не больше ${max} активных сотрудников. Расширьте лицензию или отметьте уволенных.`);
+    }
+  }
+
 
   /**
    * Checks a PIN against the stored hash. Groundwork for PIN login (stage 3):
@@ -373,11 +419,11 @@ export class StaffService {
     if (taken) throw new HubError(409, 'STAFF_NAME_TAKEN', `Сотрудник «${name}» уже есть`);
   }
 
-  #activeOwners(club: string, exceptId: string): number {
+  #activeManagers(club: string, exceptId: string): number {
     return (
       one<{ n: number }>(
         this.deps.db,
-        "SELECT COUNT(*) AS n FROM staff WHERE club_id = ? AND role = 'owner' AND is_active = 1 AND id <> ?",
+        "SELECT COUNT(*) AS n FROM staff WHERE club_id = ? AND role = 'manager' AND is_active = 1 AND id <> ?",
         club,
         exceptId,
       )?.n ?? 0
@@ -399,12 +445,6 @@ export class StaffService {
     const missing = unique.find((id) => !known.has(id));
     if (missing !== undefined) throw new HubError(422, 'TABLE_NOT_FOUND', 'Стол не найден');
     return unique;
-  }
-}
-
-function assertMayAssign(by: Actor, role: Role): void {
-  if (!canAssignRole(by.role, role)) {
-    throw new HubError(403, 'ROLE_NOT_ALLOWED', 'Ваша роль не позволяет управлять этим сотрудником');
   }
 }
 

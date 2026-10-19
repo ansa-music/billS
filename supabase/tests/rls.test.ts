@@ -140,6 +140,19 @@ test('events, owner sessions, the push queue and runtime flags are closed to own
   }
 });
 
+test('roles and licenses: platform, licenses, branch staff and every key table are closed to owners and anon', async () => {
+  const tables = ['platform_staff', 'platform_keys', 'platform_sessions', 'licenses', 'club_staff', 'club_keys', 'manager_keys'];
+  for (const table of tables) {
+    await assert.rejects(rows(uidA, `SELECT * FROM public.${table}`), denied, table);
+    const col = table === 'platform_sessions' ? 'token_hash' : 'id';
+    await assert.rejects(rows(uidA, `INSERT INTO public.${table} (${col}) VALUES ('x')`), denied, `${table} insert`);
+    await assert.rejects(asAnon((tx) => tx.query(`SELECT * FROM public.${table}`)), denied, `anon ${table}`);
+  }
+  // The new company columns are plain reads of the own company.
+  const own = await rows<{ blocked: number; access_version: number }>(uidA, 'SELECT blocked, access_version FROM public.companies');
+  assert.equal(own.length, 1);
+});
+
 test('key and password hashes are not readable, other columns are', async () => {
   await assert.rejects(rows(uidA, 'SELECT api_key_hash FROM public.hubs'), denied);
   await assert.rejects(rows(uidA, 'SELECT * FROM public.hubs'), denied);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { DemoInfo } from '@bills/domain';
-import { DEMO_KEYS } from '@bills/domain';
+import { DEMO_KEYS, rolesLabel } from '@bills/domain';
 import { hubUrl } from './api.ts';
 import { DEMO_LOCAL, resetDemo } from './demo-hub/storage.ts';
 
@@ -66,23 +66,27 @@ export function DemoBanner() {
   );
 }
 
-/** Demo keys under the login form: one tap fills the key in. */
-export function DemoKeys({ onPick }: { onPick: (key: string) => void }) {
+/**
+ * Demo: one big button per demo person — a single tap signs in, nothing to type.
+ * The keys are four digits so they can be read out at a presentation; they work
+ * only on a demo HUB.
+ */
+export function DemoKeys({ onLogin, busy }: { onLogin: (key: string) => void; busy?: boolean }) {
   const { demo, keys } = useDemo();
   if (!demo) return null;
   return (
-    <aside className="login-help demo-keys" aria-label="Демо-ключи">
+    <aside className="login-help demo-keys" aria-label="Демо-вход">
       <p>
-        <strong>Демо — данные сбрасываются каждую ночь.</strong> Войдите любым ключом (нажмите, чтобы подставить).{' '}
+        <strong>Демо — данные сбрасываются каждую ночь.</strong> Нажмите, чтобы войти, или наберите ключ из 4 цифр.{' '}
         {DEMO_LOCAL
           ? 'Клуб работает прямо в браузере и хранится только на этом устройстве.'
           : 'Бесплатный сервер засыпает без посетителей: первый вход после паузы может занять до минуты.'}
       </p>
-      <ul className="demo-keys-list">
+      <ul className="demo-keys-list demo-keys-big">
         {keys.map((k) => (
           <li key={k.key}>
-            <button type="button" className="btn demo-key" onClick={() => onPick(k.key)}>
-              <span className="demo-key-role">{k.label}</span>
+            <button type="button" className="btn demo-key" disabled={busy} onClick={() => onLogin(k.key)}>
+              <span className="demo-key-role">Войти как {(k.label || rolesLabel(k.roles)).toLowerCase()}</span>
               <code>{k.key}</code>
             </button>
           </li>

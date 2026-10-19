@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { OwnerView } from '@bills/domain';
-import { normalizeCloudUrl, parseLoginQr } from '@bills/domain';
-import { CloudRequestError, SUPABASE_MODE, login, loginByKey, sendMagicLink, takeLinkError } from './api.ts';
+import { normalizeAccessKey, normalizeCloudUrl, parseLoginQr, roleOfKeyPrefix } from '@bills/domain';
+import { CloudRequestError, SUPABASE_MODE, loginByKey, loginEmail, platformLogin, sendMagicLink, takeLinkError } from './api.ts';
+import type { Identity } from './api.ts';
 import { BrandMark } from './BrandMark.tsx';
 import { nativeBridge } from './platform.ts';
 
@@ -23,17 +23,46 @@ function describe(err: unknown, mode: Mode, cloudUrl: string | null): string {
   // Supabase mode: api-supabase.ts already words every error for the owner.
   if (SUPABASE_MODE) return e.message || 'Не удалось войти';
   if (e.status === 401) {
-    return mode === 'key' ? 'Ключ не подходит: неверный или отозван' : 'Неверный e-mail или пароль';
+    return mode === 'key' ? 'Ключ телефона не подходит: неверный или отозван' : 'Неверный e-mail или пароль';
   }
   if (e.code === 'HTTP_ERROR' && cloudUrl) return `По адресу ${cloudUrl} отвечает не облако TS. Проверьте адрес.`;
   return e.message || 'Не удалось войти';
 }
 
-export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
+/** Platform sign-in errors: wrong key, a manager's key, too many tries. */
+function describePlatform(err: unknown): string {
+  const e = err as CloudRequestError & { retryAfterMs?: number };
+  if (e.code === 'OFFLINE') return 'Нет связи с облаком. Проверьте интернет.';
+  if (e.status === 429 || e.code === 'LOGIN_LOCKED') {
+    return e.message || 'Слишком много неверных попыток — подождите немного и попробуйте снова';
+  }
+  if (e.status === 401 || e.status === 403) return 'Ключ не подходит: неверный, отозван или это не ключ платформы TS';
+  return e.message || 'Не удалось войти';
+}
+
+/** null when the key looks like a platform key, otherwise what is wrong with it. */
+function platformKeyProblem(key: string): string | null {
+  const role = roleOfKeyPrefix(key);
+  if (role === 'owner' || role === 'tech') return null;
+  if (role === 'manager') return 'Это ключ управляющего — он для входа на HUB филиала. В кабинет управляющий входит на вкладке «Управляющий».';
+  return 'Ключ платформы начинается с OWNER- или TECH-';
+}
+
+type Side = 'manager' | 'platform';
+
+export function Login({
+  onLogin,
+}: {
+  /** The manager, the platform or both (Supabase: one e-mail may be both). */
+  onLogin: (id: Identity) => void;
+}) {
   // With Supabase the app signs in like the browser: no cloud address, no owner keys.
   const bridge = SUPABASE_MODE ? null : nativeBridge();
   const inApp = nativeBridge() !== null;
   const [mode, setMode] = useState<Mode>(bridge ? 'key' : 'password');
+  // The phone app is the manager's; the platform signs in from a browser.
+  const [side, setSide] = useState<Side>('manager');
+  const [platformKey, setPlatformKey] = useState('');
   const [linkSentTo, setLinkSentTo] = useState<string | null>(null);
   const [cloud, setCloud] = useState(() => bridge?.cloudUrl() ?? '');
   const [email, setEmail] = useState('');
@@ -63,7 +92,7 @@ export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
     return url;
   }
 
-  async function run(how: Mode, attempt: () => Promise<OwnerView>, cloudUrl: string | null) {
+  async function run(how: Mode, attempt: () => Promise<Identity>, cloudUrl: string | null) {
     try {
       onLogin(await attempt());
     } catch (err) {
@@ -76,11 +105,27 @@ export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
     if (busy) return;
     setBusy(true);
     setError(null);
+    if (side === 'platform') {
+      try {
+        const k = normalizeAccessKey(platformKey);
+        const problem = platformKeyProblem(k);
+        if (problem) {
+          setError(problem);
+          return;
+        }
+        onLogin({ owner: null, platform: await platformLogin(k) });
+      } catch (err) {
+        setError(describePlatform(err));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
       let cloudUrl = await saveCloud(cloud);
       if (cloudUrl === false) return;
       if (mode === 'password') {
-        await run('password', () => login(email.trim(), password), cloudUrl);
+        await run('password', () => loginEmail(email.trim(), password), cloudUrl);
         return;
       }
       if (mode === 'link') {
@@ -98,7 +143,7 @@ export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
         cloudUrl = await saveCloud(parsed.cloudUrl);
         if (cloudUrl === false) return;
       }
-      await run('key', () => loginByKey(parsed.key), cloudUrl);
+      await run('key', async () => ({ owner: await loginByKey(parsed.key), platform: null }), cloudUrl);
     } finally {
       setBusy(false);
     }
@@ -126,7 +171,7 @@ export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
     try {
       const cloudUrl = await saveCloud(parsed.cloudUrl ?? cloud);
       if (cloudUrl === false) return;
-      await run('key', () => loginByKey(parsed.key), cloudUrl);
+      await run('key', async () => ({ owner: await loginByKey(parsed.key), platform: null }), cloudUrl);
     } finally {
       setBusy(false);
     }
@@ -138,10 +183,55 @@ export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
         <div className="brand">
           <BrandMark />
           <div>
-            <h1>Кабинет владельца</h1>
+            <h1>{side === 'platform' ? 'Платформа TS' : 'Кабинет управляющего'}</h1>
             <p className="muted">TS</p>
           </div>
         </div>
+
+        {!inApp && (
+          <div className="seg seg-side" role="tablist" aria-label="Кто входит">
+            {(['manager', 'platform'] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                role="tab"
+                aria-selected={side === s}
+                onClick={() => {
+                  setSide(s);
+                  setError(null);
+                }}
+              >
+                {s === 'manager' ? 'Управляющий' : 'Платформа TS'}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {side === 'platform' ? (
+          <>
+            <label className="field">
+              <span>Ключ платформы</span>
+              <input
+                className="key-input"
+                type="password"
+                required
+                autoComplete="off"
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="OWNER-XXXX-XXXX-XXXX-XXXX или TECH-…"
+                value={platformKey}
+                onChange={(e) => setPlatformKey(e.target.value)}
+                autoFocus
+              />
+            </label>
+            <p className="hint">
+              Для владельца и техподдержки TS. Клиенты входят на вкладке «Управляющий».
+              {SUPABASE_MODE && ' Или войдите почтой владельца платформы на вкладке «Управляющий» — откроется кабинет платформы.'}
+            </p>
+          </>
+        ) : (
+          <>
 
         {bridge && (
           <>
@@ -221,7 +311,7 @@ export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
               setError(null);
             }}
           >
-            Ключ владельца
+            Ключ телефона
           </button>
         </div>
         )}
@@ -270,7 +360,7 @@ export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
           </>
         ) : (
           <label className="field">
-            <span>Ключ владельца</span>
+            <span>Ключ для телефона (MGR-… или из «Телефон и уведомления»)</span>
             <input
               className="key-input"
               type="text"
@@ -279,11 +369,14 @@ export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
               autoCapitalize="characters"
               autoCorrect="off"
               spellCheck={false}
-              placeholder="OWNER-XXXX-XXXX-XXXX-XXXX"
+              placeholder="MGR-XXXX-XXXX-XXXX-XXXX"
               value={key}
               onChange={(e) => setKey(e.target.value)}
             />
           </label>
+        )}
+
+          </>
         )}
 
         {error && (
@@ -291,7 +384,11 @@ export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
             {error}
           </p>
         )}
-        {mode === 'link' ? (
+        {side === 'platform' ? (
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            {busy ? 'Входим…' : 'Войти'}
+          </button>
+        ) : mode === 'link' ? (
           linkSentTo ? (
             <button type="button" className="btn" onClick={() => setLinkSentTo(null)}>
               Отправить ещё раз

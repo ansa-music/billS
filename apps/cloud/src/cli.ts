@@ -5,6 +5,7 @@
  *   node apps/cloud/src/cli.ts init --company "<название>" --email <e-mail> [--name "<имя>"] [--password <пароль>]
  *   node apps/cloud/src/cli.ts add-club --name "<название>" [--tz Asia/Almaty] [--currency KZT] [--company <id>]
  *   node apps/cloud/src/cli.ts new-hub-key --hub <id>
+ *   node apps/cloud/src/cli.ts platform-key --name "<имя>" [--role owner|tech]
  *   node apps/cloud/src/cli.ts reset-password --email <e-mail> [--password <пароль>]
  *   node apps/cloud/src/cli.ts list [--json]
  *   node apps/cloud/src/cli.ts backup <папка|файл>
@@ -22,7 +23,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { addPlatformStaff } from './access.ts';
 import { AdminError, addClub, initCompany, listAll, newHubKey, resetPassword } from './admin.ts';
+import { licenseSignerFromEnv, reissueLicense } from './license.ts';
 import type { CloudConfig } from './config.ts';
 import { loadConfig } from './config.ts';
 import type { SqlDriver } from './db/driver.ts';
@@ -39,6 +42,8 @@ const USAGE = `Использование: node apps/cloud/src/cli.ts <кома�
   add-club --name "<название>" [--tz Asia/Almaty] [--currency KZT] [--company <id>]
                                    создать клуб и его HUB с новым ключом
   new-hub-key --hub <id>           перевыпустить ключ HUB (старый перестаёт работать)
+  platform-key --name "<имя>" [--role owner|tech]
+                                   добавить человека платформы TS с длинным ключом (вход в кабинет платформы)
   reset-password --email <e-mail> [--password <пароль>]
                                    сменить пароль владельца и завершить его сессии
   list [--json]                    компании, владельцы, клубы и HUB
@@ -73,6 +78,7 @@ const OPTIONS = {
   tz: { type: 'string' },
   currency: { type: 'string' },
   hub: { type: 'string' },
+  role: { type: 'string' },
   yes: { type: 'boolean' },
   json: { type: 'boolean' },
 } as const;
@@ -184,6 +190,11 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
             ...(opt.tz !== undefined ? { timezone: opt.tz } : {}),
             ...(opt.currency !== undefined ? { currency: opt.currency } : {}),
             ...(opt.company !== undefined ? { companyId: opt.company } : {}),
+          }).then(async (club) => {
+            // The license of the company (if any) is re-signed so it names the new HUB.
+            const signer = licenseSignerFromEnv(io.env, io.err);
+            await db.transaction((tx) => reissueLicense(tx, signer, io.now(), club.companyId, null));
+            return club;
           }),
         );
         io.out(`Клуб «${name.trim()}» создан. Впишите HUB_ID и CLOUD_API_KEY в .env HUB этого клуба; ключ больше не будет показан.`);
@@ -198,6 +209,16 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
         const key = await withDatabase(config, io, (db) => newHubKey(db, hubId));
         io.out(`Новый ключ HUB ${hubId} выпущен, старый больше не действует. Обновите CLOUD_API_KEY в .env HUB.`);
         io.out(`CLOUD_API_KEY=${key}`);
+        return 0;
+      }
+
+      case 'platform-key': {
+        const name = required(opt.name, '--name', '"<имя>"').trim();
+        const role = opt.role ?? 'owner';
+        if (role !== 'owner' && role !== 'tech') throw new UsageError('--role: owner или tech');
+        const r = await withDatabase(config, io, (db) => db.transaction((tx) => addPlatformStaff(tx, io.now(), { name, role })));
+        io.out(`${name} добавлен(а) в платформу TS (${role}). Ключ больше не будет показан.`);
+        io.out(`PLATFORM_KEY=${r.key.key}`);
         return 0;
       }
 

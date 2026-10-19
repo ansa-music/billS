@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type {
   ClubSnapshot,
+  SyncAccessResponse,
   SyncEvent,
   SyncEventPayload,
   SyncEventsRequest,
@@ -13,18 +14,23 @@ import type {
   TariffSetting,
   TariffConfig,
 } from '@bills/domain';
-import { isValidTimeZone, validateTariff } from '@bills/domain';
+import { isValidTimeZone, normalizeRoles, primaryRole, validateTariff } from '@bills/domain';
+import { scopeOf } from './auth.ts';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
 import { afterCommit, all, one, run, transaction } from './db.ts';
 import type { HubEvents } from './events.ts';
 import { record } from './journal.ts';
+import type { LicenseService } from './license.ts';
+import { clubId } from './views.ts';
 
 /**
  * HUB → cloud sync (stage 6). One worker per HUB:
  *  1. POST /sync/snapshot when the local settings changed since the cloud last accepted them;
  *  2. POST /sync/events with up to BATCH undelivered outbox rows (an empty batch is a heartbeat);
- *  3. GET /sync/settings when the cloud reports a newer settings version, then `applySettings`.
+ *  3. GET /sync/settings when the cloud reports a newer settings version, then `applySettings`;
+ *  4. GET /sync/access when the cloud's access version differs from the one applied, then
+ *     `applyAccess` (people and keys of this branch) and the license from the package.
  * Errors back off exponentially (interval × 2^n, at most 5 minutes); a success resets the pause.
  */
 
@@ -55,6 +61,8 @@ export interface SyncWorkerDeps extends SyncOptions {
   db: Db;
   clock: Clock;
   events: HubEvents;
+  /** Installs the license that comes with the access package. */
+  license?: LicenseService;
 }
 
 interface SyncStateRow {
@@ -243,6 +251,150 @@ export function applySettings(db: Db, now: number, settings: ClubSnapshot, event
   });
 }
 
+/** The access package version this HUB applied; null = never. */
+export function appliedAccessVersion(db: Db): number | null {
+  return one<{ version: number | null }>(db, 'SELECT version FROM access_sync WHERE id = 1')?.version ?? null;
+}
+
+export interface AccessApplied {
+  people: number;
+  keys: number;
+  deactivated: number;
+  revoked: number;
+  /** Cloud keys skipped because their hash is already used by a key of this HUB. */
+  conflicts: number;
+}
+
+const KEY_KINDS = new Set(['long', 'short']);
+const SCOPES = new Set(['platform', 'company', 'club']);
+
+/**
+ * Applies GET /sync/access in one transaction: people and keys that came from
+ * the cloud (origin 'cloud') are replaced by the package — upserted by id, those
+ * missing from it deactivated or revoked — while people and keys created on
+ * this HUB (origin 'hub') are left alone. Everyone is stored in the HUB's own
+ * club; the cloud's club id is remembered because the cloud hashes short keys
+ * over it. A cloud key whose hash a HUB key already has is skipped (key.conflict).
+ */
+export function applyAccess(db: Db, now: number, access: SyncAccessResponse, events?: HubEvents): AccessApplied {
+  return transaction(db, () => {
+    const club = clubId(db);
+    const result: AccessApplied = { people: 0, keys: 0, deactivated: 0, revoked: 0, conflicts: 0 };
+    const people = new Set<string>();
+    for (const p of access.people ?? []) {
+      if (!p || typeof p.id !== 'string' || !p.id || typeof p.name !== 'string' || !p.name.trim()) continue;
+      const norm = normalizeRoles(Array.isArray(p.roles) ? p.roles : []);
+      if (!norm.ok || !SCOPES.has(p.scope)) continue;
+      // The scope follows the roles: a 'club' person with a manager role is not a branch employee.
+      const scope = scopeOf(norm.roles);
+      const existing = one<{ origin: string }>(db, 'SELECT origin FROM staff WHERE id = ?', p.id);
+      if (existing && existing.origin !== 'cloud') continue; // an id of a HUB person: never overwritten
+      run(
+        db,
+        `INSERT INTO staff (id, club_id, name, role, roles, origin, scope, pin_hash, is_active, table_ids, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'cloud', ?, NULL, ?, '[]', ?, ?)
+         ON CONFLICT (id) DO UPDATE SET
+           name = excluded.name, role = excluded.role, roles = excluded.roles, scope = excluded.scope,
+           is_active = excluded.is_active, updated_at = excluded.updated_at`,
+        p.id,
+        club,
+        p.name.trim().slice(0, 80),
+        primaryRole(norm.roles)!,
+        JSON.stringify(norm.roles),
+        scope,
+        p.isActive ? 1 : 0,
+        now,
+        now,
+      );
+      people.add(p.id);
+      result.people++;
+    }
+    result.deactivated = run(
+      db,
+      `UPDATE staff SET is_active = 0, updated_at = ? WHERE origin = 'cloud' AND is_active = 1
+       AND id NOT IN (SELECT value FROM json_each(?))`,
+      now,
+      JSON.stringify([...people]),
+    );
+
+    const keys: string[] = [];
+    for (const k of access.keys ?? []) {
+      if (!k || typeof k.id !== 'string' || !people.has(k.personId)) continue;
+      if (!KEY_KINDS.has(k.kind) || typeof k.keyHash !== 'string' || !/^[0-9a-f]{64}$/.test(k.keyHash)) continue;
+      const clash = one<{ id: string; origin: string }>(db, 'SELECT id, origin FROM access_keys WHERE key_hash = ?', k.keyHash);
+      if (clash && (clash.origin !== 'cloud' || clash.id !== k.id)) {
+        result.conflicts++;
+        record(db, now, {
+          actor: CLOUD_ACTOR,
+          action: 'key.conflict',
+          entityType: 'staff',
+          entityId: k.personId,
+          data: { keyId: k.id, prefix: k.prefix, kind: k.kind, clashesWith: clash.id },
+        });
+        continue;
+      }
+      const existing = one<{ origin: string }>(db, 'SELECT origin FROM access_keys WHERE id = ?', k.id);
+      if (existing && existing.origin !== 'cloud') continue;
+      run(
+        db,
+        `INSERT INTO access_keys (id, club_id, staff_id, kind, origin, key_hash, prefix, label, created_at, created_by, expires_at, revoked_at, revoked_by)
+         VALUES (?, ?, ?, ?, 'cloud', ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET
+           staff_id = excluded.staff_id, kind = excluded.kind, key_hash = excluded.key_hash, prefix = excluded.prefix,
+           label = excluded.label, expires_at = excluded.expires_at,
+           revoked_by = CASE WHEN access_keys.revoked_at IS NULL AND excluded.revoked_at IS NOT NULL THEN excluded.revoked_by ELSE access_keys.revoked_by END,
+           revoked_at = COALESCE(access_keys.revoked_at, excluded.revoked_at)`,
+        k.id,
+        club,
+        k.personId,
+        k.kind,
+        k.keyHash,
+        String(k.prefix ?? '').slice(0, 40) || (k.kind === 'short' ? '••••' : 'KEY'),
+        k.label ?? null,
+        now,
+        CLOUD_ACTOR,
+        k.expiresAt ?? null,
+        k.revokedAt ?? null,
+        k.revokedAt ? CLOUD_ACTOR : null,
+      );
+      keys.push(k.id);
+      result.keys++;
+    }
+    // Cloud keys no longer in the package are revoked; revoked keys end their sessions.
+    result.revoked = run(
+      db,
+      `UPDATE access_keys SET revoked_at = ?, revoked_by = ? WHERE origin = 'cloud' AND revoked_at IS NULL
+       AND id NOT IN (SELECT value FROM json_each(?))`,
+      now,
+      CLOUD_ACTOR,
+      JSON.stringify(keys),
+    );
+    run(
+      db,
+      `UPDATE auth_sessions SET revoked_at = ? WHERE revoked_at IS NULL
+       AND key_id IN (SELECT id FROM access_keys WHERE origin = 'cloud' AND revoked_at IS NOT NULL)`,
+      now,
+    );
+
+    run(
+      db,
+      'UPDATE access_sync SET version = ?, cloud_club_id = ?, applied_at = ? WHERE id = 1',
+      access.version,
+      typeof access.clubId === 'string' && access.clubId ? access.clubId : null,
+      now,
+    );
+    record(db, now, {
+      actor: CLOUD_ACTOR,
+      action: 'cloud.access_applied',
+      entityType: 'club',
+      entityId: club,
+      data: { version: access.version, ...result },
+    });
+    if (events) afterCommit(db, () => events.changed({ kind: 'staff' }));
+    return result;
+  });
+}
+
 interface OutboxRow {
   id: number;
   at: number;
@@ -261,6 +413,7 @@ export class SyncWorker {
   readonly #intervalMs: number;
   readonly #kickDelayMs: number;
   readonly #logger: SyncLogger | undefined;
+  readonly #license: LicenseService | undefined;
   readonly #onChanged = () => this.kick();
 
   #timer: NodeJS.Timeout | undefined;
@@ -281,6 +434,7 @@ export class SyncWorker {
     this.#intervalMs = deps.intervalMs ?? 10_000;
     this.#kickDelayMs = deps.kickDelayMs ?? 1000;
     this.#logger = deps.logger;
+    this.#license = deps.license;
   }
 
   /** Earliest time of the next automatic tick; later than now while backing off after an error. */
@@ -371,6 +525,7 @@ export class SyncWorker {
   async #exchange(now: number): Promise<boolean> {
     let state = readSyncState(this.#db);
     let cloudVersion: number | null = null;
+    let accessVersion: number | undefined;
     let sent = false;
 
     // 1. Settings snapshot, when ours changed since the cloud last accepted them.
@@ -398,6 +553,7 @@ export class SyncWorker {
       const res = await this.#request<SyncEventsResponse>('POST', '/sync/events', body);
       sent = true;
       cloudVersion = res.body.settingsVersion;
+      accessVersion = res.body.accessVersion;
       const accepted = res.body.lastAcceptedId;
       if (accepted !== null && rows.length > 0) {
         run(this.#db, 'UPDATE outbox SET delivered_at = ? WHERE delivered_at IS NULL AND id <= ?', now, accepted);
@@ -415,7 +571,49 @@ export class SyncWorker {
         await this.#pushSnapshot(state);
       }
     }
+
+    // 4. People, keys and the license of this branch changed in the cloud.
+    if (typeof accessVersion === 'number' && accessVersion !== appliedAccessVersion(this.#db)) {
+      await this.pullAccess();
+    }
     return sent;
+  }
+
+  /** GET /sync/access and apply it: people and keys, then the license. */
+  async pullAccess(): Promise<AccessApplied> {
+    const res = await this.#request<SyncAccessResponse>('GET', '/sync/access');
+    const access = res.body;
+    if (!Number.isFinite(access.version) || !Array.isArray(access.people) || !Array.isArray(access.keys)) {
+      throw new Error('GET /sync/access: пакет доступа повреждён');
+    }
+    const applied = applyAccess(this.#db, this.#clock.now(), access, this.#events);
+    this.#logger?.info(
+      `Облако: доступ версии ${access.version}: людей ${applied.people}, ключей ${applied.keys}` +
+        (applied.conflicts ? `, конфликтов ключей ${applied.conflicts}` : ''),
+    );
+    const license = this.#license;
+    const text = typeof access.license === 'string' ? access.license.trim() : '';
+    if (license && text && text !== license.signed) {
+      try {
+        await license.install(text, 'cloud', CLOUD_ACTOR);
+        this.#logger?.info('Облако: установлена лицензия');
+      } catch (err) {
+        const message = (err as Error).message;
+        this.#logger?.warn(`Облако: лицензия не принята — ${message}`);
+        if (this.#db.isOpen) {
+          transaction(this.#db, () =>
+            record(this.#db, this.#clock.now(), {
+              actor: CLOUD_ACTOR,
+              action: 'license.rejected',
+              entityType: 'license',
+              entityId: 'cloud',
+              data: { message },
+            }),
+          );
+        }
+      }
+    }
+    return applied;
   }
 
   /** POSTs our settings when they differ from what the cloud last accepted. Returns the cloud version, or null when nothing was sent. */

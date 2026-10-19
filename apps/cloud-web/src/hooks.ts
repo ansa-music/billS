@@ -53,7 +53,7 @@ export function usePoll<T>(load: () => Promise<T>, intervalMs: number) {
   return { data, error, reload };
 }
 
-export type ClubTab = 'overview' | 'tariffs' | 'shifts';
+export type ClubTab = 'overview' | 'tariffs' | 'shifts' | 'staff';
 
 export type Route =
   | { kind: 'overview' }
@@ -61,23 +61,27 @@ export type Route =
   | { kind: 'club'; id: string }
   | { kind: 'tariffs'; id: string }
   | { kind: 'shifts'; id: string }
+  | { kind: 'staff'; id: string }
+  | { kind: 'company' }
   | { kind: 'phone' };
 
 export function parseHash(hash: string): Route {
   const path = hash.replace(/^#/, '').replace(/\/+$/, '') || '/';
   if (path === '/apps') return { kind: 'apps' };
   if (path === '/phone') return { kind: 'phone' };
-  const m = /^\/clubs\/([^/]+)(?:\/(tariffs|shifts))?$/.exec(path);
+  if (path === '/company') return { kind: 'company' };
+  const m = /^\/clubs\/([^/]+)(?:\/(tariffs|shifts|staff))?$/.exec(path);
   if (m && m[1]) {
     const id = decodeURIComponent(m[1]);
     if (m[2] === 'tariffs') return { kind: 'tariffs', id };
     if (m[2] === 'shifts') return { kind: 'shifts', id };
+    if (m[2] === 'staff') return { kind: 'staff', id };
     return { kind: 'club', id };
   }
   return { kind: 'overview' };
 }
 
-/** Routing by `location.hash`: #/, #/apps, #/clubs/:id, #/clubs/:id/tariffs, #/clubs/:id/shifts, #/phone. */
+/** Routing by `location.hash`: #/, #/apps, #/clubs/:id, #/clubs/:id/tariffs, #/clubs/:id/shifts, #/clubs/:id/staff, #/company, #/phone. */
 export function useHashRoute(): Route {
   const [route, setRoute] = useState<Route>(() => parseHash(location.hash));
   useEffect(() => {

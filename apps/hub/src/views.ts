@@ -8,6 +8,7 @@ import type {
   ClubSettings,
   DiscountKind,
   HubState,
+  LicenseStatus,
   OrderItemView,
   OrderView,
   PauseReason,
@@ -346,7 +347,7 @@ function openOrders(db: Db, club: string): { orders: OrderView[]; bySession: Map
 }
 
 /** `power` comes from the power monitor and `sync` from the sync worker (or `syncStatus(db, false)` without a cloud). */
-export function buildState(db: Db, now: number, power: PowerView, sync: SyncStatus): HubState {
+export function buildState(db: Db, now: number, power: PowerView, sync: SyncStatus, license: LicenseStatus | null = null): HubState {
   const club = one<HubState['club']>(db, 'SELECT id, name, timezone, currency FROM clubs ORDER BY created_at LIMIT 1');
   if (!club) throw new HubError(503, 'CLUB_NOT_CONFIGURED', 'Клуб не настроен');
 
@@ -431,6 +432,7 @@ export function buildState(db: Db, now: number, power: PowerView, sync: SyncStat
     manualMode: getManualMode(db),
     power,
     sync,
+    license,
   };
 }
 

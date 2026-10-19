@@ -33,7 +33,8 @@ export function hashApiKey(key: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Owner sessions
+// Owner sessions. An `owners` row is a client's MANAGER (the table name is historical):
+// cabinet sign-in by e-mail + password, phone keys, MGR-… keys.
 // ---------------------------------------------------------------------------
 
 interface OwnerRow {
@@ -151,17 +152,24 @@ export async function revokeOwnerKey(db: SqlDriver, now: number, ownerId: string
   return (await db.run('UPDATE owner_keys SET revoked_at = ? WHERE id = ? AND owner_id = ? AND revoked_at IS NULL', [now, keyId, ownerId])) > 0;
 }
 
-/** Owner of a live key, or null (bad shape, unknown, revoked — not told apart). */
+/**
+ * Owner (the client's manager) of a live key, or null (bad shape, unknown, revoked — not
+ * told apart): a phone key OWNER-… (owner_keys) or the manager's long key MGR-… (manager_keys).
+ * Platform keys (OWNER-…/TECH-… of TS) live in platform_keys and never match here.
+ */
 export async function authenticateOwnerKey(db: SqlDriver, now: number, raw: string): Promise<OwnerView | null> {
   const key = normalizeAccessKey(raw);
-  if (!isAccessKeyShape(key) || roleOfKeyPrefix(key) !== 'owner') return null;
+  if (!isAccessKeyShape(key)) return null;
+  const role = roleOfKeyPrefix(key);
+  const table = role === 'owner' ? 'owner_keys' : role === 'manager' ? 'manager_keys' : null;
+  if (!table) return null;
   const rows = await db.all<OwnerRow & { key_id: string }>(
-    `${OWNER_SELECT} JOIN owner_keys k ON k.owner_id = o.id WHERE k.key_hash = ? AND k.revoked_at IS NULL`,
+    `${OWNER_SELECT} JOIN ${table} k ON k.owner_id = o.id WHERE k.key_hash = ? AND k.revoked_at IS NULL`,
     [hashApiKey(key)],
   );
   const row = rows[0];
   if (!row) return null;
-  await db.run('UPDATE owner_keys SET last_used_at = ? WHERE key_hash = ?', [now, hashApiKey(key)]);
+  await db.run(`UPDATE ${table} SET last_used_at = ? WHERE key_hash = ?`, [now, hashApiKey(key)]);
   return toView(row);
 }
 

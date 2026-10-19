@@ -11,6 +11,7 @@ export { edgeContext, flushQuietly, reportPushConfigured } from './context.ts';
 export type { EdgeRequest } from './http.ts';
 export { routeOf } from './http.ts';
 export { handleSync } from './sync.ts';
+export { handlePlatform } from './platform.ts';
 export { authUserId, handleOwner, requireOwner } from './owner.ts';
 export { handleNotify, sameSecret } from './notify.ts';
 export { NtfySender, pushSenderFromEnv, RoutingSender, WebPushSender } from '../push.ts';

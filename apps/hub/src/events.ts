@@ -13,7 +13,8 @@ export interface ChangeEvent {
     | 'order'
     | 'catalog'
     | 'club'
-    | 'staff';
+    | 'staff'
+    | 'license';
   tableId?: string;
 }
 

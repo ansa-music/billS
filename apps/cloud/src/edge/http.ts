@@ -65,6 +65,19 @@ export async function readJson(req: EdgeRequest): Promise<unknown> {
   }
 }
 
+/** A POST body that may be absent (no content): {} then; broken JSON is still 400. */
+export async function readOptionalJson(req: EdgeRequest): Promise<unknown> {
+  const length = Number(req.headers.get('content-length') ?? 0);
+  if (length > BODY_LIMIT) throw badRequest('Request body is too large', 413);
+  const text = await req.text();
+  if (text.trim() === '') return {};
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (e) {
+    throw badRequest((e as Error).message);
+  }
+}
+
 /** Error → response, like the Fastify error handler: CloudError as is, anything else 500 + log. */
 export function errorResponse(err: unknown, log: Log, headers: Record<string, string> = {}): Response {
   if (err instanceof CloudError) return json(err.status, { error: { code: err.code, message: err.message } }, headers);

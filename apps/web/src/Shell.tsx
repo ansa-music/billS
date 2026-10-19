@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { AuthStaff, HubState } from '@bills/domain';
-import { ROLE_LABEL } from '@bills/domain';
+import { rolesLabel } from '@bills/domain';
 import { CloudStatus } from './CloudStatus.tsx';
 import { formatClock } from './format.ts';
 import { PowerBadge } from './PowerBadge.tsx';
@@ -244,7 +244,7 @@ export function Topbar(props: {
             <div className="actor-form">
               <p className="actor-who">
                 <strong>{staff.name}</strong>
-                <span className="muted">{ROLE_LABEL[staff.role]}</span>
+                <span className="muted">{rolesLabel(staff.roles)}</span>
               </p>
               <p className="hint">Вход по ключу доступа; имя попадает в журнал действий. Другой сотрудник — выйти и войти своим ключом.</p>
               <a className="btn actor-apps" href={hrefFor('/apps')} onClick={close}>

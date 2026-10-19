@@ -13,7 +13,12 @@
 #   SUPABASE_PROJECT_REF — ID проекта Supabase (из адреса https://<ID>.supabase.co);
 #   SUPABASE_ANON_KEY — публичный anon/publishable ключ проекта (попадает в сайт, это не секрет);
 #   VAPID_PUBLIC_KEY  — публичный ключ Web Push (тоже не секрет);
-#   CF_PAGES_CABINET / CF_PAGES_DEMO — имена проектов Pages, если не ts-cabinet / ts-demo.
+#   CF_PAGES_CABINET / CF_PAGES_DEMO — имена проектов Pages, если не ts-cabinet / ts-demo;
+#   TS_OWNER_EMAILS — e-mail владельцев платформы через запятую (учётки Supabase Auth, см. docs);
+#   TS_DEMO_CLOUD=1 — завести демо-клиента «Демо-сеть»; TS_DEMO_MANAGER_EMAIL — его управляющий
+#                     (по умолчанию demo-manager@ts.demo).
+# Секреты лицензий (необязательно): LICENSE_SIGNING_KEY, LICENSE_KEY_ID — без них лицензии
+#   подписываются DEV-ключом (их принимает только HUB с HUB_LICENSE_DEV_KEY=1).
 name: deploy
 
 on:
@@ -77,6 +82,37 @@ jobs:
           supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
           supabase db push --password "$SUPABASE_DB_PASSWORD" --include-all
 
+      # Первые владельцы платформы и демо-клиент: SQL через Management API (как SQL Editor, роль postgres).
+      - name: Supabase platform owners and demo cloud
+        if: env.LIVE == 'true' && env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != '' && env.SUPABASE_DB_PASSWORD != ''
+        env:
+          TS_OWNER_EMAILS: ${{ (vars.TS_OWNER_EMAILS || secrets.TS_OWNER_EMAILS) }}
+          TS_DEMO_CLOUD: ${{ (vars.TS_DEMO_CLOUD || secrets.TS_DEMO_CLOUD) }}
+          TS_DEMO_MANAGER_EMAIL: ${{ (vars.TS_DEMO_MANAGER_EMAIL || secrets.TS_DEMO_MANAGER_EMAIL) }}
+        run: |
+          sql() {
+            local body code
+            body=$(jq -n --arg q "$1" '{query: $q}')
+            code=$(curl -sS -o /tmp/ts-sql.json -w '%{http_code}' -X POST \
+              "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_REF/database/query" \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H 'Content-Type: application/json' -d "$body")
+            if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then echo "::error::SQL: HTTP $code $(cat /tmp/ts-sql.json)"; return 1; fi
+          }
+          # Строковый литерал SQL: одинарные кавычки удваиваются.
+          lit() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"; }
+          IFS=',' read -ra emails <<< "${TS_OWNER_EMAILS:-}"
+          for raw in "${emails[@]}"; do
+            email=$(printf '%s' "$raw" | tr -d '[:space:]')
+            [ -z "$email" ] && continue
+            sql "select public.ts_make_platform_owner($(lit "$email")) as id"
+            echo "владелец платформы: $email"
+          done
+          if [ "${TS_DEMO_CLOUD:-}" = "1" ]; then
+            sql "select (public.ts_seed_demo_cloud($(lit "${TS_DEMO_MANAGER_EMAIL:-demo-manager@ts.demo}")) - 'managerKey' - 'hubs') as r"
+            # Ключи (MGR-…, ключи HUB) не печатаются: журнал Actions может быть публичным.
+            echo "демо-клиент: $(jq -c '.[0].r' /tmp/ts-sql.json)"
+          fi
+
       - name: Supabase function secrets
         if: env.LIVE == 'true' && env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != ''
         env:
@@ -85,9 +121,11 @@ jobs:
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
           NOTIFY_SECRET: ${{ secrets.NOTIFY_SECRET }}
           TS_CABINET_URL: ${{ (vars.TS_CABINET_URL || secrets.TS_CABINET_URL) }}
+          LICENSE_SIGNING_KEY: ${{ secrets.LICENSE_SIGNING_KEY }}
+          LICENSE_KEY_ID: ${{ (vars.LICENSE_KEY_ID || secrets.LICENSE_KEY_ID) }}
         run: |
           args=()
-          for name in VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_SUBJECT NOTIFY_SECRET TS_CABINET_URL; do
+          for name in VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_SUBJECT NOTIFY_SECRET TS_CABINET_URL LICENSE_SIGNING_KEY LICENSE_KEY_ID; do
             if [ -n "${!name}" ]; then args+=("$name=${!name}"); fi
           done
           if [ ${#args[@]} -gt 0 ]; then supabase secrets set --project-ref "$SUPABASE_PROJECT_REF" "${args[@]}"; else echo "секретов для функций нет — push выключен"; fi
@@ -97,6 +135,8 @@ jobs:
         run: |
           node scripts/bundle-edge.mjs
           supabase functions deploy --project-ref "$SUPABASE_PROJECT_REF" --use-api
+          # Любой запрос к функциям подписывает лицензии, записанные SQL без подписи (ts_seed_demo_cloud); ответ 401 — нормально.
+          curl -sS -o /dev/null -w 'platform: HTTP %{http_code}\n' "https://$SUPABASE_PROJECT_REF.supabase.co/functions/v1/platform/platform/me" || true
 
       # ── Сайты ──────────────────────────────────────────────────────────────
       - name: Build

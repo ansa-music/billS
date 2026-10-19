@@ -3,11 +3,29 @@
  * the `owner` Edge Function for writes that need server-side validation, Realtime for new alerts.
  * Loaded only in a Supabase build (see api.ts), so the self-hosted bundle has no supabase-js.
  */
-import { createClient } from '@supabase/supabase-js';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import type { RealtimeChannel, Session, SupabaseClient } from '@supabase/supabase-js';
 import type {
-  ApiError,
+  BlockClientRequest,
+  BranchView,
+  ClientView,
   ClubDetails,
+  CloudKeyView,
+  CloudStaffView,
+  CreateBranchRequest,
+  CreateBranchResponse,
+  CreateClientRequest,
+  CreateClientResponse,
+  CreateCloudStaffRequest,
+  IssueCloudKeyRequest,
+  IssueCloudKeyResponse,
+  IssuedLongKey,
+  LicenseTermsRequest,
+  LicenseView,
+  PlatformLoginRequest,
+  PlatformLoginResponse,
+  PlatformMe,
+  UpdateCloudStaffRequest,
   CloudSessionView,
   CreateOwnerKeyResponse,
   DeviceView,
@@ -27,6 +45,9 @@ import { forgetLocalDevices, localDeviceIds } from './localDevices.ts';
 import { nativeBridge } from './platform.ts';
 import {
   OFFLINE_MESSAGE,
+  edgeErrorOf,
+  edgeFunctionUrl,
+  parsePlatformSession,
   authErrorFromHash,
   describeAuthError,
   edgeUrl,
@@ -44,7 +65,7 @@ function sb(): SupabaseClient {
   // hash router a clean route before supabase-js looks at the URL.
   linkError = authErrorFromHash(location.hash);
   if (linkError) history.replaceState(history.state, '', `${location.pathname}${location.search}#/`);
-  client = createClient(supabaseUrl(), supabaseAnonKey(), {
+  client = createSupabaseClient(supabaseUrl(), supabaseAnonKey(), {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
@@ -108,6 +129,18 @@ async function rpc<T>(fn: string, args?: Record<string, unknown>): Promise<T> {
   return res.data as T;
 }
 
+async function edgeError(res: Response): Promise<CloudRequestError> {
+  let data: unknown = null;
+  try {
+    data = await res.json();
+  } catch {
+    // not JSON — keep the generic text
+  }
+  const { code, message } = edgeErrorOf(res.status, data);
+  emit({ type: 'online', online: true });
+  return new CloudRequestError(res.status, code, message);
+}
+
 /** The `owner` Edge Function: `${SUPABASE_URL}/functions/v1/owner/owner/...` with the user's JWT. */
 async function edge<T>(method: string, path: string, body?: unknown): Promise<T> {
   const s = await session();
@@ -129,24 +162,7 @@ async function edge<T>(method: string, path: string, body?: unknown): Promise<T>
   }
   if (res.status === 502 || res.status === 503 || res.status === 504) return offline();
   if (res.status === 401) return unauthorized();
-  if (!res.ok) {
-    let code = 'HTTP_ERROR';
-    let message = `Облако ответило ошибкой ${res.status}`;
-    try {
-      const data = (await res.json()) as Partial<ApiError> & { message?: string; msg?: string; code?: string };
-      if (data.error && typeof data.error === 'object') {
-        code = data.error.code ?? code;
-        message = data.error.message ?? message;
-      } else {
-        code = typeof data.code === 'string' ? data.code : code;
-        message = data.message ?? data.msg ?? message;
-      }
-    } catch {
-      // not JSON — keep the generic text
-    }
-    emit({ type: 'online', online: true });
-    throw new CloudRequestError(res.status, code, message);
-  }
+  if (!res.ok) throw await edgeError(res);
   emit({ type: 'online', online: true });
   if (res.status === 204) return undefined as T;
   const text = await res.text();
@@ -169,6 +185,61 @@ export async function login(email: string, password: string): Promise<OwnerView>
   }
   emit({ type: 'online', online: true });
   return fetchMe();
+}
+
+/**
+ * E-mail sign-in for both cabinets: the same Supabase account may be a manager (owner_me),
+ * a member of the platform team (Edge Function `platform` accepts the JWT), or both.
+ */
+export async function loginEmail(email: string, password: string): Promise<{ owner: OwnerView | null; platform: PlatformMe | null }> {
+  let res: Awaited<ReturnType<SupabaseClient['auth']['signInWithPassword']>>;
+  try {
+    res = await sb().auth.signInWithPassword({ email, password });
+  } catch {
+    return offline();
+  }
+  if (res.error) {
+    const m = describeAuthError(res.error);
+    emit({ type: 'online', online: !m.offline });
+    throw new CloudRequestError(m.status, m.code, m.message);
+  }
+  emit({ type: 'online', online: true });
+  return whoAmI();
+}
+
+/** Who the stored Supabase session belongs to; signs out and throws NOT_OWNER when it is nobody. */
+export async function whoAmI(): Promise<{ owner: OwnerView | null; platform: PlatformMe | null }> {
+  const platform = await platformMeOrNull();
+  const owner = await rpc<OwnerView | null>('owner_me');
+  if (!owner && !platform) {
+    await sb()
+      .auth.signOut({ scope: 'local' })
+      .catch(() => undefined);
+    throw new CloudRequestError(401, 'NOT_OWNER', 'Эта почта не привязана ни к управляющему, ни к команде TS');
+  }
+  return { owner: owner ?? null, platform };
+}
+
+/** The manager of this session, or null (no sign-out, unlike fetchMe). */
+export async function ownerMeOrNull(): Promise<OwnerView | null> {
+  try {
+    // No Supabase session (a platform key sign-in): nothing to ask, and no "unauthorized" signal.
+    if (!(await sb().auth.getSession()).data.session) return null;
+    return (await rpc<OwnerView | null>('owner_me')) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** platformMe, with 403 NOT_PLATFORM (an ordinary manager) and 401 quietly as null. */
+export async function platformMeOrNull(): Promise<PlatformMe | null> {
+  try {
+    return await platformEdge<PlatformMe>('GET', '/platform/me', undefined, true, true);
+  } catch (e) {
+    const err = e as CloudRequestError;
+    if (err.status === 403 || err.status === 401) return null;
+    throw e;
+  }
 }
 
 /** Sends a one-time sign-in link; it brings the owner back to this very page (base path kept). */
@@ -203,7 +274,7 @@ export function takeLinkError(): string | null {
 }
 
 export async function loginByKey(_key: string): Promise<OwnerView> {
-  throw new CloudRequestError(400, 'NOT_SUPPORTED', 'Вход по ключу владельца в этой версии не используется: войдите по почте');
+  throw new CloudRequestError(400, 'NOT_SUPPORTED', 'Вход по ключу телефона в этой версии не используется: войдите по почте');
 }
 
 /** This browser/phone leaves the device list first (no pushes to a signed-out device), then the session ends here only. */
@@ -234,7 +305,7 @@ export async function fetchMe(): Promise<OwnerView> {
     await sb()
       .auth.signOut({ scope: 'local' })
       .catch(() => undefined);
-    throw new CloudRequestError(401, 'NOT_OWNER', 'Эта почта не привязана к владельцу клуба');
+    throw new CloudRequestError(401, 'NOT_OWNER', 'Эта почта не привязана ни к управляющему, ни к команде TS');
   }
   return me;
 }
@@ -264,11 +335,11 @@ export async function fetchOwnerKeys(): Promise<OwnerKeyView[]> {
 }
 
 export async function createOwnerKey(_label?: string): Promise<CreateOwnerKeyResponse> {
-  throw new CloudRequestError(400, 'NOT_SUPPORTED', 'Ключи владельца не нужны: на телефоне войдите по почте');
+  throw new CloudRequestError(400, 'NOT_SUPPORTED', 'Ключи телефона не нужны: на телефоне войдите по почте');
 }
 
 export async function revokeOwnerKey(_id: string): Promise<void> {
-  throw new CloudRequestError(400, 'NOT_SUPPORTED', 'Ключи владельца не используются');
+  throw new CloudRequestError(400, 'NOT_SUPPORTED', 'Ключи телефона не используются');
 }
 
 // --- push -------------------------------------------------------------------
@@ -349,4 +420,171 @@ export function subscribeAlerts(listener: (alert: AlertEvent) => void): () => vo
     alertListeners.delete(listener);
     if (alertListeners.size === 0) stopRealtime();
   };
+}
+
+// --- platform cabinet: Edge Function `platform`, own Bearer session token ----
+
+const PLATFORM_SESSION_KEY = 'ts.platform.session';
+type PlatformSession = { token: string; expiresAt: number };
+/** Fallback when storage is blocked: the session lives until the page is closed. */
+let memoryPlatformSession: PlatformSession | null = null;
+
+function readPlatformSession(): PlatformSession | null {
+  try {
+    return parsePlatformSession(localStorage.getItem(PLATFORM_SESSION_KEY), Date.now());
+  } catch {
+    return memoryPlatformSession && memoryPlatformSession.expiresAt > Date.now() ? memoryPlatformSession : null;
+  }
+}
+
+function writePlatformSession(value: PlatformSession | null): void {
+  memoryPlatformSession = value;
+  try {
+    if (value) localStorage.setItem(PLATFORM_SESSION_KEY, JSON.stringify(value));
+    else localStorage.removeItem(PLATFORM_SESSION_KEY);
+  } catch {
+    // storage blocked — memoryPlatformSession keeps it
+  }
+}
+
+/** A platform key session, or a Supabase Auth session (the platform owner may sign in by e-mail). */
+export async function hasPlatformSession(): Promise<boolean> {
+  if (readPlatformSession()) return true;
+  try {
+    return (await sb().auth.getSession()).data.session !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The `platform` Edge Function. Bearer = the platform key session token, or else the Supabase
+ * Auth JWT (accepted when the e-mail is in platform_staff; 403 NOT_PLATFORM otherwise).
+ * `quiet`: a 401 does not send the shell to the login form (probing who is signed in).
+ */
+async function platformEdge<T>(method: string, path: string, body?: unknown, auth = true, quiet = false): Promise<T> {
+  const headers: Record<string, string> = { apikey: supabaseAnonKey() };
+  let keySession = false;
+  if (auth) {
+    const s = readPlatformSession();
+    if (s) {
+      headers.authorization = `Bearer ${s.token}`;
+      keySession = true;
+    } else {
+      let jwt: string | null = null;
+      try {
+        jwt = (await sb().auth.getSession()).data.session?.access_token ?? null;
+      } catch {
+        return offline();
+      }
+      if (!jwt) {
+        if (quiet) throw new CloudRequestError(401, 'UNAUTHORIZED', 'Нужно войти');
+        return unauthorized();
+      }
+      headers.authorization = `Bearer ${jwt}`;
+    }
+  }
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  let res: Response;
+  try {
+    res = await fetch(edgeFunctionUrl(supabaseUrl(), 'platform', path), {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      cache: 'no-store',
+    });
+  } catch {
+    return offline();
+  }
+  if (res.status === 502 || res.status === 503 || res.status === 504) return offline();
+  if (res.status === 401 && auth) {
+    if (keySession) writePlatformSession(null);
+    const err = await edgeError(res);
+    if (!quiet) emit({ type: 'unauthorized' });
+    throw err;
+  }
+  if (!res.ok) throw await edgeError(res);
+  emit({ type: 'online', online: true });
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
+const enc = encodeURIComponent;
+
+export async function platformLogin(key: string): Promise<PlatformLoginResponse> {
+  const body: PlatformLoginRequest = { key };
+  const res = await platformEdge<PlatformLoginResponse>('POST', '/platform/login', body, false);
+  if (!res.token) throw new CloudRequestError(500, 'NO_TOKEN', 'Облако не выдало сессию платформы');
+  writePlatformSession({ token: res.token, expiresAt: res.expiresAt });
+  return res;
+}
+
+export function platformMe(): Promise<PlatformMe> {
+  return platformEdge<PlatformMe>('GET', '/platform/me');
+}
+
+export async function platformLogout(): Promise<void> {
+  try {
+    if (readPlatformSession()) await platformEdge<unknown>('POST', '/platform/logout');
+  } finally {
+    writePlatformSession(null);
+    // Signed in by e-mail: end the Supabase session too.
+    await logout().catch(() => undefined);
+  }
+}
+
+export async function listClients(): Promise<ClientView[]> {
+  return (await platformEdge<{ clients: ClientView[] }>('GET', '/platform/clients')).clients;
+}
+
+export function createClient(body: CreateClientRequest): Promise<CreateClientResponse> {
+  return platformEdge<CreateClientResponse>('POST', '/platform/clients', body);
+}
+
+export function setLicense(companyId: string, terms: LicenseTermsRequest): Promise<ClientView> {
+  return platformEdge<ClientView>('POST', `/platform/clients/${enc(companyId)}/license`, terms);
+}
+
+export function blockClient(companyId: string, body: BlockClientRequest): Promise<ClientView> {
+  return platformEdge<ClientView>('POST', `/platform/clients/${enc(companyId)}/block`, body);
+}
+
+export function issueManagerKey(companyId: string): Promise<IssuedLongKey> {
+  return platformEdge<IssuedLongKey>('POST', `/platform/clients/${enc(companyId)}/manager-key`);
+}
+
+// --- manager cabinet: Edge Function `owner`, /owner/company/… -----------------
+
+export async function companyLicense(): Promise<LicenseView | null> {
+  return (await edge<{ license: LicenseView | null }>('GET', '/owner/company/license')).license;
+}
+
+export async function listBranches(): Promise<BranchView[]> {
+  return (await edge<{ branches: BranchView[] }>('GET', '/owner/company/branches')).branches;
+}
+
+export function createBranch(body: CreateBranchRequest): Promise<CreateBranchResponse> {
+  return edge<CreateBranchResponse>('POST', '/owner/company/branches', body);
+}
+
+export async function listStaff(clubId?: string): Promise<CloudStaffView[]> {
+  const q = clubId ? `?clubId=${enc(clubId)}` : '';
+  return (await edge<{ staff: CloudStaffView[] }>('GET', `/owner/company/staff${q}`)).staff;
+}
+
+export function createStaff(body: CreateCloudStaffRequest): Promise<CloudStaffView> {
+  return edge<CloudStaffView>('POST', '/owner/company/staff', body);
+}
+
+export function updateStaff(id: string, body: UpdateCloudStaffRequest): Promise<CloudStaffView> {
+  return edge<CloudStaffView>('POST', `/owner/company/staff/${enc(id)}/update`, body);
+}
+
+export function issueStaffKey(staffId: string, body: IssueCloudKeyRequest): Promise<IssueCloudKeyResponse> {
+  return edge<IssueCloudKeyResponse>('POST', `/owner/company/staff/${enc(staffId)}/keys`, body);
+}
+
+export function revokeKey(keyId: string): Promise<CloudKeyView> {
+  return edge<CloudKeyView>('POST', `/owner/company/keys/${enc(keyId)}/revoke`);
 }

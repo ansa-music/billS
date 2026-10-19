@@ -13,8 +13,10 @@ import { writeBootstrapKeys } from './auth.ts';
 import { dirname, join } from 'node:path';
 import { MdnsResponder, normalizeHostName } from './mdns.ts';
 import { loadTls, startRedirectServer, tlsStatus } from './tls/serve.ts';
-import { DEMO_KEYS } from '@bills/domain';
+import { DEMO_KEYS, standaloneHubId } from '@bills/domain';
+import { clubId } from './views.ts';
 import { nextDemoReset } from './demo.ts';
+import { DEMO_LICENSE_KEYS, installDemoLicense } from './demo-license.ts';
 
 const config = loadConfig();
 if (config.cloudUrl && (!config.cloudApiKey || !config.hubId)) {
@@ -35,6 +37,13 @@ const hub = new Hub({
   isManager: managerMatcher(config.managerActors),
   ups,
   powerOptions: { intervalMs: config.upsPollMs, criticalPercent: config.upsCriticalPercent },
+  // A real club checks licenses unless HUB_LICENSE=off; the public demo signs itself a trial one (dev key).
+  demo: config.demo,
+  license: {
+    mode: config.demo ? 'enforce' : config.licenseMode,
+    publicKeys: config.demo ? DEMO_LICENSE_KEYS : config.licensePublicKeys,
+    hubId: config.hubId || standaloneHubId(clubId(db)),
+  },
   ...(config.cloudUrl
     ? {
         sync: {
@@ -74,20 +83,24 @@ const app = buildApp(hub, {
     : {}),
 });
 
+// The stored license is checked against the platform's keys before the first request.
+await hub.license.init();
+if (config.demo) await installDemoLicense(hub.license, Date.now());
 hub.start();
 
 // Public demo: the simple keys shown on the login screen (packages/domain/src/public.ts).
 if (config.demo) {
-  for (const k of hub.auth.issueFixedKeys(DEMO_KEYS)) app.log.info({ role: k.role, name: k.name }, 'Демо-ключ выдан');
+  for (const k of hub.auth.issueFixedKeys(DEMO_KEYS)) app.log.info({ roles: k.roles, name: k.name }, 'Демо-ключ выдан');
 }
 
-// Nobody must be locked out: owners and tech without a working key get one,
-// written next to the database. On a fresh demo club every employee gets one.
+// Nobody must be locked out: without any working long key (platform, manager) the HUB's own
+// managers — or a new installer account (TECH) — get one, written next to the database.
+// On a fresh demo club every employee gets one.
 const bootstrap = hub.auth.bootstrapKeys(seeded);
 if (bootstrap.length) {
   const file = join(dirname(config.dbPath), 'first-run-keys.txt');
   writeBootstrapKeys(file, bootstrap, Date.now());
-  for (const k of bootstrap) app.log.warn({ role: k.role, name: k.name, key: k.key }, 'Ключ доступа выдан при старте');
+  for (const k of bootstrap) app.log.warn({ roles: k.roles, name: k.name, key: k.key }, 'Ключ доступа выдан при старте');
   app.log.warn({ file }, 'Ключи сохранены в файл — передайте их и удалите файл');
 }
 
@@ -121,6 +134,7 @@ app.log.info(
     webDistServed,
     cloud: config.cloudUrl ?? 'off',
     hubId: config.hubId || undefined,
+    license: hub.license.enforced ? hub.license.status().state : 'off',
     https: tls ? true : false,
     mdns: mdnsHost ?? 'off',
     demo: config.demo || undefined,

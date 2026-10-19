@@ -33,7 +33,7 @@ export function ClubSection({ club, online, isBusy, run, onSaved, canEdit }: Sec
 
   return (
     <Section title="Клуб">
-      {!canEdit && <p className="hint">Название, часовой пояс и валюту меняет владелец.</p>}
+      {!canEdit && <p className="hint">Название, часовой пояс и валюту меняет управляющий.</p>}
       <div className="form">
         <div className="form-row">
           <Field label="Название клуба" error={dirty ? nameError : null}>

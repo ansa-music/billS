@@ -13,7 +13,22 @@ import type {
   SyncSnapshotRequest,
   UpdateTariffsRequest,
 } from '@bills/domain';
+import type { PlatformLoginRequest, PlatformLoginResponse, PlatformMe } from '@bills/domain';
 import { isPushKind, loginQrText } from '@bills/domain';
+import {
+  accessPackage,
+  authenticatePlatformKey,
+  createPlatformSession,
+  deletePlatformSession,
+  PLATFORM_COOKIE,
+  PLATFORM_SESSION_TTL_MS,
+  platformByToken,
+} from '../access.ts';
+import type { ManagerRef } from '../company.ts';
+import { companyLicense, createBranch, createStaff, issueStaffKey, listBranches, listStaff, revokeStaffKey, updateStaff } from '../company.ts';
+import type { LicenseSigner } from '../license.ts';
+import { DEV_SIGNER } from '../license.ts';
+import { blockClient, createClient, hirePlatformStaff, listClients, newClientManagerKey, platformStaff, updateClientLicense } from '../platform.ts';
 import {
   authenticateOwner,
   authenticateOwnerKey,
@@ -54,6 +69,8 @@ export interface AppDeps {
   publicUrl?: string | null;
   /** Origins allowed to call the API from a browser context (the app's WebView). */
   corsOrigins?: string[];
+  /** Signs client licenses; the dev key when omitted (main.ts reads LICENSE_SIGNING_KEY, see license.ts). */
+  licenseSigner?: LicenseSigner;
 }
 
 /** WebView origins of the Capacitor app (Android https://localhost, iOS capacitor://localhost). */
@@ -170,6 +187,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const clock = deps.clock ?? systemClock;
   const push = deps.push ?? new PushDispatcher(db, new DisabledSender(), () => clock.now());
   const corsOrigins = new Set(deps.corsOrigins ?? APP_ORIGINS);
+  const signer = deps.licenseSigner ?? DEV_SIGNER;
   const app = Fastify({ logger: deps.logger ?? false, disableRequestLogging: true, forceCloseConnections: true, bodyLimit: 8 * 1024 * 1024 });
 
   app.setErrorHandler((err, req, reply) => {
@@ -283,17 +301,33 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return reply.status(outcome.status).send(outcome.body);
   });
 
-  app.get<{ Querystring: { since?: string; hubId?: string } }>('/sync/settings', async (req) => {
-    // No body here: the key alone identifies the HUB; `hubId` is optional and checked when given.
+  /** GET requests: the key alone identifies the HUB; `hubId` is optional and checked when given. */
+  async function hubOfKey(req: FastifyRequest, hubId: string | undefined): Promise<HubRow> {
     const header = req.headers.authorization;
     if (typeof header !== 'string' || !header.startsWith('Bearer ')) {
       throw new CloudError(401, 'UNAUTHORIZED', 'Нужен ключ HUB (Authorization: Bearer)');
     }
     const hub = await findHubByKey(db, header.slice('Bearer '.length).trim());
     if (!hub) throw new CloudError(401, 'UNAUTHORIZED', 'Неизвестный ключ HUB');
-    if (req.query.hubId !== undefined && req.query.hubId !== hub.id) {
-      throw new CloudError(403, 'HUB_MISMATCH', 'Ключ выдан другому HUB');
-    }
+    if (hubId !== undefined && hubId !== hub.id) throw new CloudError(403, 'HUB_MISMATCH', 'Ключ выдан другому HUB');
+    return hub;
+  }
+
+  // DOWN: license, people and keys of this HUB's branch (see SyncAccessResponse).
+  app.get<{ Querystring: { hubId?: string } }>('/sync/access', async (req) => {
+    const hub = await hubOfKey(req, req.query.hubId);
+    const club = await loadClub(db, hub.club_id);
+    if (!club) throw new CloudError(500, 'CLUB_MISSING', 'Клуб этого HUB не найден');
+    await db.transaction(async (tx) => {
+      await tx.run('UPDATE hubs SET last_seen_at = ? WHERE id = ?', [clock.now(), hub.id]);
+      await hubBackOnline(tx, clock.now(), hub, club.name);
+    });
+    push.kick();
+    return accessPackage(db, hub);
+  });
+
+  app.get<{ Querystring: { since?: string; hubId?: string } }>('/sync/settings', async (req) => {
+    const hub = await hubOfKey(req, req.query.hubId);
     const since = Number(req.query.since ?? 0);
     if (!Number.isInteger(since) || since < 0) throw new CloudError(400, 'BAD_REQUEST', 'since должен быть целым числом');
     const club = await loadClub(db, hub.club_id);
@@ -415,6 +449,99 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     ]);
     return push.test(owner.id, clubs[0]?.id ?? '');
   });
+
+  // --- platform cabinet (owner and tech of TS) -------------------------------
+
+  /** Cookie `ts_platform` (browser) or `Authorization: Bearer` with the same session token. */
+  function platformToken(req: FastifyRequest): string | null {
+    const header = req.headers.authorization;
+    if (typeof header === 'string' && header.startsWith('Bearer ')) return header.slice('Bearer '.length).trim() || null;
+    return parseCookies(req.headers.cookie)[PLATFORM_COOKIE] ?? null;
+  }
+
+  async function requirePlatform(req: FastifyRequest): Promise<PlatformMe> {
+    const token = platformToken(req);
+    const me = token ? await platformByToken(db, token, clock.now()) : null;
+    if (!me) throw new CloudError(401, 'UNAUTHORIZED', 'Войдите в кабинет платформы');
+    return me;
+  }
+
+  function setPlatformCookie(reply: FastifyReply, token: string | null): void {
+    reply.header(
+      'set-cookie',
+      serializeCookie(PLATFORM_COOKIE, token ?? '', {
+        maxAgeSeconds: token ? PLATFORM_SESSION_TTL_MS / 1000 : 0,
+        ...(deps.secureCookies ? { secure: true } : {}),
+      }),
+    );
+  }
+
+  app.post<{ Body: PlatformLoginRequest }>(
+    '/api/platform/login',
+    { schema: { body: keyLoginSchema } },
+    async (req, reply): Promise<PlatformLoginResponse> => {
+      const me = await authenticatePlatformKey(db, clock.now(), req.body.key);
+      if (!me) throw new CloudError(401, 'INVALID_KEY', 'Ключ не подходит: неверный, отозван или это не ключ платформы');
+      const { token, expiresAt } = await createPlatformSession(db, me.id, clock.now());
+      setPlatformCookie(reply, token);
+      return { me, expiresAt };
+    },
+  );
+
+  app.get('/api/platform/me', async (req) => requirePlatform(req));
+
+  app.post('/api/platform/logout', async (req, reply) => {
+    const token = platformToken(req);
+    if (token) await deletePlatformSession(db, token);
+    setPlatformCookie(reply, null);
+    return { ok: true };
+  });
+
+  app.get('/api/platform/clients', async (req) => listClients(db, clock.now(), await requirePlatform(req)));
+
+  app.post('/api/platform/clients', async (req) =>
+    createClient(db, signer, clock.now(), await requirePlatform(req), req.body, { passwords: true }),
+  );
+
+  app.post<{ Params: { companyId: string } }>('/api/platform/clients/:companyId/license', async (req) =>
+    updateClientLicense(db, signer, clock.now(), await requirePlatform(req), req.params.companyId, req.body),
+  );
+
+  app.post<{ Params: { companyId: string } }>('/api/platform/clients/:companyId/block', async (req) =>
+    blockClient(db, signer, clock.now(), await requirePlatform(req), req.params.companyId, req.body),
+  );
+
+  app.post<{ Params: { companyId: string } }>('/api/platform/clients/:companyId/manager-key', async (req) =>
+    newClientManagerKey(db, clock.now(), await requirePlatform(req), req.params.companyId),
+  );
+
+  // Beyond the domain contract: the support team (hiring needs `platform.staff`, i.e. the owner).
+  app.get('/api/platform/staff', async (req) => platformStaff(db, await requirePlatform(req)));
+  app.post('/api/platform/staff', async (req) => hirePlatformStaff(db, clock.now(), await requirePlatform(req), req.body));
+
+  // --- manager cabinet (the client; `owners` rows are its managers) ----------
+
+  async function requireManager(req: FastifyRequest): Promise<ManagerRef> {
+    const owner = await requireOwner(req);
+    return { id: owner.id, companyId: owner.company.id };
+  }
+
+  app.get('/api/company/license', async (req) => companyLicense(db, clock.now(), await requireManager(req)));
+  app.get('/api/company/branches', async (req) => listBranches(db, await requireManager(req)));
+  app.post('/api/company/branches', async (req) => createBranch(db, signer, clock.now(), await requireManager(req), req.body));
+  app.get<{ Querystring: { clubId?: string } }>('/api/company/staff', async (req) =>
+    listStaff(db, await requireManager(req), req.query.clubId || null),
+  );
+  app.post('/api/company/staff', async (req) => createStaff(db, clock.now(), await requireManager(req), req.body));
+  app.post<{ Params: { id: string } }>('/api/company/staff/:id/update', async (req) =>
+    updateStaff(db, clock.now(), await requireManager(req), req.params.id, req.body),
+  );
+  app.post<{ Params: { id: string } }>('/api/company/staff/:id/keys', async (req) =>
+    issueStaffKey(db, clock.now(), await requireManager(req), req.params.id, req.body),
+  );
+  app.post<{ Params: { id: string } }>('/api/company/keys/:id/revoke', async (req) =>
+    revokeStaffKey(db, clock.now(), await requireManager(req), req.params.id),
+  );
 
   return app;
 }

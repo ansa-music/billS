@@ -13,6 +13,7 @@ import type {
   UpdateTariffsResponse,
 } from '@bills/domain';
 import { validateTariff } from '@bills/domain';
+import { accessVersionOf } from './access.ts';
 import { hashApiKey } from './auth.ts';
 import type { SqlDriver } from './db/driver.ts';
 import { CloudError } from './errors.ts';
@@ -95,7 +96,7 @@ export async function acceptEvents(
       req.settingsVersion,
       hub.id,
     ]);
-    return { lastAcceptedId, inserted, settingsVersion: settings.version };
+    return { lastAcceptedId, inserted, settingsVersion: settings.version, accessVersion: await accessVersionOf(tx, club.id) };
   });
 }
 

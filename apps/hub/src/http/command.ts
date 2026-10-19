@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Action } from '@bills/domain';
-import { can } from '@bills/domain';
+import { ACTION_MODULE, decide, MODULE_LABEL } from '@bills/domain';
 import type { Actor } from '../auth.ts';
 import { HubError } from '../errors.ts';
 import type { Hub } from '../hub.ts';
+import type { LicenseService } from '../license.ts';
 import type { CommandResult } from '../idempotency.ts';
 import { idempotent } from '../idempotency.ts';
 
@@ -14,6 +15,8 @@ declare module 'fastify' {
     actor?: Actor;
     /** The raw session token, for logout. */
     sessionToken?: string;
+    /** The HUB's license (set by the auth hook): routes check it with the role. */
+    license?: LicenseService;
   }
 }
 
@@ -23,10 +26,24 @@ export function actorOf(req: FastifyRequest): Actor {
   return req.actor;
 }
 
-/** 403 unless the signed-in role may perform the action. */
+/**
+ * 403 unless the signed-in person's roles may perform the action and the
+ * license allows it: FORBIDDEN, LICENSE_READ_ONLY (expired, blocked, missing…)
+ * or LICENSE_MODULE_OFF (the bar or the hardware is not in the license).
+ */
 export function assertCan(req: FastifyRequest, action: Action): Actor {
   const actor = actorOf(req);
-  if (!can(actor.role, action)) throw new HubError(403, 'FORBIDDEN', 'Недостаточно прав для этого действия');
+  const license = req.license;
+  const decision = decide(actor.roles, action, license?.gate() ?? null);
+  if (decision === 'forbidden') throw new HubError(403, 'FORBIDDEN', 'Недостаточно прав для этого действия');
+  if (decision === 'read_only') {
+    const message = license?.status().message ?? 'Лицензия не действует — режим «только чтение»';
+    throw new HubError(403, 'LICENSE_READ_ONLY', message);
+  }
+  if (decision === 'module_off') {
+    const mod = ACTION_MODULE[action];
+    throw new HubError(403, 'LICENSE_MODULE_OFF', `Модуль «${mod ? MODULE_LABEL[mod] : action}» не входит в лицензию`);
+  }
   return actor;
 }
 
@@ -40,7 +57,7 @@ export function guard(action: Action) {
 /**
  * Runs a state-changing command exactly once per Idempotency-Key. Every POST
  * route goes through here, so a retry after a lost response replays the result.
- * `action` is checked against the signed-in role before anything runs.
+ * `action` is checked against the signed-in roles and the license before anything runs.
  */
 export function runCommand(
   req: FastifyRequest,

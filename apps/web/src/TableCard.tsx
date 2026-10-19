@@ -41,6 +41,13 @@ interface Props {
   onTransfer: (sessionId: string, toTableId: string) => void;
   /** Opens the table's details panel. */
   onDetails?: () => void;
+  /**
+   * Why a new game cannot be opened right now (no right, read-only license);
+   * the open buttons are replaced by this note. null/undefined — they work.
+   */
+  openBlocked?: string | null;
+  /** Pause, resume and transfer (`table.continue`); default true. */
+  canContinue?: boolean;
 }
 
 export type TableCardProps = Props;
@@ -233,7 +240,7 @@ export function TableCard(props: Props) {
   );
 }
 
-function FreeBody({ table, tariffs, timezone, currency, serverNow, busy, shiftOpen, onOpen, onPrepaid }: Props) {
+function FreeBody({ table, tariffs, timezone, currency, serverNow, busy, shiftOpen, onOpen, onPrepaid, openBlocked }: Props) {
   const [tariffId, setTariffId] = useState(table.defaultTariffId);
   const [minutes, setMinutes] = useState<number | null>(null);
   const [picking, setPicking] = useState(false);
@@ -276,6 +283,9 @@ function FreeBody({ table, tariffs, timezone, currency, serverNow, busy, shiftOp
         </div>
       )}
 
+      {openBlocked ? (
+        <p className="blocked-note">{openBlocked}</p>
+      ) : (
       <div className="actions">
         <DurationSelect value={minutes} onChange={setMinutes} disabled={busy} />
         <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onOpen(tariffId, minutes)}>
@@ -288,6 +298,7 @@ function FreeBody({ table, tariffs, timezone, currency, serverNow, busy, shiftOp
           </button>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -327,6 +338,7 @@ function PlayingBody({
   onStop,
   onPause,
   onTransfer,
+  canContinue = true,
 }: Props & { session: SessionView; startedAt: number }) {
   const confirm = useStopConfirm();
   const [movePicking, setMovePicking] = useState(false);
@@ -395,7 +407,7 @@ function PlayingBody({
       )}
 
       <div className="actions">
-        {!confirm.confirming && (
+        {!confirm.confirming && canContinue && (
           <button
             type="button"
             className="btn btn-ghost"
@@ -413,13 +425,13 @@ function PlayingBody({
           label={paidUpfront ? 'Остановить досрочно' : undefined}
           onStop={() => onStop(session.id)}
         />
-        {!confirm.confirming && (
+        {!confirm.confirming && canContinue && (
           <button type="button" className="link" disabled={busy} onClick={() => setMovePicking((v) => !v)}>
             {movePicking ? 'Не переносить' : 'Перенести'}
           </button>
         )}
       </div>
-      {refusal && !confirm.confirming && <p className="hint">{refusal}</p>}
+      {refusal && !confirm.confirming && canContinue && <p className="hint">{refusal}</p>}
     </div>
   );
 }
@@ -432,6 +444,7 @@ function PausedBody({
   busy,
   onStop,
   onResume,
+  canContinue = true,
 }: Props & { session: SessionView; startedAt: number }) {
   const confirm = useStopConfirm();
   const { end, charge, note } = useLiveCharge(session, startedAt, serverNow);
@@ -501,7 +514,7 @@ function PausedBody({
       )}
 
       <div className="actions">
-        {!resuming && !confirm.confirming && (
+        {!resuming && !confirm.confirming && canContinue && (
           <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onResume(session.id)}>
             Продолжить
           </button>

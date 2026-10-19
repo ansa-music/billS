@@ -418,6 +418,84 @@ textarea {
   opacity: 0.45;
 }
 
+.login-key[data-kind='short'] {
+  max-width: 280px;
+  font-size: 28px;
+  letter-spacing: 0.4em;
+  text-align: center;
+}
+
+.login-mode .chip {
+  min-height: 44px;
+}
+
+/* Tablet keypad for six-digit staff keys. */
+.keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  max-width: 340px;
+}
+
+.keypad-dots {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  padding: 4px 0 6px;
+}
+
+.keypad-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+}
+
+.keypad-dot[data-on] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.keypad-key {
+  min-height: 68px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 28px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.keypad-key:active:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 18%, var(--surface-2));
+}
+
+.keypad-key:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.keypad-erase {
+  font-size: 24px;
+}
+
+.keypad-enter {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-size: 19px;
+}
+
+.login-locked {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 .login-key[aria-invalid='true'] {
   border-color: color-mix(in oklab, var(--warn) 60%, var(--border));
 }

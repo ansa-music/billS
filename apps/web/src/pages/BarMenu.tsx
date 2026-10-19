@@ -16,7 +16,8 @@ type ProductDraft = { mode: 'new'; categoryId: string } | { mode: 'edit'; produc
 
 /** Catalog admin (#/bar): categories, products, prices, stock. Owner and manager. */
 export function BarMenuPage() {
-  const { state, online } = useHub();
+  const { state, online, blockedReason } = useHub();
+  const editBlocked = blockedReason('catalog.edit');
   const { toast, show, clear } = useToast();
   const { run, busy } = useCommands(show);
   const { catalog, error, reload } = useCatalog();
@@ -25,7 +26,7 @@ export function BarMenuPage() {
   const [productDraft, setProductDraft] = useState<ProductDraft | null>(null);
 
   const sorted = useMemo(() => (catalog ? sortCatalog(catalog) : null), [catalog]);
-  const locked = busy.size > 0 || !online;
+  const locked = busy.size > 0 || !online || editBlocked !== null;
 
   // The selected category may have been removed by another screen.
   useEffect(() => {
@@ -87,6 +88,7 @@ export function BarMenuPage() {
       }
     >
       <OfflineBanner online={online} />
+      {editBlocked && <p className="blocked-note">{editBlocked}</p>}
       {error && <p className="bar-error">{error}</p>}
 
       <Section

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ClubDetails, OwnerOverview } from '@bills/domain';
 import { clubIdOf, cloud, event, gameEvents, HOUR, HUB1, HUB2, hubPost, login, MONDAY_NOON, ownerGet, sendEvents, tableIdOf } from './helpers.ts';
+import { DEMO_ACCESS_VERSION } from '../src/seed.ts';
 
 test('unknown key is 401, a key of another HUB is 403', async (t) => {
   const c = await cloud(t);
@@ -20,7 +21,7 @@ test('unknown key is 401, a key of another HUB is 403', async (t) => {
 
   const ok = await sendEvents(c, HUB1, []);
   assert.equal(ok.status, 200);
-  assert.deepEqual(ok.body, { lastAcceptedId: null, inserted: 0, settingsVersion: 0 });
+  assert.deepEqual(ok.body, { lastAcceptedId: null, inserted: 0, settingsVersion: 0, accessVersion: DEMO_ACCESS_VERSION });
 
   const settingsUnknown = await c.app.inject({ method: 'GET', url: '/sync/settings?since=0', headers: { authorization: 'Bearer nope' } });
   assert.equal(settingsUnknown.statusCode, 401);
@@ -34,14 +35,14 @@ test('a redelivered batch and a duplicate inside a batch are stored once', async
 
   const res1 = await sendEvents(c, HUB1, [...events, first]);
   assert.equal(res1.status, 200);
-  assert.deepEqual(res1.body, { lastAcceptedId: 3, inserted: 3, settingsVersion: 0 });
+  assert.deepEqual(res1.body, { lastAcceptedId: 3, inserted: 3, settingsVersion: 0, accessVersion: DEMO_ACCESS_VERSION });
 
   const res2 = await sendEvents(c, HUB1, events);
-  assert.deepEqual(res2.body, { lastAcceptedId: 3, inserted: 0, settingsVersion: 0 });
+  assert.deepEqual(res2.body, { lastAcceptedId: 3, inserted: 0, settingsVersion: 0, accessVersion: DEMO_ACCESS_VERSION });
 
   // Events of another HUB with the same outbox ids are distinct.
   const other = await sendEvents(c, HUB2, [event(1, MONDAY_NOON, 'lamp.on', tableId, { commandId: 'c1', sessionId: null })]);
-  assert.deepEqual(other.body, { lastAcceptedId: 1, inserted: 1, settingsVersion: 0 });
+  assert.deepEqual(other.body, { lastAcceptedId: 1, inserted: 1, settingsVersion: 0, accessVersion: DEMO_ACCESS_VERSION });
 
   const stored = await c.db.all<{ c: number }>('SELECT COUNT(*) AS c FROM events WHERE hub_id = ?', [HUB1.id]);
   assert.equal(stored[0]?.c, 3);
@@ -171,7 +172,7 @@ test('an unknown topic does not break the batch', async (t) => {
     event(13, MONDAY_NOON + 9500, 'something.new', 'x', { whatever: true }),
   ]);
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body, { lastAcceptedId: 13, inserted: 13, settingsVersion: 0 });
+  assert.deepEqual(res.body, { lastAcceptedId: 13, inserted: 13, settingsVersion: 0, accessVersion: DEMO_ACCESS_VERSION });
   const topics = await c.db.all<{ topic: string }>('SELECT topic FROM events ORDER BY outbox_id');
   assert.deepEqual(topics.map((r) => r.topic), [
     'session.open_requested',

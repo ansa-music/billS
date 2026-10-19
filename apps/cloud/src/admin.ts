@@ -125,14 +125,53 @@ export interface AddClubResult {
   apiKey: string;
 }
 
-/** Creates a club and its HUB with a fresh random key. */
-export async function addClub(db: SqlDriver, now: number, input: AddClubInput): Promise<AddClubResult> {
+export interface ClubInput {
+  name: string;
+  timezone?: string;
+  currency?: string;
+}
+
+/** Checks a new club's name, time zone and currency; returns them cleaned. */
+export function checkClubInput(input: ClubInput): { name: string; timezone: string; currency: string } {
   const name = input.name.trim();
   if (!name) throw new AdminError('Укажите название клуба: --name "<название>"');
   const timezone = input.timezone?.trim() || 'Asia/Almaty';
   if (!isValidTimezone(timezone)) throw new AdminError(`Неизвестный часовой пояс: ${timezone} (пример: Asia/Almaty)`);
   const currency = (input.currency?.trim() || 'KZT').toUpperCase();
   if (!/^[A-Z]{3}$/.test(currency)) throw new AdminError(`Валюта — три латинские буквы (KZT, RUB…), а не «${input.currency}»`);
+  return { name, timezone, currency };
+}
+
+/** Inserts a club (branch) of a company and its HUB with a fresh random key. Input already checked. */
+export async function insertClubWithHub(
+  tx: SqlDriver,
+  now: number,
+  companyId: string,
+  club: { name: string; timezone: string; currency: string },
+): Promise<{ clubId: string; hubId: string; apiKey: string }> {
+  const clubId = randomUUID();
+  const hubId = await freeHubId(tx, slugify(club.name));
+  const apiKey = generateHubKey();
+  await tx.run('INSERT INTO clubs (id, company_id, name, timezone, currency, created_at) VALUES (?, ?, ?, ?, ?, ?)', [
+    clubId,
+    companyId,
+    club.name,
+    club.timezone,
+    club.currency,
+    now,
+  ]);
+  // No club_settings row: loadSettings reports version 0 with empty lists until the HUB sends its snapshot.
+  await tx.run(
+    `INSERT INTO hubs (id, club_id, name, api_key_hash, created_at, settings_version)
+     VALUES (?, ?, ?, ?, ?, 0)`,
+    [hubId, clubId, `HUB ${club.name}`, hashApiKey(apiKey), now],
+  );
+  return { clubId, hubId, apiKey };
+}
+
+/** Creates a club and its HUB with a fresh random key. */
+export async function addClub(db: SqlDriver, now: number, input: AddClubInput): Promise<AddClubResult> {
+  const club = checkClubInput(input);
 
   return db.transaction(async (tx) => {
     const companies = await tx.all<{ id: string; name: string }>('SELECT id, name FROM companies ORDER BY created_at');
@@ -148,25 +187,7 @@ export async function addClub(db: SqlDriver, now: number, input: AddClubInput): 
     } else {
       companyId = companies[0]!.id;
     }
-
-    const clubId = randomUUID();
-    const hubId = await freeHubId(tx, slugify(name));
-    const apiKey = generateHubKey();
-    await tx.run('INSERT INTO clubs (id, company_id, name, timezone, currency, created_at) VALUES (?, ?, ?, ?, ?, ?)', [
-      clubId,
-      companyId,
-      name,
-      timezone,
-      currency,
-      now,
-    ]);
-    // No club_settings row: loadSettings reports version 0 with empty lists until the HUB sends its snapshot.
-    await tx.run(
-      `INSERT INTO hubs (id, club_id, name, api_key_hash, created_at, settings_version)
-       VALUES (?, ?, ?, ?, ?, 0)`,
-      [hubId, clubId, `HUB ${name}`, hashApiKey(apiKey), now],
-    );
-    return { companyId, clubId, hubId, apiKey };
+    return { companyId, ...(await insertClubWithHub(tx, now, companyId, club)) };
   });
 }
 
