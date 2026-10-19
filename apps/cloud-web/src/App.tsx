@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { OwnerView } from '@bills/domain';
 import { AppsPage } from './Apps.tsx';
-import { CloudRequestError, fetchMe, logout, subscribeApi } from './api.ts';
+import { CloudRequestError, SUPABASE_MODE, fetchMe, logout, subscribeAlerts, subscribeApi } from './api.ts';
 import { ClubPage } from './ClubPage.tsx';
-import { useHashRoute } from './hooks.ts';
+import { clubHref, requestRefresh, useHashRoute } from './hooks.ts';
 import { Login } from './Login.tsx';
 import { Overview } from './Overview.tsx';
 import { OfflineBanner } from './shared.tsx';
@@ -25,7 +25,7 @@ function useAuth() {
     let retry: ReturnType<typeof setTimeout> | undefined;
     const check = async () => {
       // The phone app without a cloud address or a token has nothing to ask: straight to the login form.
-      const bridge = nativeBridge();
+      const bridge = SUPABASE_MODE ? null : nativeBridge();
       if (bridge && (!bridge.cloudUrl() || !bridge.token())) {
         setAuth({ status: 'anonymous' });
         return;
@@ -60,15 +60,72 @@ function useAuth() {
   // the FCM token may have changed; registration is idempotent by token.
   const signedIn = auth.status === 'ok';
   useEffect(() => {
-    if (signedIn && nativeBridge()) void enablePhonePush();
+    if (signedIn && nativeBridge() && !SUPABASE_MODE) void enablePhonePush();
   }, [signedIn]);
 
   return { auth, setAuth, online };
 }
 
+interface Toast {
+  id: number;
+  text: string;
+  href: string;
+}
+
+let toastSeq = 0;
+
+/**
+ * Supabase mode: new alerts arrive over Realtime (RLS shows only the owner's clubs). The open
+ * screen reloads at once and a toast says what happened; the channel closes on sign-out.
+ */
+function useAlertToasts(signedIn: boolean) {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  useEffect(() => {
+    if (!signedIn || !SUPABASE_MODE) return;
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    const stop = subscribeAlerts((alert) => {
+      requestRefresh();
+      const toast: Toast = { id: ++toastSeq, text: alert.message || 'Новая тревога в клубе', href: clubHref(alert.clubId) };
+      setToasts((list) => [...list.slice(-2), toast]);
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        setToasts((list) => list.filter((t) => t.id !== toast.id));
+      }, 10_000);
+      timers.add(timer);
+    });
+    return () => {
+      stop();
+      for (const t of timers) clearTimeout(t);
+      setToasts([]);
+    };
+  }, [signedIn]);
+  const dismiss = (id: number) => setToasts((list) => list.filter((t) => t.id !== id));
+  return { toasts, dismiss };
+}
+
+function Toasts({ toasts, dismiss }: { toasts: Toast[]; dismiss: (id: number) => void }) {
+  if (toasts.length === 0) return null;
+  return (
+    <div className="toasts" role="status" aria-live="polite">
+      {toasts.map((t) => (
+        <div key={t.id} className="toast">
+          <span className="toast-dot" aria-hidden="true" />
+          <a className="toast-text" href={t.href} onClick={() => dismiss(t.id)}>
+            {t.text}
+          </a>
+          <button type="button" className="toast-close" aria-label="Закрыть" onClick={() => dismiss(t.id)}>
+            ×
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function App() {
   const { auth, setAuth, online } = useAuth();
   const route = useHashRoute();
+  const { toasts, dismiss } = useAlertToasts(auth.status === 'ok');
 
   // The download page needs no account: the owner opens it on a fresh phone before signing in,
   // and it must work even while the cloud is unreachable (installers come from GitHub).
@@ -85,7 +142,7 @@ export function App() {
       <main className="boot">
         <p>{online ? 'Загрузка…' : 'Подключаемся к облаку…'}</p>
         {/* The phone app keeps retrying a stored address: let the owner fix it instead of waiting forever. */}
-        {!online && nativeBridge() && (
+        {!online && nativeBridge() && !SUPABASE_MODE && (
           <>
             <p className="muted">{nativeBridge()?.cloudUrl()}</p>
             <button type="button" className="btn btn-small" onClick={() => setAuth({ status: 'anonymous' })}>
@@ -152,6 +209,7 @@ export function App() {
       </header>
 
       <OfflineBanner online={online} />
+      <Toasts toasts={toasts} dismiss={dismiss} />
 
       {route.kind === 'overview' && <Overview />}
       {route.kind === 'apps' && <AppsPage signedIn />}

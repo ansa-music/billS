@@ -1,5 +1,6 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseOrigins } from '@bills/domain';
 
 export type LampDriverKind = 'simulator' | 'esp32-http' | 'modbus-tcp';
 export const LAMP_DRIVERS: readonly LampDriverKind[] = ['simulator', 'esp32-http', 'modbus-tcp'];
@@ -60,6 +61,15 @@ export interface HubConfig {
   mdnsName: string | null;
   /** Folder for `ca init`; default `tls/` next to the database. */
   tlsDir: string;
+  /**
+   * Origins of screens served from another domain (a club screen on Cloudflare/GitHub Pages),
+   * e.g. `https://*.pages.dev`. Empty: no CORS — the club's own screens come from the HUB itself.
+   */
+  corsOrigins: string[];
+  /** Public demo club: fixed demo keys, GET /api/demo, the database is wiped nightly (src/demo.ts). */
+  demo: boolean;
+  /** Next demo reset, epoch ms; set by src/demo.ts for the child HUB. */
+  demoResetAt: number | null;
 }
 
 function int(value: string | undefined, fallback: number, name: string): number {
@@ -85,8 +95,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
   const dbPath = env.HUB_DB_PATH ?? fileURLToPath(new URL('../data/hub.db', import.meta.url));
   return {
     host: env.HUB_HOST ?? '127.0.0.1',
-    port: int(env.HUB_PORT, 4310, 'HUB_PORT'),
     dbPath,
+    // PORT is set by Render and similar hosts.
+    port: int(env.HUB_PORT ?? env.PORT, 4310, 'HUB_PORT'),
     demoTimezone: env.HUB_DEMO_TZ ?? 'Asia/Almaty',
     simulatorLatencyMs: int(env.HUB_SIM_LATENCY_MS, 300, 'HUB_SIM_LATENCY_MS'),
     webDistPath: env.HUB_WEB_DIST ?? fileURLToPath(new URL('../../web/dist', import.meta.url)),
@@ -121,5 +132,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
     httpPort: env.HUB_HTTP_PORT ? int(env.HUB_HTTP_PORT, 0, 'HUB_HTTP_PORT') : null,
     mdnsName: env.HUB_MDNS_NAME?.trim() || null,
     tlsDir: env.HUB_TLS_DIR || join(dirname(dbPath), 'tls'),
+    corsOrigins: parseOrigins(env.HUB_CORS_ORIGINS),
+    demo: flag(env.HUB_DEMO, false),
+    demoResetAt: env.HUB_DEMO_RESET_AT ? int(env.HUB_DEMO_RESET_AT, 0, 'HUB_DEMO_RESET_AT') : null,
   };
 }

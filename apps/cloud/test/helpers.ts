@@ -3,11 +3,13 @@ import type { SyncEvent, SyncEventPayload, SyncEventsResponse } from '@bills/dom
 import { ManualClock } from '../src/clock.ts';
 import type { SqlDriver } from '../src/db/driver.ts';
 import { migrate } from '../src/db/migrate.ts';
+import { createPostgresDriver } from '../src/db/postgres.ts';
 import { openSqlite } from '../src/db/sqlite.ts';
 import { buildApp } from '../src/http/app.ts';
 import type { PushSender } from '../src/push.ts';
 import { DisabledSender, PushDispatcher } from '../src/push.ts';
 import { DEMO_HUBS, DEMO_OWNER, seedDemo } from '../src/seed.ts';
+import { createPglitePool } from './pglite.ts';
 
 /** Monday 2026-10-12, 12:00 in Almaty (UTC+5). */
 export const MONDAY_NOON = Date.UTC(2026, 9, 12, 7, 0);
@@ -26,15 +28,29 @@ export interface TestCloud {
   close(): Promise<void>;
 }
 
+export type TestDbKind = 'sqlite' | 'pglite';
+
+/** The engine tests run on: in-memory SQLite by default, PGlite with `CLOUD_TEST_DB=pglite`. */
+export const TEST_DB: TestDbKind = process.env.CLOUD_TEST_DB === 'pglite' ? 'pglite' : 'sqlite';
+
+/** An empty in-memory database of the given kind. */
+export async function openTestDb(kind: TestDbKind = TEST_DB): Promise<SqlDriver> {
+  if (kind === 'pglite') return createPostgresDriver(await createPglitePool());
+  return openSqlite(':memory:');
+}
+
 export interface TestCloudOptions {
   sender?: PushSender;
   maxAgeMs?: number;
+  /** Database engine; `TEST_DB` by default. */
+  kind?: TestDbKind;
 }
 
-/** A cloud on an in-memory SQLite with the demo seed. */
+/** A cloud on an in-memory database (see `TEST_DB`) with the demo seed. */
 export async function createTestCloud(options: TestCloudOptions = {}): Promise<TestCloud> {
+  const kind = options.kind ?? TEST_DB;
   const clock = new ManualClock(MONDAY_NOON);
-  const db = openSqlite(':memory:');
+  const db = await openTestDb(kind);
   await migrate(db, clock.now());
   await seedDemo(db, clock.now());
   const pushLog: string[] = [];

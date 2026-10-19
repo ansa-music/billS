@@ -13,6 +13,8 @@ import { writeBootstrapKeys } from './auth.ts';
 import { dirname, join } from 'node:path';
 import { MdnsResponder, normalizeHostName } from './mdns.ts';
 import { loadTls, startRedirectServer, tlsStatus } from './tls/serve.ts';
+import { DEMO_KEYS } from '@bills/domain';
+import { nextDemoReset } from './demo.ts';
 
 const config = loadConfig();
 if (config.cloudUrl && (!config.cloudApiKey || !config.hubId)) {
@@ -66,9 +68,18 @@ const app = buildApp(hub, {
   startedAt: Date.now(),
   version: versionInfo(),
   staticDir: config.webDistPath,
+  corsOrigins: config.corsOrigins,
+  ...(config.demo
+    ? { demo: { resetAt: () => config.demoResetAt ?? nextDemoReset(Date.now(), config.demoTimezone, 4) } }
+    : {}),
 });
 
 hub.start();
+
+// Public demo: the simple keys shown on the login screen (packages/domain/src/public.ts).
+if (config.demo) {
+  for (const k of hub.auth.issueFixedKeys(DEMO_KEYS)) app.log.info({ role: k.role, name: k.name }, 'Демо-ключ выдан');
+}
 
 // Nobody must be locked out: owners and tech without a working key get one,
 // written next to the database. On a fresh demo club every employee gets one.
@@ -112,6 +123,8 @@ app.log.info(
     hubId: config.hubId || undefined,
     https: tls ? true : false,
     mdns: mdnsHost ?? 'off',
+    demo: config.demo || undefined,
+    cors: config.corsOrigins.length ? config.corsOrigins : undefined,
   },
   'HUB started',
 );

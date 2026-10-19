@@ -10,9 +10,9 @@
     "node": ">=24"
   },
   "scripts": {
-    "test": "npm run test -w @bills/domain -w @bills/hub -w @bills/cloud",
+    "test": "npm run test -w @bills/domain -w @bills/hub -w @bills/cloud -w @bills/cloud-web && npm run test:supabase",
     "build": "npm run build -w @bills/web -w @bills/cloud-web",
-    "typecheck": "tsc -p packages/domain && tsc -p apps/hub && tsc -p apps/web && tsc -p apps/cloud && tsc -p apps/cloud-web && tsc -p apps/mobile",
+    "typecheck": "tsc -p packages/domain && tsc -p apps/hub && tsc -p apps/web && tsc -p apps/cloud && tsc -p apps/cloud-web && tsc -p apps/mobile && tsc -p supabase",
     "dev:hub": "npm run dev -w @bills/hub",
     "dev:web": "npm run dev -w @bills/web",
     "dev:cloud": "npm run dev -w @bills/cloud",
@@ -21,10 +21,14 @@
     "start:cloud": "npm run start -w @bills/cloud",
     "local": "node scripts/local.mjs",
     "icons": "node scripts/icons.mjs",
-    "audit:pwa": "npx --yes @lhci/cli@0.15 collect --url=http://localhost:4800/ --settings.preset=desktop --numberOfRuns=1"
+    "audit:pwa": "npx --yes @lhci/cli@0.15 collect --url=http://localhost:4800/ --settings.preset=desktop --numberOfRuns=1",
+    "test:supabase": "node --test --test-concurrency=1 \"supabase/tests/**/*.test.ts\"",
+    "bundle:edge": "node scripts/bundle-edge.mjs",
+    "vapid": "node scripts/vapid-keys.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
+    "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
   }
 }

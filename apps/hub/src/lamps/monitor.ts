@@ -99,7 +99,7 @@ export class LampMonitor {
   start(): void {
     if (!this.supported || this.#options.intervalMs <= 0 || this.#timer) return;
     this.#timer = setInterval(() => void this.poll(), this.#options.intervalMs);
-    this.#timer.unref();
+    this.#timer.unref?.();
   }
 
   close(): void {

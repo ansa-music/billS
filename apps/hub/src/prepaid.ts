@@ -79,7 +79,7 @@ export class PrepaidService {
     this.sync();
     this.#events.on('changed', this.#onChange);
     this.#timer = setInterval(() => this.#safeSync(), this.#tickMs);
-    this.#timer.unref();
+    this.#timer.unref?.();
   }
 
   close(): void {

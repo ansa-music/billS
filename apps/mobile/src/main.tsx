@@ -8,6 +8,7 @@ import { Preferences } from '@capacitor/preferences';
 import { SplashScreen } from '@capacitor/splash-screen';
 import { FirebaseMessaging, Importance } from '@capacitor-firebase/messaging';
 import { App } from '../../cloud-web/src/App.tsx';
+import { SUPABASE_MODE } from '../../cloud-web/src/config.ts';
 import type { NativeBridge, PushTokenResult } from '../../cloud-web/src/platform.ts';
 import { setNativeBridge } from '../../cloud-web/src/platform.ts';
 import '../../cloud-web/src/styles.css';
@@ -52,6 +53,8 @@ async function setUpPush(): Promise<void> {
 }
 
 async function pushToken(): Promise<PushTokenResult> {
+  // Supabase build: no Firebase at all — alerts come through the ntfy app (cabinet → «Телефон и уведомления»).
+  if (SUPABASE_MODE) return { ok: false, reason: 'unavailable', message: 'в этой сборке уведомления приходят через ntfy' };
   try {
     let perm = await FirebaseMessaging.checkPermissions();
     if (perm.receive === 'prompt' || perm.receive === 'prompt-with-rationale') perm = await FirebaseMessaging.requestPermissions();
@@ -112,7 +115,8 @@ async function main(): Promise<void> {
     appVersion: () => `${info.version} (${info.build})`,
   };
   setNativeBridge(bridge);
-  await setUpPush().catch(() => {});
+  // FCM is the legacy path of the self-hosted cloud (apps/cloud); a Supabase build never registers it.
+  if (!SUPABASE_MODE) await setUpPush().catch(() => {});
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>

@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { isAccessKeyShape, normalizeAccessKey } from '@bills/domain';
 import { HubRequestError } from './api.ts';
 import { readDevice, useAuth, writeDevice } from './auth.ts';
+import { DemoKeys } from './demo.tsx';
 import { navigate, useLocation } from './router.tsx';
 import { Field, Page } from './ui.tsx';
 
@@ -108,6 +109,12 @@ export function LoginPage({ next }: { next: string }) {
           </button>
         </div>
       </form>
+      <DemoKeys
+        onPick={(k) => {
+          setKey(k);
+          setError(null);
+        }}
+      />
       <aside className="login-help">
         <p>
           Ключ выдаёт управляющий или владелец на странице «Сотрудники». Первые ключи владельца и техподдержки HUB

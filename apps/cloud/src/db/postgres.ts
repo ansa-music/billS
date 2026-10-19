@@ -43,7 +43,8 @@ export function toPositional(sql: string): string {
 /**
  * PostgreSQL driver over a `pg.Pool`-shaped object. A transaction runs on one
  * dedicated client (BEGIN … COMMIT / ROLLBACK) which is released afterwards.
- * Not yet verified against a live PostgreSQL server — see the README.
+ * Verified on PGlite (real PostgreSQL in WASM, test/pg-dialect.test.ts); not yet
+ * against a networked server — see the README.
  */
 export function createPostgresDriver(pool: PgPoolLike): SqlDriver {
   const over = (q: PgQueryable, insideTx: boolean): SqlDriver => {

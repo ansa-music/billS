@@ -1,0 +1,171 @@
+# Публичный доступ к TS — бесплатно
+
+Как выложить TS в интернет без своего сервера. Нужны три бесплатных сервиса:
+
+- **Supabase** — весь бэкенд облака: база Postgres, вход владельца, отчёты, тревоги в реальном времени, приём данных из клубов, push;
+- **Cloudflare Pages** — сайты, основной вариант;
+- **GitHub Pages** — сайты, запасной вариант без регистрации.
+
+Firebase и Google не используются вовсе.
+
+> Все эти сервисы на бесплатном плане работают **без банковской карты**. Если понадобится платный план, Supabase, Cloudflare и GitHub принимают обычные карты **Visa / Mastercard**.
+
+## Что получится
+
+| Что | Где | Адрес (пример) |
+|---|---|---|
+| **Кабинет владельца**: все клубы сети, выручка, смены, тарифы, тревоги сразу на экране. Ставится на телефон как приложение | Cloudflare Pages, проект `ts-cabinet` | `https://ts-cabinet.pages.dev` |
+| **Демо экрана клуба**: зал, касса, бар, оборудование с симулятором ламп. Работает целиком в браузере, данные сбрасываются каждую ночь | Cloudflare Pages, проект `ts-demo` | `https://ts-demo.pages.dev` |
+| То же без Cloudflare | GitHub Pages | `https://ansa-music.github.io/billS/cabinet/` и `…/demo/` |
+| **Облако**: база, вход, отчёты, приём событий из клубов (Edge Function `sync`), push (`notify`) | Supabase | `https://<ID>.supabase.co` |
+
+Как это работает:
+
+- При каждом пуше в `main` GitHub Actions (`.github/workflows/deploy.yml`) делает всё сам: проверяет код и прогоняет тесты, накатывает миграции базы (`supabase db push`), выкладывает Edge Functions, собирает и выкладывает оба сайта.
+- Для каждого pull request на Cloudflare появляются свои копии сайтов. Ссылки на них робот пишет в PR. Базу из PR робот не трогает.
+- **Демо экрана клуба не требует сервера.** Внутри браузера работает тот же HUB, что в клубе: те же правила, тарифы и касса, а база в памяти браузера (SQLite в WebAssembly). Демо никогда не «засыпает» и ничего не стоит.
+- **HUB клуба** отправляет события в Supabase. Для этого в его `.env` достаточно одной строки `CLOUD_URL=https://<ID>.supabase.co/functions/v1` плюс ключ HUB. Код HUB менять не нужно.
+
+## ⚠️ Сначала про персональные данные
+
+Supabase, Cloudflare и GitHub находятся **за пределами Казахстана**: регионов в Казахстане у Supabase нет (ближайшие — Франкфурт и Мумбаи, подойдёт и любой другой, например Токио). Закон РК «О персональных данных и их защите» требует хранить персональные данные граждан РК на серверах в Казахстане. В облаке TS лежат почта и имена владельцев, имена сотрудников в журнале.
+
+- **Публичное облако из этой инструкции — для демо и для кабинета без персональных данных** (демо-владелец, обезличенные имена).
+- **Для пилота с настоящим клубом** персональные данные храните в самом клубе. Это бесплатный режим из `docs/FREE_SETUP_RU.md`: облако `apps/cloud` на мини-ПК клуба, доступ через Tailscale или Cloudflare Tunnel.
+- Настоящее облако с реальными данными включайте после переезда на хостинг с дата-центром в Казахстане. Код для этого готов: `apps/cloud` и PostgreSQL.
+
+## Что сделать один раз руками
+
+Аккаунты регистрируете вы: нужен ваш вход и подтверждение почты. Claude аккаунты не создаёт и пароли не вводит. Везде удобнее входить **через GitHub** (кнопка «Continue with GitHub»). На всё уйдёт примерно 30 минут.
+
+Секреты и переменные GitHub задаются в репозитории `ansa-music/billS` → **Settings → Secrets and variables → Actions**. Есть две вкладки:
+
+- **Secrets** — для паролей, их потом никто не увидит;
+- **Variables** — для того, что и так попадает на сайт.
+
+Несекретные значения — `SUPABASE_PROJECT_REF`, `SUPABASE_ANON_KEY`, `VAPID_PUBLIC_KEY`, `TS_CABINET_URL` — можно положить и туда, и туда: **секрет или переменная — подойдёт любое**. Робот сначала ищет переменную, потом секрет с тем же именем.
+
+### 1. Supabase: проект
+
+1. <https://supabase.com> → **Start your project** → вход через GitHub. План **Free**, карта не нужна.
+2. **New project**:
+   - имя `ts`;
+   - **Database password** — придумайте и сохраните в менеджере паролей;
+   - **Region** — любой, работает с любым. Если проект уже создан в другом регионе (например, Tokyo), пересоздавать его не нужно. Для нового проекта задержка из Казахстана обычно меньше у Central EU (Frankfurt) или South Asia (Mumbai). Все регионы вне Казахстана, см. предупреждение выше.
+3. Когда проект создастся, откройте **Project Settings → General** и скопируйте **Project ID** — короткую строку вида `abcdefghijklmnop`. Затем **Project Settings → API Keys** и скопируйте ключ **anon / publishable**. Он публичный, это нормально: доступ к данным закрывают правила RLS в базе.
+4. Ваш личный токен: аватар справа вверху → **Account preferences → Access Tokens → Generate new token**, имя `github-ts`. Скопируйте его.
+5. В GitHub:
+   - **Secrets**: `SUPABASE_ACCESS_TOKEN` = токен из п. 4, `SUPABASE_DB_PASSWORD` = пароль базы из п. 2;
+   - **Variables**: `SUPABASE_PROJECT_REF` = Project ID, `SUPABASE_ANON_KEY` = anon-ключ.
+6. **Authentication → URL Configuration**:
+   - **Site URL** = адрес кабинета: `https://ts-cabinet.pages.dev`, или адрес на GitHub Pages;
+   - в **Redirect URLs** добавьте его же с `/**` на конце. Без этого не будет работать вход по ссылке из письма.
+
+Таблицы создавать не нужно: их создаст робот при первом запуске (миграции `supabase/migrations`).
+
+### 2. Владелец и клубы
+
+Компании, владельцев, клубы и ключи HUB создаёт платформа, а не сам владелец. Готовый SQL печатает наш скрипт. Его вывод вставьте в Supabase → **SQL Editor → New query → Run**:
+
+```
+node scripts/supabase-sql.ts demo                                     # демо-сеть «Демо сеть»: owner@demo.kz, два клуба
+node scripts/supabase-sql.ts company --company "Моя сеть" --email boss@example.kz
+node scripts/supabase-sql.ts club --company <COMPANY_ID> --name "Клуб на Абая" --tz Asia/Almaty
+```
+
+1. **Вход владельца.** Supabase → **Authentication → Users → Add user → Create new user**: та же почта, пароль, галочка «Auto Confirm User». Или **Send invitation** — тогда владелец задаст пароль сам по ссылке из письма. Пользователь привязывается к владельцу по совпадающей почте.
+2. **HUB клуба.** Команда `club` печатает три строки. Впишите их в `.env` HUB этого клуба (ключ показывается один раз):
+   ```
+   CLOUD_URL=https://<ID>.supabase.co/functions/v1
+   HUB_ID=hub-...
+   CLOUD_API_KEY=...
+   ```
+
+### 3. Сайты — вариант А: Cloudflare Pages (основной)
+
+1. <https://dash.cloudflare.com/sign-up> → регистрация (бесплатный план, карта не нужна).
+2. **Account ID**: в панели Cloudflare откройте **Workers & Pages**. Справа будет **Account ID** — скопируйте.
+3. **API-токен**: аватар → **My Profile → API Tokens → Create Token** → шаблон **Edit Cloudflare Workers**, или Custom token с правом **Account → Cloudflare Pages → Edit**. Скопируйте токен.
+4. В GitHub **Secrets**: `CLOUDFLARE_API_TOKEN` и `CLOUDFLARE_ACCOUNT_ID`.
+5. Проекты Pages `ts-cabinet` и `ts-demo` робот создаст сам. Если эти имена заняты, задайте свои в **Variables** `CF_PAGES_CABINET` и `CF_PAGES_DEMO`.
+
+Заголовки для PWA лежат в файлах `_headers`:
+
+- `no-cache` на `index.html`, `sw.js` и `manifest.webmanifest`, поэтому телефоны сразу видят новую версию;
+- кэш на год для `/assets/*`.
+
+Неизвестные адреса открывают приложение (`_redirects`).
+
+### 3. Сайты — вариант Б: GitHub Pages (без регистрации)
+
+1. GitHub → **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+2. **Variables**: `PAGES_ENABLED` = `1`.
+3. Сайты появятся по адресам `https://ansa-music.github.io/billS/cabinet/` и `…/billS/demo/` (workflow `pages`).
+
+Ограничения GitHub Pages:
+
+- свои HTTP-заголовки задать нельзя — файл `_headers` там не работает;
+- все файлы кэшируются на 10 минут, поэтому **обновление PWA приходит до 10 минут позже**, чем на Cloudflare.
+
+Ссылки внутри приложений работают, потому что адреса страниц хранятся после `#`.
+
+Можно включить оба варианта сразу.
+
+### 4. Push-уведомления о тревогах (необязательно)
+
+Без Firebase. Есть два способа, оба бесплатные:
+
+- **Web Push** — для кабинета, установленного как приложение. Работает на Android (Chrome), на iPhone с iOS 16.4+ (после «На экран „Домой“») и на компьютере. Ключи VAPID делает наш скрипт:
+  ```
+  npm run vapid
+  ```
+  Он напечатает три значения:
+  - в **Variables**: `VAPID_PUBLIC_KEY` (публичный);
+  - в **Secrets**: `VAPID_PRIVATE_KEY` и `VAPID_SUBJECT` (`mailto:ваша@почта`).
+
+  Ещё задайте **Secret** `NOTIFY_SECRET` — любая длинная случайная строка. И **Variable** `TS_CABINET_URL` — адрес кабинета: по нему уведомление открывает нужный клуб.
+- **ntfy** — для приложения TS на Android (APK). Внутри APK Web Push не работает: системный WebView его не поддерживает. Поэтому уведомления приходят через бесплатное приложение **ntfy** (F-Droid или Google Play). В кабинете: **Уведомления → «Получать через ntfy»** → кнопка «Подписаться» откроет ntfy с вашим личным секретным каналом. Сервер ntfy.sh бесплатный; при желании можно поднять свой (open-source).
+- Почему не FCM: Android-push через Firebase требует консоль Firebase и аккаунт Google Cloud, а оплатить Google в будущем может не получиться. FCM остаётся только в самостоятельном облаке `apps/cloud` (бесплатный режим на мини-ПК) — для тех, у кого уже есть Firebase.
+- **Проверка «HUB пропал»** каждые 5 минут. В Supabase → **SQL Editor** один раз выполните блок из комментария в `supabase/migrations/20261020000300_cron.sql`: он записывает адрес проекта и `NOTIFY_SECRET` в Vault. Дальше `pg_cron` сам вызывает функцию `notify`. О новых тревогах из клубов push уходит сразу, без этой проверки.
+
+### 5. Запуск
+
+GitHub → **Actions → deploy → Run workflow**, или просто пуш в `main`. Через 3–5 минут:
+
+- кабинет: `https://ts-cabinet.pages.dev`. Вход — почта и пароль из шага 2 или «Войти по ссылке из письма»;
+- демо экрана клуба: `https://ts-demo.pages.dev`. Ключи показаны прямо на странице входа: `OWNER-2222-2222-2222-2222` (владелец), `MGR-3333-3333-3333-3333` (управляющий), `CASH-4444-4444-4444-4444` (кассир), `WTR-5555-5555-5555-5555` (официант).
+
+## Ограничения бесплатных планов
+
+| Сервис | Ограничение | Что это значит |
+|---|---|---|
+| **Supabase Free** | база 500 МБ, 2 проекта, 500 000 вызовов Edge Functions в месяц | На демо и первые клубы хватит надолго: HUB шлёт пачку событий раз в 10 секунд, это около 260 000 вызовов в месяц на клуб. Для нескольких клубов увеличьте `CLOUD_SYNC_INTERVAL_MS` в HUB до 30–60 с |
+| Supabase Free | проект ставится на **паузу после 7 дней** без запросов | Пока клуб шлёт данные, пауза не наступает. Для демо раз в 3 дня его будит `.github/workflows/keepalive.yml`. Если всё же уснул: Dashboard → **Restore project** |
+| **Cloudflare Pages Free** | 500 сборок в месяц, без ограничения трафика | С запасом |
+| **GitHub Pages** | 100 ГБ трафика в месяц, нет своих заголовков, кэш 10 минут | Запасной вариант |
+| Демо в браузере | данные только в этом браузере | Каждый посетитель видит свой демо-клуб. Он сбрасывается ночью в 04:00 или кнопкой «Сбросить демо» |
+
+## Что проверено и что нет
+
+- **Проверено автоматически** (`npm test`):
+  - миграции применяются на настоящем PostgreSQL (PGlite) с заглушками Supabase (`supabase/tests/harness.ts`);
+  - RLS: владелец видит только свою сеть;
+  - отчёты RPC совпадают с отчётами `apps/cloud`;
+  - обработчики Edge Functions и шифрование Web Push проверены по тестовым векторам RFC 8291;
+  - `config.toml` читает Supabase CLI.
+- **Не проверялось на живом проекте**: настоящий Supabase (Auth-письма, Realtime, pg_cron, запуск функций в Deno), Cloudflare Pages и GitHub Pages. Первую выкладку стоит пройти по шагам выше и проверить вход, тревогу и push руками.
+
+## Для разработчика
+
+- `supabase/migrations/20261020000000_cloud_schema.sql` — это миграции `apps/cloud` один в один. Тест `supabase/tests/schema.test.ts` следит, чтобы они не разошлись. После новой миграции в `apps/cloud` пересоберите файл: команда в его шапке.
+- Supabase-часть:
+  - `…0100_owner_access.sql` — связь с Auth, RLS, RPC отчётов, Realtime;
+  - `…0200_push.sql` — Web Push и ntfy;
+  - `…0300_cron.sql` — pg_cron, в тестах пропускается;
+  - `…0400_keepalive.sql`.
+- Edge Functions (`supabase/functions/*`) — тонкие обёртки на Deno. Логика лежит в `apps/cloud/src/edge/` и переиспользует `sync.ts`, `projection.ts`, `push.ts` облака. В Deno её приносит бандл `npm run bundle:edge` (`supabase/functions/_shared/core.js`, собирается в CI).
+- Переменные сборки:
+  - кабинет — `VITE_SUPABASE_URL` и `VITE_SUPABASE_ANON_KEY` (режим Supabase; без них кабинет ходит в `apps/cloud` по `/api`), `VITE_VAPID_PUBLIC_KEY`;
+  - демо — `VITE_DEMO_LOCAL=1`;
+  - подпуть для GitHub Pages — `VITE_BASE=/billS/cabinet/`.
+- Демо-HUB на сервере (для своего мини-ПК): `npm run demo -w @bills/hub` (`HUB_DEMO=1`, сброс в 04:00, `HUB_CORS_ORIGINS`).

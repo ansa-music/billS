@@ -1,0 +1,2 @@
+# Cloudflare Pages: any unknown path opens the app (routing is in the #hash, this only catches stray links).
+/* /index.html 200

@@ -1,11 +1,6 @@
 import type {
-  ApiError,
   ClubDetails,
-  CloudKeyLoginRequest,
-  CloudLoginResponse,
   CloudSessionView,
-  CloudLoginRequest,
-  CreateOwnerKeyRequest,
   CreateOwnerKeyResponse,
   DeviceView,
   OwnerKeyView,
@@ -13,198 +8,126 @@ import type {
   OwnerView,
   PushRule,
   PushSettingsView,
-  RegisterDeviceRequest,
   TestPushResponse,
-  UpdatePushRulesRequest,
   UpdateTariffsRequest,
   UpdateTariffsResponse,
 } from '@bills/domain';
-import { nativeBridge } from './platform.ts';
-
-export class CloudRequestError extends Error {
-  readonly code: string;
-  readonly status: number;
-
-  constructor(status: number, code: string, message: string) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
-
-/** Connectivity and auth signals from every request, so the shell can show a banner or the login form. */
-export type ApiSignal = { type: 'online'; online: boolean } | { type: 'unauthorized' };
-
-const listeners = new Set<(signal: ApiSignal) => void>();
-
-export function subscribeApi(listener: (signal: ApiSignal) => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
-
-function emit(signal: ApiSignal): void {
-  for (const l of listeners) l(signal);
-}
-
-async function toError(res: Response): Promise<CloudRequestError> {
-  try {
-    const body = (await res.json()) as ApiError;
-    return new CloudRequestError(res.status, body.error.code, body.error.message);
-  } catch {
-    return new CloudRequestError(res.status, 'HTTP_ERROR', `Облако ответило ошибкой ${res.status}`);
-  }
-}
+import * as http from './api-http.ts';
+import type { RegisterDeviceBody } from './api-core.ts';
+import type { AlertEvent } from './api-supabase.ts';
+import { SUPABASE_MODE } from './config.ts';
 
 /**
- * In the browser the session cookie is HttpOnly and set by the server; the cabinet only has to send it back.
- * Inside the phone app every request goes to the cloud address from the app settings with the bearer token.
+ * One API for the pages, two backends chosen at build time (config.ts):
+ * api-http.ts — the self-hosted apps/cloud; api-supabase.ts — Supabase (loaded lazily, and dropped
+ * from the self-hosted bundle because SUPABASE_MODE is a literal there).
  */
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const bridge = nativeBridge();
-  let url = path;
-  let options: RequestInit = { credentials: 'same-origin', cache: 'no-store', ...init };
-  if (bridge) {
-    const cloud = bridge.cloudUrl();
-    if (!cloud) throw new CloudRequestError(0, 'NO_CLOUD', 'Укажите адрес облака');
-    url = `${cloud}${path}`;
-    const headers = new Headers(init.headers);
-    headers.set('x-ts-app', '1');
-    const token = bridge.token();
-    if (token) headers.set('authorization', `Bearer ${token}`);
-    options = { cache: 'no-store', ...init, credentials: 'omit', headers };
-  }
-  const offlineMessage = bridge ? `Нет связи с облаком по адресу ${bridge.cloudUrl()}` : 'Нет связи с облаком';
-  let res: Response;
-  try {
-    res = await fetch(url, options);
-  } catch {
-    emit({ type: 'online', online: false });
-    throw new CloudRequestError(0, 'OFFLINE', offlineMessage);
-  }
-  // A reverse proxy (vite dev, nginx) answers for a cloud that is down — that is "offline" too.
-  if (res.status === 502 || res.status === 503 || res.status === 504) {
-    emit({ type: 'online', online: false });
-    throw new CloudRequestError(res.status, 'OFFLINE', offlineMessage);
-  }
-  emit({ type: 'online', online: true });
-  if (res.status === 401) {
-    const error = await toError(res);
-    // The phone's token is dead (expired, signed out elsewhere): forget it, the shell shows the login form.
-    if (bridge && bridge.token() && !path.startsWith('/api/auth/login') && !path.startsWith('/api/auth/key')) {
-      await bridge.setToken(null).catch(() => undefined);
-    }
-    emit({ type: 'unauthorized' });
-    throw error;
-  }
-  if (!res.ok) throw await toError(res);
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
-}
+export { CloudRequestError, subscribeApi } from './api-core.ts';
+export type { AnyDevicePlatform, ApiSignal, RegisterDeviceBody } from './api-core.ts';
+export type { AlertEvent } from './api-supabase.ts';
+export { SUPABASE_MODE } from './config.ts';
 
-function json(method: string, body: unknown): RequestInit {
-  return { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
-}
+type SupabaseApi = typeof import('./api-supabase.ts');
+let supabaseApi: Promise<SupabaseApi> | null = null;
 
-/** The app keeps the session token from the answer; the browser got a cookie instead. */
-async function startSession(res: CloudLoginResponse): Promise<OwnerView> {
-  const { token, ...owner } = res;
-  const bridge = nativeBridge();
-  if (bridge && token) await bridge.setToken(token);
-  return owner;
+function sb(): Promise<SupabaseApi> {
+  // The literal condition (vite `define`) keeps the self-hosted build from emitting the Supabase chunk at all.
+  supabaseApi ??= __TS_SUPABASE__
+    ? import('./api-supabase.ts')
+    : Promise.reject(new Error('this build has no Supabase backend'));
+  return supabaseApi;
 }
 
 export async function login(email: string, password: string): Promise<OwnerView> {
-  const body: CloudLoginRequest = { email, password };
-  return startSession(await request<CloudLoginResponse>('/api/auth/login', json('POST', body)));
+  return SUPABASE_MODE ? (await sb()).login(email, password) : http.login(email, password);
 }
 
-/** Sign-in by an owner key «OWNER-XXXX-XXXX-XXXX-XXXX» (typed or scanned from the cabinet's QR). */
+/** Supabase only: a one-time sign-in link to the owner's e-mail. */
+export async function sendMagicLink(email: string): Promise<void> {
+  if (!SUPABASE_MODE) throw new Error('magic link needs the Supabase backend');
+  return (await sb()).sendMagicLink(email);
+}
+
+/** Supabase only: why the magic link this page was opened with did not work. */
+export async function takeLinkError(): Promise<string | null> {
+  return SUPABASE_MODE ? (await sb()).takeLinkError() : null;
+}
+
+/** Sign-in by an owner key «OWNER-XXXX-XXXX-XXXX-XXXX» (self-hosted only). */
 export async function loginByKey(key: string): Promise<OwnerView> {
-  const body: CloudKeyLoginRequest = { key };
-  return startSession(await request<CloudLoginResponse>('/api/auth/key', json('POST', body)));
+  return SUPABASE_MODE ? (await sb()).loginByKey(key) : http.loginByKey(key);
 }
 
-/** In the app the phone first leaves the device list (no pushes to a signed-out phone), then the session ends. */
 export async function logout(): Promise<void> {
-  const bridge = nativeBridge();
-  if (!bridge) {
-    await request<unknown>('/api/auth/logout', { method: 'POST' });
-    return;
-  }
-  try {
-    const deviceId = bridge.deviceId();
-    if (deviceId) {
-      try {
-        await removeDevice(deviceId);
-      } catch {
-        // Already gone or the cloud is unreachable — signing out must still work.
-      }
-    }
-    if (bridge.token()) await request<unknown>('/api/auth/logout', { method: 'POST' });
-  } finally {
-    await bridge.setToken(null).catch(() => undefined);
-    await bridge.setDeviceId(null).catch(() => undefined);
-  }
+  return SUPABASE_MODE ? (await sb()).logout() : http.logout();
 }
 
-export function fetchMe(): Promise<OwnerView> {
-  return request<OwnerView>('/api/auth/me');
+export async function fetchMe(): Promise<OwnerView> {
+  return SUPABASE_MODE ? (await sb()).fetchMe() : http.fetchMe();
 }
 
-export function fetchOverview(): Promise<OwnerOverview> {
-  return request<OwnerOverview>('/api/owner/overview');
+export async function fetchOverview(): Promise<OwnerOverview> {
+  return SUPABASE_MODE ? (await sb()).fetchOverview() : http.fetchOverview();
 }
 
-export function fetchClub(id: string): Promise<ClubDetails> {
-  return request<ClubDetails>(`/api/owner/clubs/${encodeURIComponent(id)}`);
+export async function fetchClub(id: string): Promise<ClubDetails> {
+  return SUPABASE_MODE ? (await sb()).fetchClub(id) : http.fetchClub(id);
 }
 
 /** `day` is a local calendar date of the club, YYYY-MM-DD. */
-export function fetchSessions(id: string, day: string): Promise<CloudSessionView[]> {
-  return request<CloudSessionView[]>(
-    `/api/owner/clubs/${encodeURIComponent(id)}/sessions?day=${encodeURIComponent(day)}`,
-  );
+export async function fetchSessions(id: string, day: string): Promise<CloudSessionView[]> {
+  return SUPABASE_MODE ? (await sb()).fetchSessions(id, day) : http.fetchSessions(id, day);
 }
 
-export function updateTariffs(id: string, body: UpdateTariffsRequest): Promise<UpdateTariffsResponse> {
-  return request<UpdateTariffsResponse>(`/api/owner/clubs/${encodeURIComponent(id)}/tariffs`, json('PUT', body));
+export async function updateTariffs(id: string, body: UpdateTariffsRequest): Promise<UpdateTariffsResponse> {
+  return SUPABASE_MODE ? (await sb()).updateTariffs(id, body) : http.updateTariffs(id, body);
 }
 
 // --- phone: keys, devices, push rules ---------------------------------------
 
-export function fetchOwnerKeys(): Promise<OwnerKeyView[]> {
-  return request<OwnerKeyView[]>('/api/owner/keys');
+export async function fetchOwnerKeys(): Promise<OwnerKeyView[]> {
+  return SUPABASE_MODE ? (await sb()).fetchOwnerKeys() : http.fetchOwnerKeys();
 }
 
-export function createOwnerKey(label?: string): Promise<CreateOwnerKeyResponse> {
-  const body: CreateOwnerKeyRequest = label ? { label } : {};
-  return request<CreateOwnerKeyResponse>('/api/owner/keys', json('POST', body));
+export async function createOwnerKey(label?: string): Promise<CreateOwnerKeyResponse> {
+  return SUPABASE_MODE ? (await sb()).createOwnerKey(label) : http.createOwnerKey(label);
 }
 
 export async function revokeOwnerKey(id: string): Promise<void> {
-  await request<unknown>(`/api/owner/keys/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  return SUPABASE_MODE ? (await sb()).revokeOwnerKey(id) : http.revokeOwnerKey(id);
 }
 
-export function fetchPushSettings(): Promise<PushSettingsView> {
-  return request<PushSettingsView>('/api/owner/push');
+export async function fetchPushSettings(): Promise<PushSettingsView> {
+  return SUPABASE_MODE ? (await sb()).fetchPushSettings() : http.fetchPushSettings();
 }
 
-export function updatePushRules(rules: PushRule[]): Promise<PushSettingsView> {
-  const body: UpdatePushRulesRequest = { rules };
-  return request<PushSettingsView>('/api/owner/push/rules', json('PUT', body));
+export async function updatePushRules(rules: PushRule[]): Promise<PushSettingsView> {
+  return SUPABASE_MODE ? (await sb()).updatePushRules(rules) : http.updatePushRules(rules);
 }
 
-/** Idempotent by the FCM token: the same phone keeps its id. */
-export function registerDevice(body: RegisterDeviceRequest): Promise<DeviceView> {
-  return request<DeviceView>('/api/owner/devices', json('POST', body));
+/** Idempotent by the token: the same device keeps its id. */
+export async function registerDevice(body: RegisterDeviceBody): Promise<DeviceView> {
+  return SUPABASE_MODE ? (await sb()).registerDevice(body) : http.registerDevice(body);
 }
 
 export async function removeDevice(id: string): Promise<void> {
-  await request<unknown>(`/api/owner/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  return SUPABASE_MODE ? (await sb()).removeDevice(id) : http.removeDevice(id);
 }
 
-export function sendTestPush(): Promise<TestPushResponse> {
-  return request<TestPushResponse>('/api/owner/push/test', { method: 'POST' });
+export async function sendTestPush(): Promise<TestPushResponse> {
+  return SUPABASE_MODE ? (await sb()).sendTestPush() : http.sendTestPush();
+}
+
+/** Supabase only: new alerts via Realtime. The self-hosted cabinet just polls. */
+export function subscribeAlerts(listener: (alert: AlertEvent) => void): () => void {
+  if (!SUPABASE_MODE) return () => undefined;
+  let stop: (() => void) | null = null;
+  let cancelled = false;
+  void sb().then((api) => {
+    if (!cancelled) stop = api.subscribeAlerts(listener);
+  });
+  return () => {
+    cancelled = true;
+    stop?.();
+  };
 }

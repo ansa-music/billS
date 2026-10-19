@@ -1,0 +1,153 @@
+# Публичный TS: бэкенд в Supabase, сайты на Cloudflare Pages (docs/PUBLIC_DEPLOY_RU.md).
+#
+# - push в main: проверки → миграции и Edge Functions в Supabase → сборка → выкладка двух сайтов
+#   (кабинет владельца и демо экрана клуба) на Cloudflare Pages;
+# - pull request: проверки, сборка и preview-копии сайтов на Cloudflare Pages, ссылки — комментарием в PR.
+#   База и функции Supabase из PR не меняются.
+#
+# Каждая часть включается своими секретами; без них шаг пропускается (проверки и сборка идут всегда):
+#   Supabase:   SUPABASE_ACCESS_TOKEN, SUPABASE_DB_PASSWORD (+ переменная SUPABASE_PROJECT_REF)
+#               (+ для push: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT, NOTIFY_SECRET)
+#   Cloudflare: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+# Несекретные значения — переменные или секреты, подойдёт любое (Settings → Secrets and variables → Actions):
+#   SUPABASE_PROJECT_REF — ID проекта Supabase (из адреса https://<ID>.supabase.co);
+#   SUPABASE_ANON_KEY — публичный anon/publishable ключ проекта (попадает в сайт, это не секрет);
+#   VAPID_PUBLIC_KEY  — публичный ключ Web Push (тоже не секрет);
+#   CF_PAGES_CABINET / CF_PAGES_DEMO — имена проектов Pages, если не ts-cabinet / ts-demo.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  deployments: write
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CF_PAGES_CABINET: ${{ vars.CF_PAGES_CABINET || 'ts-cabinet' }}
+  CF_PAGES_DEMO: ${{ vars.CF_PAGES_DEMO || 'ts-demo' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ (vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF) }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LIVE: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # ── Supabase: база и функции (только main) ──────────────────────────────
+      - name: Setup Supabase CLI
+        if: env.LIVE == 'true' && env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != ''
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Supabase migrations
+        if: env.LIVE == 'true' && env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != '' && env.SUPABASE_DB_PASSWORD != ''
+        run: |
+          supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          supabase db push --password "$SUPABASE_DB_PASSWORD" --include-all
+
+      - name: Supabase function secrets
+        if: env.LIVE == 'true' && env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != ''
+        env:
+          VAPID_PUBLIC_KEY: ${{ vars.VAPID_PUBLIC_KEY || secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          NOTIFY_SECRET: ${{ secrets.NOTIFY_SECRET }}
+          TS_CABINET_URL: ${{ (vars.TS_CABINET_URL || secrets.TS_CABINET_URL) }}
+        run: |
+          args=()
+          for name in VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_SUBJECT NOTIFY_SECRET TS_CABINET_URL; do
+            if [ -n "${!name}" ]; then args+=("$name=${!name}"); fi
+          done
+          if [ ${#args[@]} -gt 0 ]; then supabase secrets set --project-ref "$SUPABASE_PROJECT_REF" "${args[@]}"; else echo "секретов для функций нет — push выключен"; fi
+
+      - name: Supabase Edge Functions
+        if: env.LIVE == 'true' && env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != ''
+        run: |
+          node scripts/bundle-edge.mjs
+          supabase functions deploy --project-ref "$SUPABASE_PROJECT_REF" --use-api
+
+      # ── Сайты ──────────────────────────────────────────────────────────────
+      - name: Build
+        env:
+          VITE_SUPABASE_URL: ${{ (vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF) != '' && format('https://{0}.supabase.co', (vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF)) || '' }}
+          VITE_SUPABASE_ANON_KEY: ${{ (vars.SUPABASE_ANON_KEY || secrets.SUPABASE_ANON_KEY) }}
+          VITE_VAPID_PUBLIC_KEY: ${{ vars.VAPID_PUBLIC_KEY || secrets.VAPID_PUBLIC_KEY }}
+        run: |
+          npm run build -w @bills/cloud-web
+          VITE_DEMO_LOCAL=1 npm run build -w @bills/web
+
+      - name: Cloudflare Pages projects
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && (env.LIVE == 'true' || github.event.pull_request.head.repo.full_name == github.repository)
+        run: |
+          for p in "$CF_PAGES_CABINET" "$CF_PAGES_DEMO"; do
+            npx --yes wrangler@4 pages project create "$p" --production-branch=main 2>/dev/null && echo "создан проект Pages $p" || echo "проект Pages $p уже есть"
+          done
+
+      - name: Deploy cabinet
+        id: cabinet
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && (env.LIVE == 'true' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy apps/cloud-web/dist --project-name=${{ env.CF_PAGES_CABINET }} --branch=${{ env.LIVE == 'true' && 'main' || github.head_ref }} --commit-dirty=true
+
+      - name: Deploy demo
+        id: demo
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && (env.LIVE == 'true' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy apps/web/dist --project-name=${{ env.CF_PAGES_DEMO }} --branch=${{ env.LIVE == 'true' && 'main' || github.head_ref }} --commit-dirty=true
+
+      - name: Preview links in the PR
+        if: github.event_name == 'pull_request' && steps.cabinet.outputs.deployment-url != ''
+        uses: actions/github-script@v7
+        env:
+          CABINET_URL: ${{ steps.cabinet.outputs.deployment-url }}
+          DEMO_URL: ${{ steps.demo.outputs.deployment-url }}
+        with:
+          script: |
+            const body = [
+              '**Preview TS (Cloudflare Pages)**',
+              `- кабинет владельца: ${process.env.CABINET_URL}`,
+              `- демо экрана клуба: ${process.env.DEMO_URL}`,
+            ].join('\n');
+            await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });
+
+      - name: Nothing to deploy
+        if: env.CLOUDFLARE_API_TOKEN == '' || env.CLOUDFLARE_ACCOUNT_ID == ''
+        run: echo "::notice::Нет секретов Cloudflare — сайты собраны, но не выложены. Запасной вариант без регистрации — workflow pages (GitHub Pages)."
