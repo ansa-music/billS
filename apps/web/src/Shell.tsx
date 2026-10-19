@@ -247,6 +247,9 @@ export function Topbar(props: {
                 <span className="muted">{ROLE_LABEL[staff.role]}</span>
               </p>
               <p className="hint">Вход по ключу доступа; имя попадает в журнал действий. Другой сотрудник — выйти и войти своим ключом.</p>
+              <a className="btn actor-apps" href={hrefFor('/apps')} onClick={close}>
+                <Icon name="download" size={18} /> Приложения TS
+              </a>
               <button
                 type="button"
                 className="btn"

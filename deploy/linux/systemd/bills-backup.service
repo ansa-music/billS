@@ -1,10 +1,12 @@
-# TS — ночной бэкап базы HUB. Запускается таймером bills-backup.timer.
+# TS — ночной бэкап базы HUB (и облака, если оно включено на этом мини-ПК:
+# есть /etc/bills/cloud.env — тогда backup.sh дополнительно делает cloud-*.db.gz).
+# Запускается таймером bills-backup.timer.
 # Вручную: systemctl start bills-backup.service  (или: bills backup)
 
 [Unit]
-Description=TS: резервная копия базы HUB
+Description=TS: резервная копия базы HUB и облака
 Documentation=https://github.com/ansa-music/billS
-After=bills-hub.service
+After=bills-hub.service bills-cloud.service
 
 [Service]
 Type=oneshot

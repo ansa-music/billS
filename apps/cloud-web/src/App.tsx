@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { OwnerView } from '@bills/domain';
+import { AppsPage } from './Apps.tsx';
 import { CloudRequestError, fetchMe, logout, subscribeApi } from './api.ts';
 import { ClubPage } from './ClubPage.tsx';
 import { useHashRoute } from './hooks.ts';
@@ -53,6 +54,16 @@ export function App() {
   const { auth, setAuth, online } = useAuth();
   const route = useHashRoute();
 
+  // The download page needs no account: the owner opens it on a fresh phone before signing in,
+  // and it must work even while the cloud is unreachable (installers come from GitHub).
+  if (route.kind === 'apps' && auth.status !== 'ok') {
+    return (
+      <main className="app">
+        <AppsPage signedIn={false} />
+      </main>
+    );
+  }
+
   if (auth.status === 'loading') {
     return (
       <main className="boot">
@@ -95,6 +106,9 @@ export function App() {
           <span className="conn" data-online={online || undefined}>
             {online ? 'Облако на связи' : 'Нет связи с облаком'}
           </span>
+          <a className="topbar-link" href="#/apps" aria-current={route.kind === 'apps' ? 'page' : undefined}>
+            Скачать приложение
+          </a>
           <span className="owner" title={owner.email}>
             {owner.name || owner.email}
           </span>
@@ -107,6 +121,7 @@ export function App() {
       <OfflineBanner online={online} />
 
       {route.kind === 'overview' && <Overview />}
+      {route.kind === 'apps' && <AppsPage signedIn />}
       {route.kind === 'club' && <ClubPage key={route.id} id={route.id} />}
       {route.kind === 'tariffs' && <Tariffs key={route.id} id={route.id} />}
       {route.kind === 'shifts' && <Shifts key={route.id} id={route.id} />}

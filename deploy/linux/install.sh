@@ -4,6 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/ansa-music/billS/main/deploy/linux/install.sh | sudo bash
 #   или из клона репозитория:
 #   sudo bash deploy/linux/install.sh [--ref <tag|branch>] [--host 0.0.0.0] [--port 4310] [--node-from nodesource|tarball]
+#                                     [--with-cloud [--cloud-port 4320]]
 #
 # Повторный запуск безопасен (идемпотентен): существующий /etc/bills/hub.env и база не трогаются,
 # релиз пересоздаётся только если изменился целевой коммит.
@@ -16,6 +17,9 @@
 #   /var/lib/bills                  база hub.db и backups/
 #   /etc/bills/hub.env              настройки
 #   systemd: bills-hub.service, bills-backup.service + bills-backup.timer (03:30)
+#   --with-cloud (бесплатный режим): облако TS и кабинет владельца на этом же мини-ПК —
+#   /etc/bills/cloud.env, /var/lib/bills/cloud.db, bills-cloud.service (порт 4320).
+#   Наличие /etc/bills/cloud.env = «облако включено»; повторный запуск без --with-cloud его не выключает.
 
 set -Eeuo pipefail
 SCRIPT_NAME="install.sh"
@@ -34,6 +38,9 @@ PORT="4310"
 HOST_SET=0
 PORT_SET=0
 NODE_FROM="auto"
+WITH_CLOUD=0
+CLOUD_PORT_OPT="4320"
+CLOUD_PORT_SET=0
 REPO_URL="${BILLS_REPO:-https://github.com/ansa-music/billS.git}"
 ORIG_ARGS=("$@")
 
@@ -46,6 +53,10 @@ usage() {
   --node-from <режим>      nodesource (deb-репозиторий), tarball (архив с nodejs.org в /usr/local)
                            или auto (по умолчанию: nodesource, при сбое — tarball)
   --repo <url>             адрес git-репозитория (или переменная BILLS_REPO)
+  --with-cloud             бесплатный режим: облако TS и кабинет владельца на этом же мини-ПК
+                           (bills-cloud.service, /etc/bills/cloud.env). Повторный запуск без
+                           этого флага облако НЕ выключает.
+  --cloud-port <порт>      CLOUD_PORT для нового cloud.env (по умолчанию 4320; вместе с --with-cloud)
 USAGE
 }
 
@@ -61,12 +72,17 @@ while [ $# -gt 0 ]; do
     --node-from=*) NODE_FROM="${1#--node-from=}"; shift ;;
     --repo) [ $# -ge 2 ] || die "--repo требует значение"; REPO_URL="$2"; shift 2 ;;
     --repo=*) REPO_URL="${1#--repo=}"; shift ;;
+    --with-cloud) WITH_CLOUD=1; shift ;;
+    --cloud-port) [ $# -ge 2 ] || die "--cloud-port требует значение"; CLOUD_PORT_OPT="$2"; CLOUD_PORT_SET=1; shift 2 ;;
+    --cloud-port=*) CLOUD_PORT_OPT="${1#--cloud-port=}"; CLOUD_PORT_SET=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "неизвестный параметр: $1 (см. --help)" ;;
   esac
 done
 case "$NODE_FROM" in auto|nodesource|tarball) ;; *) die "--node-from: допустимо auto, nodesource или tarball" ;; esac
 case "$PORT" in ''|*[!0-9]*) die "--port должен быть числом" ;; esac
+case "$CLOUD_PORT_OPT" in ''|*[!0-9]*) die "--cloud-port должен быть числом" ;; esac
+[ "$CLOUD_PORT_OPT" != "$PORT" ] || die "--cloud-port не должен совпадать с портом HUB ($PORT)"
 
 [ "$(id -u)" -eq 0 ] || die "запустите от root: sudo bash install.sh ${ORIG_ARGS[*]:-}"
 
@@ -209,6 +225,7 @@ install_scripts() {
     install -m 755 -o root -g root "$f" "$BIN_DIR/$(basename "$f")"
   done
   install -m 644 -o root -g root "$SRC_DIR/hub.env.example" "$BIN_DIR/hub.env.example"
+  install -m 644 -o root -g root "$SRC_DIR/cloud.env.example" "$BIN_DIR/cloud.env.example"
   [ -f "$SRC_DIR/README.md" ] && install -m 644 -o root -g root "$SRC_DIR/README.md" "$BIN_DIR/README.md"
   for f in "$SRC_DIR"/systemd/*; do
     install -m 644 -o root -g root "$f" "$BIN_DIR/systemd/$(basename "$f")"
@@ -265,9 +282,52 @@ install_systemd() {
   install -m 644 -o root -g root "$SRC_DIR/systemd/bills-hub.service"    /etc/systemd/system/bills-hub.service
   install -m 644 -o root -g root "$SRC_DIR/systemd/bills-backup.service" /etc/systemd/system/bills-backup.service
   install -m 644 -o root -g root "$SRC_DIR/systemd/bills-backup.timer"   /etc/systemd/system/bills-backup.timer
+  # Юнит облака ставим всегда (без /etc/bills/cloud.env он не запустится), включаем — только если облако включено.
+  install -m 644 -o root -g root "$SRC_DIR/systemd/bills-cloud.service"  /etc/systemd/system/bills-cloud.service
   systemctl daemon-reload
   systemctl enable --quiet bills-hub.service
   systemctl enable --quiet --now bills-backup.timer
+  if cloud_enabled; then
+    systemctl enable --quiet bills-cloud.service
+  fi
+}
+
+# ---------- Облако на этом мини-ПК (--with-cloud) ----------
+ensure_cloud_env_file() {
+  if [ -f "$CLOUD_ENV_FILE" ]; then
+    log "Облако включено: $CLOUD_ENV_FILE уже есть — не трогаю."
+    if [ "$CLOUD_PORT_SET" -eq 1 ]; then
+      warn "--cloud-port применяется только при создании нового cloud.env; отредактируйте $CLOUD_ENV_FILE вручную и выполните: sudo systemctl restart $CLOUD_SERVICE"
+    fi
+  elif [ "$WITH_CLOUD" -eq 1 ]; then
+    log "Включаю облако: создаю $CLOUD_ENV_FILE из шаблона (CLOUD_PORT=$CLOUD_PORT_OPT)"
+    sed -e "s|^CLOUD_PORT=.*|CLOUD_PORT=$CLOUD_PORT_OPT|" \
+        -e "s|^CLOUD_DB_PATH=.*|CLOUD_DB_PATH=$STATE_DIR/cloud.db|" \
+        "$SRC_DIR/cloud.env.example" >"$CLOUD_ENV_FILE"
+  else
+    [ "$CLOUD_PORT_SET" -eq 0 ] || die "--cloud-port используется только вместе с --with-cloud"
+    return 0
+  fi
+  chown root:"$BILLS_USER" "$CLOUD_ENV_FILE"
+  chmod 640 "$CLOUD_ENV_FILE"
+}
+
+# Запуск облака и проверка health (после update.sh, который собирает кабинет).
+start_cloud() {
+  local cport
+  cport="$(cloud_port)"
+  [ "$cport" != "$PORT" ] || die "порт облака ($cport) совпадает с портом HUB — исправьте CLOUD_PORT в $CLOUD_ENV_FILE"
+  systemctl enable --quiet "$CLOUD_SERVICE"
+  if ! cloud_is_active; then
+    log "Запускаю $CLOUD_SERVICE ..."
+    systemctl start "$CLOUD_SERVICE"
+  fi
+  log "Жду ответа облака на /api/health (до ${HEALTH_TIMEOUT} с) ..."
+  if ! cloud_health_wait "$HEALTH_TIMEOUT"; then
+    journalctl -u "$CLOUD_SERVICE" -n 30 --no-pager || true
+    die "облако не ответило на http://127.0.0.1:${cport}/api/health. Смотрите: journalctl -u $CLOUD_SERVICE -n 100 (HUB при этом работает)"
+  fi
+  ok "Облако работает: $(health_summary "$CLOUD_HEALTH_BODY")"
 }
 
 # ---------- Фаервол ----------
@@ -277,6 +337,24 @@ configure_firewall() {
     ufw allow "$PORT/tcp" comment 'TS HUB (только LAN)' >/dev/null
   fi
   warn "HUB НЕ должен быть доступен из интернета — только из локальной сети клуба. Не пробрасывайте порт $PORT на роутере."
+  if cloud_enabled; then
+    configure_cloud_firewall
+  fi
+}
+
+# Порт облака: при активном ufw — разрешаем только на интерфейсе Tailscale (tailscale0).
+configure_cloud_firewall() {
+  local cport
+  cport="$(cloud_port)"
+  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
+    if ip link show tailscale0 >/dev/null 2>&1; then
+      log "ufw активен — открываю порт облака $cport/tcp только на интерфейсе tailscale0"
+      ufw allow in on tailscale0 to any port "$cport" proto tcp comment 'TS cloud (Tailscale)' >/dev/null
+    else
+      warn "ufw активен, а Tailscale ещё не установлен — другие клубы пока не достучатся до облака (порт $cport). После «sudo bills tailscale» порт откроется на tailscale0 автоматически."
+    fi
+  fi
+  warn "Порт облака $cport тоже НЕ пробрасывайте на роутере. Доступ снаружи: sudo bills tailscale (рекомендуется), bills tunnel или bills duckdns."
 }
 
 # ---------- Итог ----------
@@ -304,6 +382,39 @@ print_summary() {
   echo "    bills restore                список бэкапов / восстановление"
   echo "    systemctl list-timers $BACKUP_TIMER"
   echo
+  if cloud_enabled; then
+    print_cloud_summary "$ip"
+  fi
+}
+
+print_cloud_summary() {
+  local ip="$1" cport tsip
+  cport="$(cloud_port)"
+  tsip="$(tailscale_ip)"
+  echo "=============================================================="
+  ok "Облако TS и кабинет владельца работают на этом мини-ПК: $(health_summary "${CLOUD_HEALTH_BODY:-}")"
+  echo "=============================================================="
+  echo "  Кабинет в локальной сети:    http://${ip}:${cport}"
+  if [ -n "$tsip" ]; then
+    echo "  Кабинет через Tailscale:     http://${tsip}:${cport}"
+    echo "  CLOUD_URL для других клубов: http://${tsip}:${cport}"
+  fi
+  echo "  Настройки облака:            $CLOUD_ENV_FILE"
+  echo "  База облака:                 $(env_value "$CLOUD_ENV_FILE" CLOUD_DB_PATH "$STATE_DIR/cloud.db")  (бэкап тем же таймером: cloud-*.db.gz)"
+  echo "  Логи облака:                 bills cloud-logs"
+  echo
+  echo "  Следующие шаги:"
+  echo "    1) Создать компанию и владельца (пароль напечатается — сохраните его):"
+  echo "         sudo bills cloud init --company \"Название сети\" --email владелец@почта.kz"
+  echo "    2) Добавить этот клуб и сразу подключить к облаку HUB этого мини-ПК:"
+  echo "         sudo bills cloud add-club --name \"Название клуба\" --connect"
+  echo "    3) Доступ к кабинету с телефона владельца и для других клубов (рекомендуется):"
+  echo "         sudo bills tailscale"
+  echo "    4) Для каждого другого клуба: sudo bills cloud add-club --name \"Клуб 2\""
+  echo "       и на HUB того клуба: sudo bills connect-cloud --url http://<адрес Tailscale этого мини-ПК>:${cport} --hub-id <HUB_ID> --key <CLOUD_API_KEY>"
+  echo "       (HUB на Windows: connect-cloud.ps1 -Url ... -HubId ... -Key ...)"
+  echo "  Подробно: docs/FREE_SETUP_RU.md"
+  echo
 }
 
 main() {
@@ -322,6 +433,7 @@ main() {
   ensure_user_and_dirs
   install_scripts
   ensure_env_file
+  ensure_cloud_env_file
   ensure_repo
   install_systemd
 
@@ -340,6 +452,10 @@ main() {
   if ! health_wait "$HEALTH_TIMEOUT"; then
     journalctl -u "$HUB_SERVICE" -n 30 --no-pager || true
     die "HUB не ответил на http://127.0.0.1:${PORT}/api/health. Смотрите: journalctl -u $HUB_SERVICE -n 100"
+  fi
+  # Облако — после HUB (кабинет для него уже собрал update.sh).
+  if cloud_enabled; then
+    start_cloud
   fi
   print_summary
 

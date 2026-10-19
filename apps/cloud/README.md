@@ -71,6 +71,7 @@ node --env-file-if-exists=.env apps/cloud/src/main.ts    # или: npm run dev -
 | `CLOUD_DATABASE_URL` | — | строка подключения PostgreSQL; если задана, SQLite не используется |
 | `CLOUD_DEMO_SEED` | `1` для SQLite, `0` для PostgreSQL | демо-сид на пустой базе |
 | `CLOUD_SECURE_COOKIES` | `0` | ставить флаг `Secure` на cookie владельца (только за HTTPS) |
+| `CLOUD_WEB_DIST` | `apps/cloud-web/dist` | собранный кабинет владельца; облако отдаёт его на `/` (если папки нет — только API) |
 
 Демо-сид создаёт компанию «Демо сеть», владельца `owner@demo.kz` / `demo1234`, клубы
 «Клуб «Демо»» и «Клуб «Север»» (Asia/Almaty) и по одному HUB с фиксированными ключами —
@@ -78,6 +79,38 @@ node --env-file-if-exists=.env apps/cloud/src/main.ts    # или: npm run dev -
 создании; их же можно сразу вписать в `.env` HUB (`CLOUD_URL`, `CLOUD_API_KEY`, `HUB_ID`).
 
 Проверка: `npm test -w @bills/cloud` (node --test, SQLite в памяти) и `npx tsc -p apps/cloud`.
+
+**Кабинет на том же порту.** Если собран `apps/cloud-web` (`npm run build` в корне), облако само
+раздаёт его на `/` (`@fastify/static`, как HUB раздаёт экран зала): `assets/*` кэшируются на год
+(`immutable`), `index.html`, манифест и прочие файлы — `no-cache`, `.webmanifest` отдаётся как
+`application/manifest+json`. Неизвестный GET/HEAD вне `/api` и `/sync` получает `index.html`
+(маршруты кабинета), остальное — JSON 404 `NOT_FOUND`. Отдельный веб-сервер для кабинета не нужен.
+
+## Команды CLI
+
+`node apps/cloud/src/cli.ts <команда>` или `npm run cli -w @bills/cloud -- <команда>`. База — та же,
+что у сервера: `CLOUD_DB_PATH` или `CLOUD_DATABASE_URL`; если ни одна не задана, подхватывается
+корневой `.env`. Перед командами с данными применяются миграции. Значения для скриптов печатаются
+отдельными строками `КЛЮЧ=значение`. Коды выхода: 0 — успех, 1 — ошибка, 2 — неверный вызов.
+
+| Команда | Что делает | Строки для скриптов |
+|---|---|---|
+| `init --company "<название>" --email <e-mail> [--name "<имя>"] [--password <пароль>]` | компания и её владелец; без `--password` генерируется пароль из 16 символов без похожих букв и цифр; e-mail должен быть новым | `COMPANY_ID=`, `OWNER_EMAIL=`, `OWNER_PASSWORD=` (только если сгенерирован) |
+| `add-club --name "<название>" [--tz Asia/Almaty] [--currency KZT] [--company <id>]` | клуб и его HUB с новым ключом (32 случайных байта, base64url; хранится только sha256); `--company` нужен, только если компаний несколько | `CLUB_ID=`, `HUB_ID=` (`hub-<латиница из названия>`), `CLOUD_API_KEY=` |
+| `new-hub-key --hub <id>` | новый ключ HUB, старый сразу перестаёт работать | `CLOUD_API_KEY=` |
+| `reset-password --email <e-mail> [--password <пароль>]` | новый пароль владельца, все его сессии завершаются | `OWNER_PASSWORD=` (если сгенерирован) |
+| `list [--json]` | компании, владельцы, клубы (id, пояс, валюта), HUB и их последний контакт | — |
+| `backup <папка\|файл>` | копия SQLite через `VACUUM INTO` (можно при работающем облаке) + `integrity_check`; папка → `cloud-ГГГГ-ММ-ДД_чч-мм-сс.db` | последняя строка stdout — путь к копии |
+| `restore <файл> --yes` | заменить базу копией (облако остановлено!); без `--yes` — только план, код 2; прежняя база → `cloud.db.before-restore-<время>` вместе с `-wal`/`-shm` | последняя строка stdout — путь к базе |
+| `check [файл]` | `integrity_check` + счётчики | `COMPANIES=`, `CLUBS=`, `EVENTS=` |
+| `version [--json]` | версия и git-коммит | — |
+
+Выданные `HUB_ID` и `CLOUD_API_KEY` вписываются в `.env` HUB клуба вместе с `CLOUD_URL`. Новый клуб
+не имеет настроек (версия 0): их пришлёт HUB первым `POST /sync/snapshot`.
+
+`backup`, `restore` и `check` работают только с SQLite: при заданном `CLOUD_DATABASE_URL` они
+завершаются с кодом 1 — для PostgreSQL используйте `pg_dump` / `pg_restore`. Остальные команды
+работают и через PostgreSQL.
 
 ## Режимы базы
 
@@ -125,3 +158,8 @@ HUB (`Authorization: Bearer <ключ>`; `hubId` в теле должен сов
 облако TS и его базу данных нужно размещать у хостинг-провайдера с дата-центром в РК,
 а не на зарубежных площадках; резервные копии — тоже внутри страны. Пароли хранятся только
 в виде scrypt-хэшей, ключи HUB — в виде sha256-хэшей.
+
+Бесплатный режим — облако на мини-ПК главного клуба в Казахстане (`deploy/linux/install.sh --with-cloud`,
+см. `docs/FREE_SETUP_RU.md`): база SQLite и её копии лежат на этом компьютере, то есть физически в РК,
+поэтому такой режим тоже соответствует требованию о локализации персональных данных. Копии
+(`cli.ts backup`) при этом тоже нужно хранить на носителях внутри страны.

@@ -11,6 +11,8 @@ export interface CloudConfig {
   demoSeed: boolean;
   /** Mark the owner cookie `Secure` (only sent over HTTPS). */
   secureCookies: boolean;
+  /** Built owner cabinet (apps/cloud-web/dist), served on `/` when the folder exists. */
+  webDistPath: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): CloudConfig {
@@ -24,5 +26,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CloudConfig {
     databaseUrl,
     demoSeed,
     secureCookies: env.CLOUD_SECURE_COOKIES === '1',
+    webDistPath: env.CLOUD_WEB_DIST ?? fileURLToPath(new URL('../../cloud-web/dist', import.meta.url)),
   };
 }

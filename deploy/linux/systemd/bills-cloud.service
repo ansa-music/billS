@@ -1,0 +1,40 @@
+# Облако TS и кабинет владельца на мини-ПК главного клуба («бесплатный режим»).
+# Устанавливается скриптом deploy/linux/install.sh --with-cloud в /etc/systemd/system/.
+# Настройки облака — в /etc/bills/cloud.env. Логи: journalctl -u bills-cloud -f  (или: bills cloud-logs)
+
+[Unit]
+Description=TS: облако и кабинет владельца
+Documentation=https://github.com/ansa-music/billS
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/bills/cloud.env
+
+[Service]
+Type=simple
+User=bills
+Group=bills
+WorkingDirectory=/opt/bills/current
+EnvironmentFile=/etc/bills/cloud.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node apps/cloud/src/main.ts
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+KillSignal=SIGTERM
+
+# Состояние (база cloud.db): /var/lib/bills
+StateDirectory=bills
+StateDirectoryMode=0750
+
+# Ограничения безопасности
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/bills
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

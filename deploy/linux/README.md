@@ -32,6 +32,8 @@ sudo bash deploy/linux/install.sh [--ref <tag|branch>] [--host 0.0.0.0] [--port 
 | `--port` | `4310` | `HUB_PORT` в новом `hub.env` |
 | `--node-from` | `auto` | `nodesource` (deb-репозиторий), `tarball` (архив nodejs.org в `/usr/local`); `auto` пробует nodesource, при сбое — tarball |
 | `--repo` / `BILLS_REPO` | `https://github.com/ansa-music/billS.git` | адрес репозитория (например, свой форк) |
+| `--with-cloud` | выкл. | бесплатный режим: облако TS и кабинет владельца на этом же мини-ПК (см. [ниже](#облако-ts-на-этом-мини-пк-бесплатный-режим)) |
+| `--cloud-port` | `4320` | `CLOUD_PORT` в новом `cloud.env` (вместе с `--with-cloud`) |
 
 Повторный запуск установщика безопасен: существующий `/etc/bills/hub.env` и база не трогаются,
 релиз пересобирается только если изменился целевой коммит. Если на столах идут игры,
@@ -53,7 +55,7 @@ sudo bash deploy/linux/install.sh [--ref <tag|branch>] [--host 0.0.0.0] [--port 
 | `/opt/bills/releases/<ГГГГММДД-ЧЧММСС>-<sha>/` | релизы: код + `node_modules` + собранный `apps/web/dist` |
 | `/opt/bills/current` | симлинк на рабочий релиз (из него запускается сервис) |
 | `/opt/bills/previous` | симлинк на предыдущий релиз (для отката) |
-| `/opt/bills/bin/` | эти скрипты (`install.sh`, `update.sh`, `backup.sh`, `restore.sh`, `bills.sh`, `lib.sh`) |
+| `/opt/bills/bin/` | эти скрипты (`install.sh`, `update.sh`, `backup.sh`, `restore.sh`, `bills.sh`, `lib.sh`, `tailscale.sh`, `cloudflare-tunnel.sh`, `duckdns.sh`) |
 | `/usr/local/bin/bills` | команда-обёртка для оператора |
 | `/var/lib/bills/hub.db` | база данных SQLite (WAL) |
 | `/var/lib/bills/backups/` | бэкапы `hub-ГГГГ-ММ-ДД_ЧЧ-мм-сс.db.gz` |
@@ -62,6 +64,9 @@ sudo bash deploy/linux/install.sh [--ref <tag|branch>] [--host 0.0.0.0] [--port 
 | `/etc/bills/hub.env` | настройки (шаблон — `hub.env.example`) |
 | `/etc/systemd/system/bills-hub.service` | сервис HUB (`User=bills`, `Restart=always`) |
 | `/etc/systemd/system/bills-backup.{service,timer}` | ночной бэкап в 03:30 |
+| `/etc/bills/cloud.env` | настройки облака (только с `--with-cloud`; шаблон — `cloud.env.example`). Есть файл = облако включено |
+| `/var/lib/bills/cloud.db` | база облака (только с `--with-cloud`) |
+| `/etc/systemd/system/bills-cloud.service` | сервис облака и кабинета владельца (включается только с `--with-cloud`) |
 
 Сервис работает от системного пользователя `bills` (без шелла, home `/opt/bills`).
 Node 24 ставится в систему (`/usr/bin/node`); логи — в journald.
@@ -78,6 +83,13 @@ bills restore [файл]    восстановить базу (без файла
 bills check [файл]      PRAGMA integrity_check базы или файла
 bills version           версия HUB
 bills health            ответ /api/health
+
+bills cloud <...>       команды облака на этом мини-ПК (init, add-club [--connect], new-hub-key, reset-password, list, check, version)
+bills cloud-logs        логи облака (journalctl -u bills-cloud -f)
+bills connect-cloud --url <URL> --hub-id <id> --key <ключ>   подключить этот HUB к облаку
+bills tailscale [...]   доступ через Tailscale (рекомендуется)
+bills tunnel <режим>    Cloudflare Tunnel (quick | token <TOKEN> | status | stop)
+bills duckdns [...]     DuckDNS + Caddy (HTTPS), нужен «белый» IP
 ```
 
 Команда сама поднимается до root через `sudo`.
@@ -116,7 +128,10 @@ sudo bills update --rollback      # вернуться на предыдущий
 - сжимает её в `hub-*.db.gz`;
 - удаляет локальные копии старше `BACKUP_KEEP_DAYS` (по умолчанию 30 дней);
 - при заданном `BACKUP_RCLONE_REMOTE` выгружает копию в облако и чистит там старые;
-- при заданном `BACKUP_SECOND_DIR` копирует на второй диск/USB (только если он примонтирован).
+- при заданном `BACKUP_SECOND_DIR` копирует на второй диск/USB (только если он примонтирован);
+- если на мини-ПК включено облако (`/etc/bills/cloud.env`) — то же самое для базы облака:
+  `cloud-*.db.gz` в той же папке, та же ротация, rclone и второй диск. Ошибка бэкапа облака
+  не отменяет копию HUB, но служба завершается с `failed`.
 
 ```bash
 sudo bills backup                              # бэкап вручную
@@ -159,6 +174,50 @@ sudo bills restore hub-2026-10-18_03-30-00.db.gz --yes  # без подтвер�
 старая база сохраняется как `hub.db.before-restore-<штамп>`), запускает HUB и ждёт `/api/health`.
 Всё, что было записано после создания бэкапа, теряется — скрипт предупреждает об этом и
 показывает, идут ли сейчас игры.
+
+База облака восстанавливается так же, с `--cloud` (останавливается `bills-cloud`, HUB не трогается):
+
+```bash
+sudo bills restore --cloud                                       # список cloud-*.db.gz
+sudo bills restore --cloud cloud-2026-10-18_03-30-00.db.gz
+```
+
+## Облако TS на этом мини-ПК (бесплатный режим)
+
+Облако (куда HUB всех клубов сети шлют события) и кабинет владельца могут работать прямо на мини-ПК
+главного клуба, рядом с HUB, — без арендованного сервера. Пошагово для владельца: [docs/FREE_SETUP_RU.md](../../docs/FREE_SETUP_RU.md).
+
+```bash
+sudo bash /opt/bills/bin/install.sh --with-cloud          # включить (можно на уже работающем HUB)
+sudo bills cloud init --company "Название сети" --email владелец@почта.kz   # компания и владелец (пароль напечатается)
+sudo bills cloud add-club --name "Клуб на Абая" --connect  # этот клуб + сразу подключить HUB этого мини-ПК
+sudo bills tailscale                                      # доступ с телефона владельца и для других клубов
+sudo bills cloud add-club --name "Клуб 2"                 # для другого клуба: HUB_ID и CLOUD_API_KEY
+# на HUB другого клуба (Linux):
+sudo bills connect-cloud --url http://100.x.y.z:4320 --hub-id <HUB_ID> --key <CLOUD_API_KEY>
+# на HUB другого клуба (Windows): C:\bills\bin\connect-cloud.ps1 -Url ... -HubId ... -Key ...
+```
+
+- `--with-cloud` создаёт `/etc/bills/cloud.env` (если его нет), ставит и включает `bills-cloud.service`
+  (порт 4320), собирает кабинет (`npm run build -w @bills/cloud-web`) и ждёт `/api/health` облака.
+  Повторный запуск установщика без флага облако не выключает.
+- `bills update` при включённом облаке делает и бэкап его базы, собирает кабинет, перезапускает
+  `bills-cloud` и проверяет его health; если облако не поднялось — общий откат current/previous,
+  как для HUB. `bills update --rollback` перезапускает и облако.
+- `bills connect-cloud` / `add-club --connect` пишут `CLOUD_URL`, `HUB_ID`, `CLOUD_API_KEY` в `hub.env`
+  (прежний файл — `hub.env.bak`) и перезапускают HUB.
+- Порт облака не пробрасывайте на роутере. При активном `ufw` он открывается только на `tailscale0`.
+
+Доступ к кабинету снаружи — один из трёх вариантов:
+
+| Вариант | Команда | Что нужно | Открыто в интернет? |
+|---|---|---|---|
+| **Tailscale** (рекомендуется) | `sudo bills tailscale [--https]` | бесплатный аккаунт Tailscale, приложение на телефоне владельца и на HUB других клубов | нет — только ваши устройства |
+| Cloudflare Tunnel | `sudo bills tunnel quick` (временный адрес `*.trycloudflare.com`, для демонстрации) или `sudo bills tunnel token <TOKEN>` (свой домен) | для `token` — домен в Cloudflare | да, вход по паролю; данные остаются на мини-ПК |
+| DuckDNS + Caddy | `sudo bills duckdns --domain <поддомен> --token <токен> --https` | «белый» IP (не CGNAT), проброс 80 и 443 на роутере | да, вход по паролю |
+
+`tailscale --https` включает `tailscale serve` (сертификат `*.ts.net`, нужно включить HTTPS в админке
+Tailscale); Funnel не используется. HUB-порт 4310 не пробрасывается ни в одном варианте.
 
 ## Логи и диагностика
 
@@ -224,6 +283,10 @@ groups:
 | `backup.sh` | бэкап (таймер и вручную) |
 | `restore.sh` | восстановление из бэкапа |
 | `bills.sh` | обёртка `bills <команда>` |
-| `lib.sh` | общие функции (пути, логирование, запуск от `bills`, health) |
+| `lib.sh` | общие функции (пути, логирование, запуск от `bills`, health, облако) |
+| `tailscale.sh` | Tailscale: доступ к кабинету и облаку без проброса портов (`bills tailscale`) |
+| `cloudflare-tunnel.sh` | Cloudflare Tunnel (`bills tunnel`) |
+| `duckdns.sh` | DuckDNS + Caddy с HTTPS (`bills duckdns`) |
 | `hub.env.example` | шаблон `/etc/bills/hub.env` |
-| `systemd/` | `bills-hub.service`, `bills-backup.service`, `bills-backup.timer` |
+| `cloud.env.example` | шаблон `/etc/bills/cloud.env` (облако на этом мини-ПК) |
+| `systemd/` | `bills-hub.service`, `bills-cloud.service`, `bills-backup.service`, `bills-backup.timer` |
