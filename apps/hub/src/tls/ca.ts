@@ -18,15 +18,18 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { isIPv4, isIPv6 } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
+import { RENEW_BEFORE_DAYS } from './info.ts';
+import type { CertInfo } from './info.ts';
 import { bits, bool, explicit, implicit, integer, namedBits, octets, oid, pem, seq, set, subjectOf, time, utf8 } from './der.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
+export { RENEW_BEFORE_DAYS } from './info.ts';
+export type { CertInfo } from './info.ts';
+
 /** Root lifetime: the tablets install it once. */
 export const CA_DAYS = 3650;
 /** Apple rejects TLS server certificates valid for more than 825 days, even under a private root. */
 export const SERVER_DAYS = 800;
-/** `ca init` re-issues the server certificate this long before it expires. */
-export const RENEW_BEFORE_DAYS = 30;
 /** Tablet clocks drift: certificates start an hour in the past. */
 const BACKDATE_MS = 60 * 60 * 1000;
 
@@ -181,16 +184,6 @@ export interface CaInitResult {
   /** Why the server certificate was (re)issued, for the operator. */
   reason?: string;
   info: CertInfo;
-}
-
-export interface CertInfo {
-  caSubject: string;
-  /** SHA-256 of the root, `AA:BB:…` — what the tablet shows in certificate details. */
-  caFingerprint: string;
-  caValidTo: number;
-  serverValidTo: number;
-  dnsNames: string[];
-  ips: string[];
 }
 
 function altNames(cert: X509Certificate): { dnsNames: string[]; ips: string[] } {

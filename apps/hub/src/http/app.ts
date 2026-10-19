@@ -24,8 +24,8 @@ import { registerSettingsRoutes } from './routes/settings.ts';
 import { registerStaffRoutes } from './routes/staff.ts';
 import { registerStatic } from './static.ts';
 import type { TlsStatus } from '@bills/domain';
-import { registerTlsRoutes, tlsStatus } from '../tls/serve.ts';
-import type { TlsRuntime } from '../tls/serve.ts';
+import { registerTlsRoutes, tlsStatus } from '../tls/routes.ts';
+import type { TlsRuntime } from '../tls/routes.ts';
 
 export interface AppOptions extends AuthHookOptions {
   /** Exposes /api/dev/lamps to control the simulator. Never in production. */
