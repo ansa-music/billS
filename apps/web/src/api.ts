@@ -10,6 +10,7 @@ import type {
   LoginResponse,
   ManualModeView,
   SessionView,
+  TlsStatus,
 } from '@bills/domain';
 
 export class HubRequestError extends Error {
@@ -195,6 +196,7 @@ export const fetchSessions = (from: number, to: number) =>
   fetchJson<SessionView[]>(`/api/sessions?from=${Math.floor(from)}&to=${Math.ceil(to)}`);
 
 export const fetchLamps = () => fetchJson<LampDetail[]>('/api/lamps');
+export const fetchTls = () => fetchJson<TlsStatus>('/api/tls');
 
 // ── Development simulators (/api/dev/*): public routes, absent with real hardware ──
 

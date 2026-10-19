@@ -196,7 +196,7 @@ export function App() {
             mode={state.manualMode}
             timezone={state.club.timezone}
             busy={commands.isBusy('manual') || !hub.online}
-            canDisable={can('equipment.view')}
+            canDisable={can('lamps.manual_off')}
             onDisable={() => void commands.run('manual', () => setManualMode(actor, false))}
           />
           <main className="content" id="content">

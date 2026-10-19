@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { HubState, JournalCategory, JournalEntry } from '@bills/domain';
-import { formatMoney } from '@bills/domain';
+import { formatMoney, ROLE_LABEL } from '@bills/domain';
+import type { Role } from '@bills/domain';
 import { fetchJournal } from '../api.ts';
 import { EmptyState, SectionCard } from '../components.tsx';
 import { formatClock, formatDay, formatSpan, lampErrorText } from '../format.ts';
@@ -14,6 +15,7 @@ type Filter = 'all' | JournalCategory;
 const FILTERS: Array<{ value: Filter; label: string }> = [
   { value: 'all', label: 'Все' },
   { value: 'games', label: 'Игры' },
+  { value: 'money', label: 'Касса' },
   { value: 'lamps', label: 'Свет' },
   { value: 'alerts', label: 'Тревоги' },
   { value: 'bar', label: 'Бар' },
@@ -30,6 +32,7 @@ interface Described {
 }
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
+const METHOD_WORD: Record<string, string> = { CASH: 'наличные', CARD: 'карта', QR: 'QR' };
 const num = (v: unknown) => (typeof v === 'number' ? v : 0);
 
 /** Turns an audit record into a sentence a cashier understands. */
@@ -120,6 +123,155 @@ function describe(e: JournalEntry, state: HubState): Described {
       return { title: 'Сотрудник изменён', detail: Object.keys(d).join(', '), icon: 'staff', cat: 'club' };
     case 'staff.pin_checked':
       return { title: d.ok === false ? 'Неверный PIN' : 'Вход по PIN', icon: 'user', cat: 'club', bad: d.ok === false };
+    // Games: pauses, transfers, prepaid time, settling
+    case 'session.paused':
+      return { title: `${table}: пауза`, detail: d.reason === 'power' ? 'отключение света' : undefined, icon: 'clock', cat: 'games' };
+    case 'session.resume_requested':
+      return { title: `${table}: продолжить`, detail: d.manual ? 'ручной режим — время пошло сразу' : 'ждём подтверждения лампы', icon: 'play', cat: 'games' };
+    case 'session.resumed':
+      return { title: `${table}: игра продолжена`, icon: 'play', cat: 'games' };
+    case 'session.resume_failed':
+      return { title: `${table}: не удалось продолжить`, detail: 'лампа не подтвердила включение', icon: 'alert', cat: 'games', bad: true };
+    case 'session.transferred': {
+      const to = state.tables.find((t) => t.id === d.toTableId)?.name ?? 'другой стол';
+      const from = state.tables.find((t) => t.id === d.fromTableId)?.name ?? table;
+      return { title: `${from} → ${to}: игра перенесена`, icon: 'refresh', cat: 'games' };
+    }
+    case 'session.prepaid':
+      return { title: `${table}: время на ${num(d.minutes)} мин`, detail: 'HUB сам остановит игру', icon: 'clock', cat: 'games' };
+    case 'session.prepaid_warning':
+      return { title: `${table}: скоро конец оплаченного времени`, detail: 'лампа мигнула', icon: 'clock', cat: 'games' };
+    case 'session.prepaid_ended':
+      return { title: `${table}: оплаченное время вышло`, detail: d.minutes ? `${num(d.minutes)} мин` : undefined, icon: 'stop', cat: 'games' };
+    case 'session.prepaid_deadline_shifted':
+      return { title: `${table}: конец оплаченного времени сдвинут`, icon: 'clock', cat: 'games' };
+    case 'session.closed':
+      return { title: `${table}: игра оплачена`, detail: d.prepaid ? 'предоплата' : undefined, icon: 'check', cat: 'games' };
+    case 'session.voided':
+      return {
+        title: `${table}: игра отменена`,
+        detail: [money(d.amount), str(d.reason), str(d.approvedBy) && `подтвердил ${str(d.approvedBy)}`].filter(Boolean).join(' · '),
+        icon: 'close',
+        cat: 'games',
+        bad: true,
+      };
+    // Money: checks, payments, shifts
+    case 'check.created':
+      return { title: `Счёт №${num(d.number)} создан`, detail: d.prepaid ? 'предоплата' : undefined, icon: 'checks', cat: 'money' };
+    case 'check.item_added':
+      return { title: 'В счёт добавлена строка', detail: d.amount !== undefined ? money(d.amount) : undefined, icon: 'checks', cat: 'money' };
+    case 'check.item_removed':
+      return { title: 'Строка убрана из счёта', detail: d.amount !== undefined ? money(d.amount) : undefined, icon: 'checks', cat: 'money' };
+    case 'check.discount_set':
+      return {
+        title: 'Скидка на счёт',
+        detail: `${d.kind === 'PERCENT' ? `${num(d.value)}%` : money(d.value)} = ${money(d.amount)}${str(d.reason) ? ` · ${str(d.reason)}` : ''}`,
+        icon: 'checks',
+        cat: 'money',
+      };
+    case 'check.discount_removed':
+      return { title: 'Скидка убрана', icon: 'checks', cat: 'money' };
+    case 'check.paid':
+      return {
+        title: `Счёт №${num(d.number)} оплачен`,
+        detail: `${money(d.total)}${num(d.discount) ? ` · скидка ${money(d.discount)}` : ''}`,
+        icon: 'check',
+        cat: 'money',
+      };
+    case 'check.voided':
+      return { title: 'Счёт аннулирован', detail: 'в нём не осталось строк', icon: 'close', cat: 'money' };
+    case 'payment.accepted': {
+      // `parts` are what went into the check per method (cash net of change); `applied` is their sum.
+      const applied = Array.isArray(d.parts) ? (d.parts as Array<{ method?: unknown; amount?: unknown }>) : [];
+      const how = applied.map((p) => `${METHOD_WORD[str(p.method)] ?? str(p.method)} ${money(p.amount)}`).join(' + ');
+      return {
+        title: `Оплата по счёту №${num(d.number)}`,
+        detail: `${how}${num(d.change) ? ` · сдача ${money(d.change)}` : ''}${num(d.remaining) ? ` · осталось ${money(d.remaining)}` : ''}`,
+        icon: 'checks',
+        cat: 'money',
+      };
+    }
+    case 'payment.refunded':
+      return {
+        title: `Возврат по счёту №${num(d.number)}`,
+        detail: `${METHOD_WORD[str(d.method)] ?? str(d.method)} ${money(d.amount)} · ${str(d.reason)}${str(d.approvedBy) ? ` · подтвердил ${str(d.approvedBy)}` : ''}`,
+        icon: 'close',
+        cat: 'money',
+        bad: true,
+      };
+    case 'shift.opened':
+      return { title: `Смена №${num(d.number)} открыта`, detail: `размен ${money(d.openingFloat)}`, icon: 'checks', cat: 'money' };
+    case 'shift.closed':
+      return {
+        title: `Смена №${num(d.number)} закрыта`,
+        detail: `в кассе ${money(d.countedCash)}${num(d.difference) ? ` · расхождение ${money(d.difference)}` : ' · без расхождений'}`,
+        icon: 'checks',
+        cat: 'money',
+        bad: num(d.difference) !== 0,
+      };
+    case 'shift.cash_deposited':
+      return { title: 'Внесение в кассу', detail: `${money(d.amount)}${str(d.reason) ? ` · ${str(d.reason)}` : ''}`, icon: 'checks', cat: 'money' };
+    case 'shift.cash_withdrawn':
+      return { title: 'Изъятие из кассы', detail: `${money(d.amount)}${str(d.reason) ? ` · ${str(d.reason)}` : ''}`, icon: 'checks', cat: 'money' };
+    case 'order.closed':
+      return { title: `${table}: заказ оплачен в счёте`, detail: money(d.total), icon: 'orders', cat: 'bar' };
+    // Access
+    case 'auth.login':
+      return {
+        title: 'Вход по ключу',
+        detail: [str(d.prefix) && `ключ ${str(d.prefix)}…`, str(d.device)].filter(Boolean).join(' · ') || undefined,
+        icon: 'user',
+        cat: 'club',
+      };
+    case 'auth.logout':
+      return { title: 'Выход', icon: 'logout', cat: 'club' };
+    case 'key.issued':
+      return {
+        title: 'Выдан ключ доступа',
+        detail: [ROLE_LABEL[str(d.forRole) as Role], str(d.label)].filter(Boolean).join(' · ') || undefined,
+        icon: 'staff',
+        cat: 'club',
+      };
+    case 'key.revoked':
+      return { title: 'Ключ доступа отозван', detail: str(d.prefix) ? `${str(d.prefix)}…` : undefined, icon: 'staff', cat: 'club', bad: true };
+    // Lamps, manual mode, power, cloud
+    case 'lamp.blink_requested':
+      return { title: `${table}: мигнуть лампой`, icon: 'lamp', cat: 'lamps' };
+    case 'lamp.mismatch':
+      return { title: `${table}: реле разошлось с нужным состоянием`, detail: 'HUB отправил команду ещё раз', icon: 'alert', cat: 'lamps', bad: true };
+    case 'hub.manual_mode_on':
+      return { title: 'Включён ручной режим', detail: str(d.reason) || undefined, icon: 'alert', cat: 'system', bad: true };
+    case 'hub.manual_mode_off':
+      return { title: 'Ручной режим выключен', icon: 'check', cat: 'system' };
+    case 'power.on_battery':
+      return {
+        title: 'Отключение света: ИБП на батарее',
+        detail: d.chargePercent != null ? `заряд ${num(d.chargePercent)}%` : undefined,
+        icon: 'plug',
+        cat: 'system',
+        bad: true,
+      };
+    case 'power.critical':
+      return { title: 'Батарея ИБП почти разряжена', icon: 'plug', cat: 'system', bad: true };
+    case 'power.restored':
+      return { title: 'Свет вернулся', icon: 'plug', cat: 'system' };
+    case 'power.ups_unreachable':
+      return { title: 'ИБП не отвечает', icon: 'plug', cat: 'system', bad: true };
+    case 'power.ups_reachable':
+      return { title: 'Связь с ИБП восстановлена', icon: 'plug', cat: 'system' };
+    case 'power.auto_paused':
+      return { title: 'Игры на паузе: нет света', icon: 'clock', cat: 'system' };
+    case 'power.auto_resumed':
+      return { title: 'Игры продолжены: свет вернулся', icon: 'play', cat: 'system' };
+    case 'power.settings_changed':
+      return {
+        title: 'Настройка ИБП изменена',
+        detail: d.autoPauseOnPowerLoss ? 'автопауза при отключении света' : 'без автопаузы',
+        icon: 'plug',
+        cat: 'system',
+      };
+    case 'cloud.settings_applied':
+      return { title: 'Настройки из облака применены', detail: `тарифов ${num(d.tariffs)} · столов ${num(d.tables)}`, icon: 'refresh', cat: 'system' };
     default:
       return { title: e.action, icon: 'journal', cat: 'system' };
   }

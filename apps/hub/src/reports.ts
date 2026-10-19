@@ -16,6 +16,14 @@ const DAYS_IN_CHART = 14;
 
 /** Statuses of games whose bill is final: they make up the revenue. */
 const STOPPED = "('AWAITING_PAYMENT', 'CLOSED')";
+/**
+ * Bar orders on the same footing as time: an order counts once its game is
+ * stopped or it was settled in a check. Orders on a game that is still running
+ * wait, like the game's time (otherwise the owner saw the bar of live tables
+ * as revenue next to their time not yet counted).
+ */
+const ORDER_IS_REVENUE = `(o.status = 'CLOSED' OR (o.status = 'OPEN' AND (o.session_id IS NULL OR EXISTS (
+  SELECT 1 FROM table_sessions g WHERE g.id = o.session_id AND g.status IN ${STOPPED}))))`;
 
 // ── Local calendar without libraries ──────────────────────────────────────────
 
@@ -228,7 +236,7 @@ export class ReportService {
     };
   }
 
-  /** Time revenue of stopped games plus bar orders (not cancelled) created in the period. */
+  /** Time revenue of stopped games plus their bar orders (see ORDER_IS_REVENUE) created in the period. */
   #periodRevenue(club: string, p: Period): { amount: number; games: number } {
     const { db } = this.deps;
     const games = one<{ n: number; amount: number | null }>(
@@ -241,8 +249,8 @@ export class ReportService {
     );
     const orders = one<{ total: number | null }>(
       db,
-      `SELECT SUM(total) AS total FROM bar_orders
-       WHERE club_id = ? AND status IN ('OPEN', 'CLOSED') AND created_at >= ? AND created_at < ?`,
+      `SELECT SUM(o.total) AS total FROM bar_orders o
+       WHERE o.club_id = ? AND ${ORDER_IS_REVENUE} AND o.created_at >= ? AND o.created_at < ?`,
       club,
       p.start,
       p.end,
@@ -315,8 +323,8 @@ export class ReportService {
     }
     for (const o of all<{ created_at: number; total: number }>(
       db,
-      `SELECT created_at, total FROM bar_orders
-       WHERE club_id = ? AND status IN ('OPEN', 'CLOSED') AND created_at >= ? AND created_at < ?`,
+      `SELECT o.created_at, o.total FROM bar_orders o
+       WHERE o.club_id = ? AND ${ORDER_IS_REVENUE} AND o.created_at >= ? AND o.created_at < ?`,
       club,
       rangeStart,
       rangeEnd,

@@ -13,16 +13,25 @@ import type { TestHub } from '../../hub/test/helpers.ts';
 import { clubIdOf, createTestCloud, HOUR, HUB1, HUB2, login, ownerGet, ownerPut } from './helpers.ts';
 import type { TestCloud } from './helpers.ts';
 
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
+/**
+ * Holds a port for a cloud that is "down": every connection is reset at once.
+ * Freeing the port early and listening on it later would let any other process
+ * (parallel test runs, outgoing connections) take it in between.
+ */
+async function holdPort(): Promise<{ port: number; release(): Promise<void> }> {
+  const srv = createServer((socket) => socket.destroy());
+  await new Promise<void>((resolve, reject) => {
     srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const address = srv.address();
-      const port = typeof address === 'object' && address ? address.port : 0;
-      srv.close(() => resolve(port));
-    });
+    srv.listen(0, '127.0.0.1', () => resolve());
   });
+  const address = srv.address();
+  const port = typeof address === 'object' && address ? address.port : 0;
+  return { port, release: () => new Promise<void>((resolve) => srv.close(() => resolve())) };
+}
+
+/** Waits until no lamp command is in flight: a lamp ack writes `lamp.*` to the outbox asynchronously. */
+async function lampsSettled(t: TestHub): Promise<void> {
+  await waitFor(() => (all<{ n: number }>(t.db, "SELECT COUNT(*) AS n FROM lamp_commands WHERE status = 'PENDING'")[0]?.n ?? 1) === 0);
 }
 
 /** A HUB whose sync worker is driven by hand (`tick()`), not by timers. */
@@ -30,7 +39,7 @@ async function startHub(h: Harness, url: string, hub: { id: string; key: string 
   const t = await h.start(undefined, { sync: { url, apiKey: hub.key, hubId: hub.id, intervalMs: 1000, kickDelayMs: 1 } });
   t.hub.sync!.stop();
   // Lamp recovery at start answers asynchronously and writes to the outbox; let it finish first.
-  await waitFor(() => (all<{ n: number }>(t.db, "SELECT COUNT(*) AS n FROM lamp_commands WHERE status = 'PENDING'")[0]?.n ?? 1) === 0);
+  await lampsSettled(t);
   return t;
 }
 
@@ -38,7 +47,11 @@ function sync(t: TestHub) {
   return t.hub.sync!;
 }
 
-/** Opens a table, waits for the lamp, stops after `playMs`. Returns the session id. */
+/**
+ * Opens a table, waits for the lamp, stops after `playMs` and waits for the lamp to go off.
+ * Without the last wait the `lamp.off` ack could land in the outbox in the middle of a
+ * sync tick (after its outbox read) and leave one row undelivered. Returns the session id.
+ */
 async function playGame(t: TestHub, h: Harness, table: string, playMs: number): Promise<string> {
   const opened = await post(t, `/api/tables/${tableId(t, table)}/open`);
   assert.equal(opened.status, 201);
@@ -46,6 +59,7 @@ async function playGame(t: TestHub, h: Harness, table: string, playMs: number): 
   h.clock.advance(playMs);
   const stopped = await post(t, `/api/sessions/${opened.body.id}/stop`);
   assert.equal(stopped.status, 200);
+  await lampsSettled(t);
   return opened.body.id;
 }
 
@@ -59,7 +73,8 @@ async function cloudSessions(c: TestCloud, hubId: string): Promise<Array<{ id: s
 }
 
 test('HUB offline → events pile up → cloud comes up → everything arrives once; two HUBs add up', async (t) => {
-  const port = await freePort();
+  const down = await holdPort();
+  const port = down.port;
   const url = `http://127.0.0.1:${port}`;
 
   const h1 = new Harness();
@@ -69,6 +84,7 @@ test('HUB offline → events pile up → cloud comes up → everything arrives o
     await h1.dispose();
     await h2.dispose();
     await c?.close();
+    await down.release();
   });
 
   // --- Club 1 works while the cloud is unreachable -------------------------
@@ -91,6 +107,7 @@ test('HUB offline → events pile up → cloud comes up → everything arrives o
 
   // --- The cloud comes up ---------------------------------------------------
   c = await createTestCloud();
+  await down.release();
   await c.app.listen({ host: '127.0.0.1', port });
 
   await sync(hub1).tick();

@@ -69,6 +69,30 @@ load_env() {
 # Порт HUB: из окружения (после load_env) или по умолчанию.
 hub_port() { printf '%s' "${HUB_PORT:-$DEFAULT_PORT}"; }
 
+# Адрес HUB для проверок с этого же сервера: https, если включён сертификат клуба (bills ca init).
+hub_url() {
+  if [ -n "${HUB_TLS_CERT:-}" ]; then printf 'https://127.0.0.1:%s' "$(hub_port)"; else printf 'http://127.0.0.1:%s' "$(hub_port)"; fi
+}
+
+# curl к HUB: при HTTPS доверяет корневому сертификату клуба (он же раздаётся планшетам).
+hub_curl() {
+  if [ -n "${HUB_TLS_CERT:-}" ]; then
+    curl --cacert "${HUB_TLS_CA:-$(dirname "$HUB_TLS_CERT")/ca.crt}" "$@"
+  else
+    curl "$@"
+  fi
+}
+
+# set_env_var КЛЮЧ ЗНАЧЕНИЕ — заменить строку КЛЮЧ=… в hub.env (или дописать в конец).
+set_env_var() {
+  local key="$1" value="$2"
+  if grep -Eq "^#?[[:space:]]*${key}=" "$ENV_FILE"; then
+    sed -i -E "s|^#?[[:space:]]*${key}=.*|${key}=${value}|" "$ENV_FILE"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+  fi
+}
+
 # Папка бэкапов: из окружения или по умолчанию.
 backup_dir() { printf '%s' "${BACKUP_DIR:-$STATE_DIR/backups}"; }
 
@@ -133,9 +157,8 @@ hub_is_active() { systemctl is-active --quiet "$HUB_SERVICE"; }
 
 # Количество столов с активной игрой по /api/state. Печатает число или "?" при ошибке.
 active_games_count() {
-  local port json
-  port="$(hub_port)"
-  json="$(curl -fsS --max-time 5 "http://127.0.0.1:${port}/api/state" 2>/dev/null)" || { printf '?'; return 0; }
+  local json
+  json="$(hub_curl -fsS --max-time 5 "$(hub_url)/api/state" 2>/dev/null)" || { printf '?'; return 0; }
   printf '%s' "$json" | node -e '
     let raw = "";
     process.stdin.on("data", (c) => (raw += c));
@@ -151,10 +174,9 @@ active_games_count() {
 
 # Ждать, пока /api/health ответит ok:true. health_wait [таймаут_сек]. Код 0/1.
 health_wait() {
-  local timeout="${1:-$HEALTH_TIMEOUT}" port body i
-  port="$(hub_port)"
+  local timeout="${1:-$HEALTH_TIMEOUT}" body i
   for ((i = 0; i < timeout; i++)); do
-    if body="$(curl -fsS --max-time 3 "http://127.0.0.1:${port}/api/health" 2>/dev/null)" \
+    if body="$(hub_curl -fsS --max-time 3 "$(hub_url)/api/health" 2>/dev/null)" \
        && printf '%s' "$body" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'; then
       HEALTH_BODY="$body"
       return 0

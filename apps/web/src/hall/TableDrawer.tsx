@@ -405,7 +405,7 @@ export function TableDrawer({
         <div className="drawer-alert" role="alert">
           <Icon name="alert" size={18} />
           <p>{alert?.message ?? 'Лампа не ответила — проверьте свет на столе'}</p>
-          {alert && (
+          {alert && hub.can('alert.resolve') && (
             <button
               type="button"
               className="btn btn-small"

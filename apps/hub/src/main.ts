@@ -11,6 +11,8 @@ import { managerMatcher } from './manual-mode.ts';
 import { versionInfo, versionString } from './version.ts';
 import { writeBootstrapKeys } from './auth.ts';
 import { dirname, join } from 'node:path';
+import { MdnsResponder, normalizeHostName } from './mdns.ts';
+import { loadTls, startRedirectServer, tlsStatus } from './tls/serve.ts';
 
 const config = loadConfig();
 if (config.cloudUrl && (!config.cloudApiKey || !config.hubId)) {
@@ -44,7 +46,19 @@ const hub = new Hub({
       }
     : {}),
 });
+// HTTPS with the club's own root (`bills ca init`); broken TLS settings stop the start instead of falling back to HTTP.
+const tls = loadTls({ certPath: config.tlsCert, keyPath: config.tlsKey, caPath: config.tlsCa });
+const mdnsHost = config.mdnsName ? normalizeHostName(config.mdnsName) : null;
+const status = () =>
+  tlsStatus({
+    tls,
+    httpsPort: tls ? config.port : null,
+    httpPort: tls ? config.httpPort : null,
+    mdnsName: mdnsHost,
+    now: Date.now(),
+  });
 const app = buildApp(hub, {
+  tls: { runtime: tls, status },
   simulator: lamps.simulator,
   upsSimulator: ups instanceof SimulatorUps ? ups : undefined,
   logger: true,
@@ -67,6 +81,22 @@ if (bootstrap.length) {
 }
 
 await app.listen({ host: config.host, port: config.port });
+const redirect =
+  tls && config.httpPort !== null
+    ? await startRedirectServer({ tls, status, httpsPort: config.port, host: config.host, port: config.httpPort })
+    : null;
+const mdns = config.mdnsName
+  ? new MdnsResponder({
+      name: config.mdnsName,
+      logger: { info: (m: string) => app.log.info(m), warn: (m: string) => app.log.warn(m) },
+    })
+  : null;
+await mdns?.start();
+if (tls) {
+  const s = status();
+  app.log.info({ https: s.appUrls, caPage: s.caPageUrls, serverValidTo: new Date(s.serverValidTo!).toISOString() }, 'HTTPS on');
+  if (s.renewSoon) app.log.warn('Сертификат HUB скоро истекает — выполните `bills ca init`');
+}
 const webDistServed = existsSync(config.webDistPath);
 app.log.info(
   {
@@ -80,6 +110,8 @@ app.log.info(
     webDistServed,
     cloud: config.cloudUrl ?? 'off',
     hubId: config.hubId || undefined,
+    https: tls ? true : false,
+    mdns: mdnsHost ?? 'off',
   },
   'HUB started',
 );
@@ -92,6 +124,8 @@ async function shutdown(signal: string) {
   if (stopping) return;
   stopping = true;
   app.log.info({ signal }, 'HUB stopping');
+  await mdns?.close();
+  redirect?.close();
   await app.close();
   hub.close();
   lamps.close();

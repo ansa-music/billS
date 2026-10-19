@@ -21,6 +21,9 @@ import { registerReportRoutes } from './routes/reports.ts';
 import { registerSettingsRoutes } from './routes/settings.ts';
 import { registerStaffRoutes } from './routes/staff.ts';
 import { registerStatic } from './static.ts';
+import type { TlsStatus } from '@bills/domain';
+import { registerTlsRoutes, tlsStatus } from '../tls/serve.ts';
+import type { TlsRuntime } from '../tls/serve.ts';
 
 export interface AppOptions extends AuthHookOptions {
   /** Exposes /api/dev/lamps to control the simulator. Never in production. */
@@ -35,11 +38,19 @@ export interface AppOptions extends AuthHookOptions {
   version?: VersionInfo;
   /** Built hall screen (apps/web/dist) to serve on `/` with an SPA fallback; skipped when the folder is missing. */
   staticDir?: string;
+  /** HTTPS: certificates (HUB_TLS_*) and what GET /api/tls reports; without it /api/tls says `enabled: false`. */
+  tls?: { runtime: TlsRuntime | null; status: () => TlsStatus };
 }
 
 export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   // Screens poll /api/state on every change: per-request logs would drown real events.
-  const app = Fastify({ logger: options.logger ?? false, disableRequestLogging: true, forceCloseConnections: true });
+  const runtime = options.tls?.runtime ?? null;
+  const app = Fastify({
+    logger: options.logger ?? false,
+    disableRequestLogging: true,
+    forceCloseConnections: true,
+    ...(runtime ? { https: { key: runtime.key, cert: runtime.cert } } : {}),
+  }) as unknown as FastifyInstance;
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof HubError) {
@@ -376,6 +387,12 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
       },
     );
   }
+
+  registerTlsRoutes(
+    app,
+    options.tls?.status ?? (() => tlsStatus({ tls: null, httpsPort: null, httpPort: null, mdnsName: null, now: hub.clock.now() })),
+    runtime,
+  );
 
   if (options.staticDir) registerStatic(app, options.staticDir);
 

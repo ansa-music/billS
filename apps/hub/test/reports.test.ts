@@ -27,7 +27,7 @@ interface GameFixture {
   startedAt: number;
   stoppedAt: number;
   amount: number;
-  status?: 'AWAITING_PAYMENT' | 'CLOSED';
+  status?: 'AWAITING_PAYMENT' | 'CLOSED' | 'ACTIVE';
 }
 
 /** Inserts a finished game straight into the database, as if it was played earlier. */
@@ -238,6 +238,36 @@ test('bar orders add to revenue and to the unpaid amount', async (t) => {
   assert.equal(body.unpaidAmount, 1600_00);
   // Top tables count time only.
   assert.equal(body.topTables.find((x) => x.name === 'Стол 4')?.revenue, 1000_00);
+});
+
+test('bar orders of a game still running wait with its time; they count once it stops', async (t) => {
+  const h = harness(t);
+  const hub = await h.start();
+  const done = insertGame(hub, {
+    table: 'Стол 1',
+    startedAt: almaty(2026, 10, 12, 9),
+    stoppedAt: almaty(2026, 10, 12, 10),
+    amount: 1500_00,
+  });
+  insertOrder(hub, done, 1200_00, almaty(2026, 10, 12, 9, 30));
+  const live = insertGame(hub, {
+    table: 'Стол 4',
+    startedAt: almaty(2026, 10, 12, 11),
+    stoppedAt: almaty(2026, 10, 12, 11, 30),
+    amount: 0,
+    status: 'ACTIVE',
+  });
+  run(hub.db, 'UPDATE table_sessions SET stopped_at = NULL WHERE id = ?', live);
+  insertOrder(hub, live, 900_00, almaty(2026, 10, 12, 11, 10));
+
+  let { body } = await summary(hub, '2026-10-12');
+  assert.equal(body.revenue.today, 2700_00);
+  assert.equal(body.revenueByDay.at(-1)?.amount, 2700_00);
+  assert.equal(body.avgCheck, 2700_00);
+
+  run(hub.db, "UPDATE table_sessions SET status = 'AWAITING_PAYMENT', stopped_at = ?, amount = 1500_00 WHERE id = ?", almaty(2026, 10, 12, 12), live);
+  ({ body } = await summary(hub, '2026-10-12'));
+  assert.equal(body.revenue.today, 2700_00 + 1500_00 + 900_00);
 });
 
 test('default date is today in the club zone; a malformed date is rejected', async (t) => {

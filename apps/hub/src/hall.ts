@@ -82,11 +82,12 @@ export function saveHallLayout(db: Db, events: HubEvents, now: number, actor: st
 
 const CATEGORY_FILTER: Record<JournalCategory, string> = {
   games: "a.action LIKE 'session.%'",
+  money: "(a.action LIKE 'check.%' OR a.action LIKE 'payment.%' OR a.action LIKE 'shift.%')",
   lamps: "a.action LIKE 'lamp.%'",
   alerts: "a.action LIKE 'alert.%'",
   bar: "(a.action LIKE 'order.%' OR a.action LIKE 'product.%' OR a.action LIKE 'category.%')",
-  club: "(a.action LIKE 'club.%' OR a.action LIKE 'table.%' OR a.action LIKE 'tables.%' OR a.action LIKE 'tariff.%' OR a.action LIKE 'staff.%')",
-  system: "(a.action LIKE 'hub.%' OR a.action LIKE 'hall.%')",
+  club: "(a.action LIKE 'club.%' OR a.action LIKE 'table.%' OR a.action LIKE 'tables.%' OR a.action LIKE 'tariff.%' OR a.action LIKE 'staff.%' OR a.action LIKE 'key.%' OR a.action LIKE 'auth.%')",
+  system: "(a.action LIKE 'hub.%' OR a.action LIKE 'hall.%' OR a.action LIKE 'power.%' OR a.action LIKE 'cloud.%')",
 };
 
 export function journalPage(

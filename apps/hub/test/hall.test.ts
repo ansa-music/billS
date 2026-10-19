@@ -100,6 +100,16 @@ test('the journal lists actions newest first, by category and table, page by pag
   const page2 = await get<JournalPage>(hub, `/api/journal?limit=2&before=${page1.body.nextBefore}`);
   assert.ok((page2.body.entries[0]?.id ?? 0) < (page1.body.entries[1]?.id ?? 0));
 
+  // The cash desk has its own filter: shift, check and payment records.
+  await post(hub, '/api/shifts/open', { openingFloat: 5000_00 });
+  const check = await post(hub, '/api/checks', { sessionIds: [opened.body.id] });
+  await post(hub, `/api/checks/${check.body.id}/pay`, { parts: [{ method: 'CASH', amount: 10_000_00 }] });
+  const money = await get<JournalPage>(hub, '/api/journal?category=money');
+  assert.deepEqual(
+    money.body.entries.map((e) => e.action),
+    ['check.paid', 'payment.accepted', 'check.created', 'shift.opened'],
+  );
+
   assert.equal((await get(hub, '/api/journal?category=nope')).status, 400);
 });
 

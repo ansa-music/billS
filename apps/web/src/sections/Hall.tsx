@@ -13,7 +13,7 @@ import {
 import { fetchHall, fetchSessions, saveHall } from '../api.ts';
 import { CardBoundary } from '../CardBoundary.tsx';
 import { EmptyState, Segmented, StatTile } from '../components.tsx';
-import { DAY_MS, workdayStart } from '../format.ts';
+import { DAY_MS, plural, workdayStart } from '../format.ts';
 import { alertsByTable, amountOf, isLive, matchesFilter, tablePhase } from '../hall.ts';
 import { HallFilterChips, useHallFilter } from '../HallToolbar.tsx';
 import { PlanView } from '../hall/PlanView.tsx';
@@ -58,7 +58,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), M
 const meters = (cm: number) => (cm / 100).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
 
 function HallSummary({ dayRevenue }: { dayRevenue: number | null }) {
-  const { state, serverNow } = useHub();
+  const { state, serverNow, can } = useHub();
   const total = state.tables.length;
   const playing = state.tables.filter((t) => tablePhase(t) === 'playing').length;
   const paused = state.tables.filter((t) => tablePhase(t) === 'paused').length;
@@ -98,9 +98,13 @@ function HallSummary({ dayRevenue }: { dayRevenue: number | null }) {
       <StatTile
         label="Ждут оплаты"
         value={formatMoney(unpaid, currency)}
-        detail={state.unpaid.length ? `${state.unpaid.length} ${state.unpaid.length === 1 ? 'игра' : 'игр'} · открыть счета` : 'неоплаченных нет'}
+        detail={
+          state.unpaid.length
+            ? `${state.unpaid.length} ${plural(state.unpaid.length, ['игра', 'игры', 'игр'])}${can('checks.view') ? ' · открыть счета' : ''}`
+            : 'неоплаченных нет'
+        }
         tone={state.unpaid.length ? 'info' : undefined}
-        href={hrefFor('/checks')}
+        href={can('checks.view') ? hrefFor('/checks') : undefined}
       />
     </div>
   );

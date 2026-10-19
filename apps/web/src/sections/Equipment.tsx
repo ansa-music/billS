@@ -5,6 +5,7 @@ import { fetchLamps, fetchSimulator, fetchUpsSimulator, updateSimulator, updateU
 import { EmptyState, SectionCard, StatTile } from '../components.tsx';
 import { formatAgo, lampErrorText } from '../format.ts';
 import { HardwarePanel } from '../Hardware.tsx';
+import { TlsCard } from './TlsCard.tsx';
 import { Icon } from '../icons.tsx';
 import { useHub, useLive } from '../useHub.tsx';
 
@@ -296,6 +297,7 @@ export function EquipmentSection() {
         </SectionCard>
         <HardwarePanel />
       </div>
+      <TlsCard />
       <div className="two-col">
         <SimulatorCard />
         <UpsSimulatorCard />

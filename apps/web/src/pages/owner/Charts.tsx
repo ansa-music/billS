@@ -34,15 +34,9 @@ function useWidth(ref: RefObject<HTMLDivElement | null>): number {
   return width;
 }
 
-/** Russian plural: plural(3, ['игра', 'игры', 'игр']). */
-export function plural(n: number, forms: [string, string, string]): string {
-  const a = Math.abs(n) % 100;
-  const b = a % 10;
-  if (a > 10 && a < 20) return forms[2];
-  if (b > 1 && b < 5) return forms[1];
-  if (b === 1) return forms[0];
-  return forms[2];
-}
+import { plural } from '../../format.ts';
+
+export { plural };
 
 /** Bar with rounded top corners anchored to the baseline. */
 function topRoundedBar(x: number, y: number, w: number, h: number, r: number): string {
