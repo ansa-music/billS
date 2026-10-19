@@ -10,7 +10,7 @@ import { useRegisterSW } from 'virtual:pwa-register/react';
 
 const INSTALL_KEY = 'bills.pwa.install';
 const UPDATE_CHECK_MS = 60 * 60 * 1000;
-const RELOAD_FALLBACK_MS = 2500;
+const RELOAD_FALLBACK_MS = 8000;
 
 type InstallMemory = 'dismissed' | 'installed' | null;
 
