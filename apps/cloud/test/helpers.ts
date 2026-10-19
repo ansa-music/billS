@@ -6,6 +6,8 @@ import { migrate } from '../src/db/migrate.ts';
 import { createPostgresDriver } from '../src/db/postgres.ts';
 import { openSqlite } from '../src/db/sqlite.ts';
 import { buildApp } from '../src/http/app.ts';
+import type { PushSender } from '../src/push.ts';
+import { DisabledSender, PushDispatcher } from '../src/push.ts';
 import { DEMO_HUBS, DEMO_OWNER, seedDemo } from '../src/seed.ts';
 import { createPglitePool } from './pglite.ts';
 
@@ -20,6 +22,9 @@ export interface TestCloud {
   db: SqlDriver;
   clock: ManualClock;
   app: FastifyInstance;
+  push: PushDispatcher;
+  /** Lines the push dispatcher wrote to its log. */
+  pushLog: string[];
   close(): Promise<void>;
 }
 
@@ -34,18 +39,34 @@ export async function openTestDb(kind: TestDbKind = TEST_DB): Promise<SqlDriver>
   return openSqlite(':memory:');
 }
 
+export interface TestCloudOptions {
+  sender?: PushSender;
+  maxAgeMs?: number;
+  /** Database engine; `TEST_DB` by default. */
+  kind?: TestDbKind;
+}
+
 /** A cloud on an in-memory database (see `TEST_DB`) with the demo seed. */
-export async function createTestCloud(kind: TestDbKind = TEST_DB): Promise<TestCloud> {
+export async function createTestCloud(options: TestCloudOptions = {}): Promise<TestCloud> {
+  const kind = options.kind ?? TEST_DB;
   const clock = new ManualClock(MONDAY_NOON);
   const db = await openTestDb(kind);
   await migrate(db, clock.now());
   await seedDemo(db, clock.now());
-  const app = buildApp({ db, clock });
+  const pushLog: string[] = [];
+  const log = (m: string) => pushLog.push(m);
+  const push = new PushDispatcher(db, options.sender ?? new DisabledSender(log), () => clock.now(), {
+    log,
+    ...(options.maxAgeMs !== undefined ? { maxAgeMs: options.maxAgeMs } : {}),
+  });
+  const app = buildApp({ db, clock, push });
   await app.ready();
   return {
     db,
     clock,
     app,
+    push,
+    pushLog,
     async close() {
       await app.close();
       await db.close();
@@ -53,8 +74,8 @@ export async function createTestCloud(kind: TestDbKind = TEST_DB): Promise<TestC
   };
 }
 
-export function cloud(t: { after: (fn: () => Promise<void>) => void }): Promise<TestCloud> {
-  const p = createTestCloud();
+export function cloud(t: { after: (fn: () => Promise<void>) => void }, options: TestCloudOptions = {}): Promise<TestCloud> {
+  const p = createTestCloud(options);
   t.after(async () => (await p).close());
   return p;
 }

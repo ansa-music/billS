@@ -71,10 +71,12 @@ node --env-file-if-exists=.env apps/cloud/src/main.ts    # или: npm run dev -
 | `CLOUD_DATABASE_URL` | — | строка подключения PostgreSQL; если задана, SQLite не используется |
 | `CLOUD_DEMO_SEED` | `1` для SQLite, `0` для PostgreSQL | демо-сид на пустой базе |
 | `CLOUD_SECURE_COOKIES` | `0` | ставить флаг `Secure` на cookie владельца (только за HTTPS) |
-| `DATABASE_URL` | — | то же, что `CLOUD_DATABASE_URL` (так её называют Render и Supabase) |
-| `CLOUD_DATABASE_SSL` | `1` для не-локальной базы | TLS к PostgreSQL без проверки CA (Supabase); `0` — выключить |
-| `CLOUD_CORS_ORIGINS` | `https://*.web.app,https://*.firebaseapp.com` | кабинеты на других доменах; вход отдаёт токен в `X-Owner-Token`, дальше `Authorization: Bearer` (cookie через домены не ходят) |
-| `PORT` | — | порт от хостинга (Render), если `CLOUD_PORT` не задан |
+| `CLOUD_WEB_DIST` | `apps/cloud-web/dist` | собранный кабинет владельца; облако отдаёт его на `/` (если папки нет — только API) |
+| `CLOUD_FCM_SERVICE_ACCOUNT` / `CLOUD_FCM_SERVICE_ACCOUNT_JSON` | — | ключ сервисного аккаунта Firebase (путь к JSON или сам JSON); без него push выключены |
+| `CLOUD_PUBLIC_URL` | из запроса | HTTPS-адрес облака для QR входа с телефона |
+| `CLOUD_HUB_OFFLINE_MINUTES` | `10` | через сколько минут тишины HUB считается пропавшим (push `HUB_OFFLINE`) |
+| `CLOUD_SHIFT_OPEN_HOURS` | `20` | через сколько часов открытая смена даёт push `SHIFT_NOT_CLOSED` |
+| `CLOUD_PUSH_MAX_AGE_MINUTES` | `120` | тревоги, дошедшие до облака позже (HUB догоняет журнал), не пушатся |
 
 Демо-сид создаёт компанию «Демо сеть», владельца `owner@demo.kz` / `demo1234`, клубы
 «Клуб «Демо»» и «Клуб «Север»» (Asia/Almaty) и по одному HUB с фиксированными ключами —
@@ -83,27 +85,47 @@ node --env-file-if-exists=.env apps/cloud/src/main.ts    # или: npm run dev -
 
 Проверка: `npm test -w @bills/cloud` (node --test, SQLite в памяти) и `npx tsc -p apps/cloud`.
 
+**Кабинет на том же порту.** Если собран `apps/cloud-web` (`npm run build` в корне), облако само
+раздаёт его на `/` (`@fastify/static`, как HUB раздаёт экран зала): `assets/*` кэшируются на год
+(`immutable`), `index.html`, манифест и прочие файлы — `no-cache`, `.webmanifest` отдаётся как
+`application/manifest+json`. Неизвестный GET/HEAD вне `/api` и `/sync` получает `index.html`
+(маршруты кабинета), остальное — JSON 404 `NOT_FOUND`. Отдельный веб-сервер для кабинета не нужен.
+
+## Команды CLI
+
+`node apps/cloud/src/cli.ts <команда>` или `npm run cli -w @bills/cloud -- <команда>`. База — та же,
+что у сервера: `CLOUD_DB_PATH` или `CLOUD_DATABASE_URL`; если ни одна не задана, подхватывается
+корневой `.env`. Перед командами с данными применяются миграции. Значения для скриптов печатаются
+отдельными строками `КЛЮЧ=значение`. Коды выхода: 0 — успех, 1 — ошибка, 2 — неверный вызов.
+
+| Команда | Что делает | Строки для скриптов |
+|---|---|---|
+| `init --company "<название>" --email <e-mail> [--name "<имя>"] [--password <пароль>]` | компания и её владелец; без `--password` генерируется пароль из 16 символов без похожих букв и цифр; e-mail должен быть новым | `COMPANY_ID=`, `OWNER_EMAIL=`, `OWNER_PASSWORD=` (только если сгенерирован) |
+| `add-club --name "<название>" [--tz Asia/Almaty] [--currency KZT] [--company <id>]` | клуб и его HUB с новым ключом (32 случайных байта, base64url; хранится только sha256); `--company` нужен, только если компаний несколько | `CLUB_ID=`, `HUB_ID=` (`hub-<латиница из названия>`), `CLOUD_API_KEY=` |
+| `new-hub-key --hub <id>` | новый ключ HUB, старый сразу перестаёт работать | `CLOUD_API_KEY=` |
+| `reset-password --email <e-mail> [--password <пароль>]` | новый пароль владельца, все его сессии завершаются | `OWNER_PASSWORD=` (если сгенерирован) |
+| `list [--json]` | компании, владельцы, клубы (id, пояс, валюта), HUB и их последний контакт | — |
+| `backup <папка\|файл>` | копия SQLite через `VACUUM INTO` (можно при работающем облаке) + `integrity_check`; папка → `cloud-ГГГГ-ММ-ДД_чч-мм-сс.db` | последняя строка stdout — путь к копии |
+| `restore <файл> --yes` | заменить базу копией (облако остановлено!); без `--yes` — только план, код 2; прежняя база → `cloud.db.before-restore-<время>` вместе с `-wal`/`-shm` | последняя строка stdout — путь к базе |
+| `check [файл]` | `integrity_check` + счётчики | `COMPANIES=`, `CLUBS=`, `EVENTS=` |
+| `version [--json]` | версия и git-коммит | — |
+
+Выданные `HUB_ID` и `CLOUD_API_KEY` вписываются в `.env` HUB клуба вместе с `CLOUD_URL`. Новый клуб
+не имеет настроек (версия 0): их пришлёт HUB первым `POST /sync/snapshot`.
+
+`backup`, `restore` и `check` работают только с SQLite: при заданном `CLOUD_DATABASE_URL` они
+завершаются с кодом 1 — для PostgreSQL используйте `pg_dump` / `pg_restore`. Остальные команды
+работают и через PostgreSQL.
+
 ## Режимы базы
 
 - **SQLite** (разработка, один клуб-два клуба): файл `CLOUD_DB_PATH`, WAL, внешние ключи
   включены. Так работает всё, что покрыто тестами.
 - **PostgreSQL** (продакшен): `CLOUD_DATABASE_URL=postgres://user:pass@host:5432/bills`.
-  Диалект проверен на настоящем PostgreSQL: тесты гоняют драйвер через
-  [PGlite](https://pglite.dev) — PostgreSQL 18 (парсер, планировщик, типы, `ON CONFLICT`,
-  транзакции), собранный в WASM и запущенный в процессе, без сервера. Адаптер
-  `test/pglite.ts` отдаёт PGlite как `pg.Pool` (одно соединение под мьютексом).
-  - `test/pg-dialect.test.ts` всегда идёт на PGlite: миграции и сид (повторный запуск ничего
-    не меняет), один и тот же поток HUB + кабинет владельца (смена, оплаты, скидки, возврат,
-    предоплата, пауза, отключение питания, тревоги, Z-отчёт, снапшот, настройки, тарифы)
-    на SQLite и на PostgreSQL — все HTTP-ответы совпадают; параллельные пачки двух HUB.
-  - Весь набор тестов на PostgreSQL: `CLOUD_TEST_DB=pglite npm test -w @bills/cloud`
-    (по умолчанию тесты идут на SQLite).
-
-  Чего PGlite не покрывает: сетевой `pg.Pool` с несколькими соединениями (настоящая
-  конкуренция транзакций), SSL, права пользователя БД. Перед вводом в эксплуатацию всё равно
-  прогоните миграции и тестовую синхронизацию с HUB на стенде с живой базой.
-  `BIGINT`/`NUMERIC` приходят из `pg` строками; `main.ts` настраивает парсер типов в `Number`
-  (адаптер PGlite делает то же).
+  Драйвер покрыт тестами на fake-клиенте (перевод плейсхолдеров, BEGIN/COMMIT/ROLLBACK,
+  миграции без запрещённых конструкций). **На живой базе PostgreSQL режим не проверялся** —
+  перед вводом в эксплуатацию прогоните миграции и тестовую синхронизацию с HUB на стенде.
+  `BIGINT`/`NUMERIC` приходят из `pg` строками; `main.ts` настраивает парсер типов в `Number`.
 
 ## HTTP
 
@@ -128,9 +150,52 @@ HUB (`Authorization: Bearer <ключ>`; `hubId` в теле должен сов
 | `GET /api/owner/clubs/:id` | `ClubDetails` |
 | `GET /api/owner/clubs/:id/sessions?day=YYYY-MM-DD` | `CloudSessionView[]` (по умолчанию — сегодня клуба) |
 | `PUT /api/owner/clubs/:id/tariffs` | `UpdateTariffsRequest` → `UpdateTariffsResponse`; 400 `TARIFF_INVALID` |
-| `GET /api/health` | `{ ok: true, now }`; с `?db=1` ещё читает таблицу (`companies`) — keep-alive для бесплатного Supabase |
+| `GET /api/health` | `{ ok: true, now }` |
 
 Типы — в `packages/domain/src/cloud.ts`.
+
+## Телефон владельца: вход по ключу и push
+
+Приложение `apps/mobile` (Capacitor) — тот же кабинет, но запросы идут на адрес облака из
+настроек приложения с `Authorization: Bearer <токен сессии>` и `x-ts-app: 1`, без cookie.
+Облако принимает владельца и по cookie, и по Bearer; при `x-ts-app: 1` ответы входа содержат
+`token` и cookie не ставят. CORS отвечает только на источники WebView приложения
+(`https://localhost`, `capacitor://localhost`, `http://localhost`).
+
+| Метод и путь | Ответ |
+|---|---|
+| `POST /api/auth/key { key }` | вход по ключу `OWNER-…` → `CloudLoginResponse` (401 `INVALID_KEY`) |
+| `GET /api/owner/keys` | `OwnerKeyView[]` — живые ключи владельца |
+| `POST /api/owner/keys { label? }` | `CreateOwnerKeyResponse`: ключ (один раз) и текст QR `ts://login?cloud=…&key=…` |
+| `DELETE /api/owner/keys/:id` | отозвать ключ |
+| `POST /api/owner/devices { token, platform, name? }` | `DeviceView` — регистрация FCM-токена (повтор с тем же токеном обновляет запись) |
+| `DELETE /api/owner/devices/:id` | убрать телефон (при выходе из приложения) |
+| `GET /api/owner/push` | `PushSettingsView`: включены ли push на облаке, виды, правила, устройства |
+| `PUT /api/owner/push/rules { rules }` | полный список правил → `PushSettingsView` |
+| `POST /api/owner/push/test` | тестовый push на свои устройства → `TestPushResponse` |
+
+Ключи владельца хранятся sha256-хэшем (`owner_keys`), как ключи HUB.
+
+**Что пушится** (`src/push.ts`, типы — `packages/domain/src/push.ts`):
+- тревоги HUB (`alert.raised`): свет без игры, игра без света, клуб на ИБП, батарея ИБП
+  на исходе — включены по умолчанию; ИБП не отвечает, лампа не сработала, предоплаченная игра
+  не началась, прочее — выключены по умолчанию;
+- `HUB_OFFLINE` — HUB молчит дольше `CLOUD_HUB_OFFLINE_MINUTES` (один раз за эпизод; когда HUB
+  снова на связи — push «HUB снова на связи», сторож перевзводится);
+- `SHIFT_NOT_CLOSED` — кассовая смена открыта дольше `CLOUD_SHIFT_OPEN_HOURS` (один раз на смену).
+
+**Кому:** всем владельцам компании клуба, у кого правило разрешает вид: правило для клуба
+важнее правила «все клубы», то — важнее умолчания (`pushRuleAllows`).
+
+**Как:** проекция и сторож (раз в минуту в `main.ts`) кладут уведомление в `push_queue` в той же
+транзакции, что и событие; `dedupe_key` защищает от повторов при повторной доставке пачки.
+После коммита `PushDispatcher.flush()` рассылает очередь через FCM HTTP v1: OAuth-токен
+получается из ключа сервисного аккаунта (JWT RS256 через `node:crypto`, без SDK Google) и
+кэшируется на час. Токен, о котором FCM отвечает `UNREGISTERED`/404, удаляет устройство.
+Тревоги старше `CLOUD_PUSH_MAX_AGE_MINUTES` помечаются `STALE`. **Без ключа** — режим
+«push выключены»: очередь помечается `DISABLED`, каждое уведомление пишется в лог, правила и
+устройства сохраняются. Тесты (`test/push.test.ts`) гоняют настоящий `FcmSender` на фейковом
+FCM с проверкой подписи JWT.
 
 ## Персональные данные и хостинг
 
@@ -141,3 +206,8 @@ HUB (`Authorization: Bearer <ключ>`; `hubId` в теле должен сов
 облако TS и его базу данных нужно размещать у хостинг-провайдера с дата-центром в РК,
 а не на зарубежных площадках; резервные копии — тоже внутри страны. Пароли хранятся только
 в виде scrypt-хэшей, ключи HUB — в виде sha256-хэшей.
+
+Бесплатный режим — облако на мини-ПК главного клуба в Казахстане (`deploy/linux/install.sh --with-cloud`,
+см. `docs/FREE_SETUP_RU.md`): база SQLite и её копии лежат на этом компьютере, то есть физически в РК,
+поэтому такой режим тоже соответствует требованию о локализации персональных данных. Копии
+(`cli.ts backup`) при этом тоже нужно хранить на носителях внутри страны.

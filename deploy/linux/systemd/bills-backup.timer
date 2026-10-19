@@ -2,7 +2,7 @@
 # Проверить: systemctl list-timers bills-backup.timer
 
 [Unit]
-Description=TS: ежедневный бэкап базы HUB в 03:30
+Description=TS: ежедневный бэкап баз HUB и облака в 03:30
 
 [Timer]
 OnCalendar=*-*-* 03:30:00

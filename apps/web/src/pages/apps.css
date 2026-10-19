@@ -1,0 +1,90 @@
+/* «Приложения» (#/apps). Only tokens from styles.css / app.css, so both themes work. */
+
+.apps-release {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.apps-release .link {
+  padding-left: 0;
+}
+
+.apps-sections {
+  display: grid;
+  gap: 16px;
+  max-width: 880px;
+}
+
+.apps-body {
+  display: grid;
+  gap: 12px;
+}
+
+.apps-group {
+  display: grid;
+  gap: 8px;
+}
+
+.apps-group h3 {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.apps-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn.apps-download {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 18px;
+  text-decoration: none;
+  max-width: 100%;
+}
+
+.btn.apps-download:not(.btn-primary) {
+  color: var(--text);
+}
+
+.apps-download-text {
+  display: grid;
+  justify-items: start;
+  gap: 1px;
+  min-width: 0;
+}
+
+.apps-download-text > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.apps-size {
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.apps-steps {
+  margin: 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 6px;
+}
+
+.apps-steps a {
+  word-break: break-all;
+}
+
+@media (max-width: 600px) {
+  .btn.apps-download {
+    width: 100%;
+  }
+}

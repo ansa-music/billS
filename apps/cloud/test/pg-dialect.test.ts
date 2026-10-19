@@ -1,3 +1,4 @@
+import { readdirSync } from 'node:fs';
 /**
  * The PostgreSQL dialect, checked on a real PostgreSQL parser and planner:
  * PGlite (PostgreSQL compiled to WASM, in-process) behind createPostgresDriver.
@@ -212,7 +213,7 @@ async function flow(c: TestCloud): Promise<Array<{ step: string; status: number;
 }
 
 async function runFlow(kind: TestDbKind) {
-  const c = await createTestCloud(kind);
+  const c = await createTestCloud({ kind });
   try {
     return stableIds(await flow(c)) as Array<{ step: string; status: number; body: unknown }>;
   } finally {
@@ -240,7 +241,8 @@ test('the same HUB + owner flow answers identically on SQLite and on PostgreSQL 
 test('PostgreSQL: migrations and seed are idempotent; counts and sums come back as numbers', async () => {
   const db = await openTestDb('pglite');
   try {
-    assert.deepEqual(await migrate(db, NOON), ['001_init.sql', '002_money.sql']);
+    const files = readdirSync(new URL('../src/migrations/', import.meta.url)).filter((f) => f.endsWith('.sql')).sort();
+    assert.deepEqual(await migrate(db, NOON), files);
     assert.deepEqual(await migrate(db, NOON), []);
     assert.equal(await seedDemo(db, NOON), true);
     assert.equal(await seedDemo(db, NOON), false);
@@ -255,7 +257,7 @@ test('PostgreSQL: migrations and seed are idempotent; counts and sums come back 
 });
 
 test('PostgreSQL: concurrent batches from two HUBs serialise into whole transactions', async () => {
-  const c = await createTestCloud('pglite');
+  const c = await createTestCloud({ kind: 'pglite' });
   try {
     const t1 = await tableIdOf(c, HUB1.id, 'Стол 1');
     const t2 = await tableIdOf(c, HUB2.id, 'Стол 1');

@@ -22,6 +22,11 @@ DEFAULT_PORT=4310
 KEEP_RELEASES="${KEEP_RELEASES:-3}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-60}"
 
+# Облако TS на этом же мини-ПК (бесплатный режим). Наличие cloud.env = «облако включено».
+CLOUD_ENV_FILE="${CLOUD_ENV_FILE:-$ENV_DIR/cloud.env}"
+CLOUD_SERVICE="${CLOUD_SERVICE:-bills-cloud}"
+DEFAULT_CLOUD_PORT=4320
+
 # ---------- Вывод ----------
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
   C_INFO=$'\033[1;34m'; C_OK=$'\033[1;32m'; C_WARN=$'\033[1;33m'; C_ERR=$'\033[1;31m'; C_OFF=$'\033[0m'
@@ -185,12 +190,108 @@ health_summary() {
   ' 2>/dev/null || printf 'ok'
 }
 
+# ---------- Файлы KEY=value ----------
+# env_value <файл> <КЛЮЧ> [по умолчанию] — значение ключа из env-файла БЕЗ загрузки файла в окружение
+# (чтобы настройки облака не перемешивались с hub.env). Берётся последняя незакомментированная строка.
+env_value() {
+  local file="$1" key="$2" def="${3:-}" v=""
+  if [ -r "$file" ]; then
+    v="$(K="$key" awk '
+      BEGIN { k = ENVIRON["K"] }
+      /^[[:space:]]*#/ { next }
+      {
+        line = $0; sub(/^[[:space:]]+/, "", line)
+        if (index(line, k "=") == 1) { val = substr(line, length(k) + 2) }
+      }
+      END { sub(/\r$/, "", val); print val }
+    ' "$file")"
+  fi
+  printf '%s' "${v:-$def}"
+}
+
+# set_env_value <файл> <КЛЮЧ> <значение> — заменить строку КЛЮЧ=… (или закомментированную #КЛЮЧ=…),
+# а если такой нет — дописать в конец. Владелец и права файла сохраняются (перезапись на месте).
+set_env_value() {
+  local file="$1" key="$2" value="$3" tmp mode=append
+  if grep -Eq "^[[:space:]]*${key}[[:space:]]*=" "$file"; then
+    mode=active
+  elif grep -Eq "^[[:space:]]*#[[:space:]]*${key}[[:space:]]*=" "$file"; then
+    mode=commented
+  fi
+  tmp="$(mktemp)"
+  K="$key" V="$value" M="$mode" awk '
+    BEGIN { k = ENVIRON["K"]; v = ENVIRON["V"]; m = ENVIRON["M"]; done = 0
+            re = (m == "active") ? "^[[:space:]]*" k "[[:space:]]*=" : "^[[:space:]]*#[[:space:]]*" k "[[:space:]]*=" }
+    m != "append" && $0 ~ re {
+      if (!done) { print k "=" v; done = 1 }
+      next
+    }
+    { print }
+    END { if (!done) print k "=" v }
+  ' "$file" >"$tmp"
+  cat "$tmp" >"$file"
+  rm -f -- "$tmp"
+}
+
+# ---------- Облако TS на этом мини-ПК ----------
+# Облако включено, если есть /etc/bills/cloud.env (его создаёт install.sh --with-cloud).
+cloud_enabled() { [ -f "$CLOUD_ENV_FILE" ]; }
+
+# Порт облака из cloud.env (или 4320).
+cloud_port() {
+  local p
+  p="$(env_value "$CLOUD_ENV_FILE" CLOUD_PORT "$DEFAULT_CLOUD_PORT")"
+  case "$p" in ''|*[!0-9]*) p="$DEFAULT_CLOUD_PORT" ;; esac
+  printf '%s' "$p"
+}
+
+cloud_is_active() { systemctl is-active --quiet "$CLOUD_SERVICE"; }
+
+# Ждать, пока облако ответит ok:true на /api/health. cloud_health_wait [таймаут_сек]. Код 0/1.
+# Ответ кладётся в CLOUD_HEALTH_BODY.
+cloud_health_wait() {
+  local timeout="${1:-$HEALTH_TIMEOUT}" port body i
+  port="$(cloud_port)"
+  for ((i = 0; i < timeout; i++)); do
+    if body="$(curl -fsS --max-time 3 "http://127.0.0.1:${port}/api/health" 2>/dev/null)" \
+       && printf '%s' "$body" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'; then
+      CLOUD_HEALTH_BODY="$body"
+      return 0
+    fi
+    sleep 1
+  done
+  CLOUD_HEALTH_BODY=""
+  return 1
+}
+
+# cloud_cli <папка релиза> <аргументы CLI...>
+# Запускает `node apps/cloud/src/cli.ts ...` от bills с переменными ТОЛЬКО из cloud.env
+# (sudo -u bills сбрасывает окружение, поэтому переменные hub.env туда не попадают).
+cloud_cli() {
+  local dir="$1"; shift
+  [ -f "$dir/apps/cloud/src/cli.ts" ] || die "в релизе $dir нет apps/cloud/src/cli.ts — обновите TS: sudo bills update"
+  as_bills bash -c '
+    set -a
+    [ -r "$1" ] && . "$1"
+    set +a
+    cd "$2" || exit 1
+    shift 2
+    exec node apps/cloud/src/cli.ts "$@"
+  ' _ "$CLOUD_ENV_FILE" "$dir" "$@"
+}
+
+# Адрес Tailscale этого мини-ПК (100.x.y.z) или пусто.
+tailscale_ip() {
+  command -v tailscale >/dev/null 2>&1 || return 0
+  tailscale ip -4 2>/dev/null | head -n 1 || true
+}
+
 # ---------- Разное ----------
 # Первый IP-адрес машины в LAN (для подсказки операторам).
 primary_ip() {
   local ip
-  ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  [ -n "$ip" ] || ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
+  ip="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  [ -n "$ip" ] || ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}' || true)"
   printf '%s' "${ip:-<ip-сервера>}"
 }
 

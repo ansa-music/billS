@@ -21,6 +21,7 @@ import { StatsSection } from './sections/Stats.tsx';
 import { TariffsSection } from './sections/Tariffs.tsx';
 import { JournalSection } from './sections/Journal.tsx';
 import { EquipmentSection } from './sections/Equipment.tsx';
+import { AppsPage } from './pages/Apps.tsx';
 import { BarMenuPage } from './pages/BarMenu.tsx';
 import { ClubSettingsPage } from './pages/ClubSettings.tsx';
 import { OrdersPage } from './pages/Orders.tsx';
@@ -43,6 +44,7 @@ const PAGES: Record<string, (query: URLSearchParams) => ReactNode> = {
   '/settings': () => <ClubSettingsPage />,
   '/owner': () => <OwnerPage />,
   '/platform': () => <PlatformPage />,
+  '/apps': () => <AppsPage />,
 };
 
 /**

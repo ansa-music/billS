@@ -87,6 +87,8 @@ apps/web          экраны клуба (React + Vite): вход по ключ
                   настройки, кабинет владельца
 apps/cloud        облако (Fastify): компании, клубы, владельцы, приём outbox, настройки вниз, отчёты
 apps/cloud-web    кабинет владельца сети (React + Vite): все клубы, выручка, загрузка столов, тарифы
+apps/desktop      приложение TS для ПК кассы и мини-ПК (Tauri 2, Rust): окно с интерфейсом HUB, киоск, тихая печать чеков,
+                  автозапуск, установка HUB службой, автообновление; установщики .msi и .deb
 scripts/local.mjs своя копия клуба (HUB + экраны) на отдельных портах и с отдельной базой
 deploy/           установка HUB в клубе: Linux (systemd, бэкапы, обновления с откатом), Windows, удалённая поддержка
 docs/             регламенты: эксплуатация для управляющего (OPERATIONS_RU), инфраструктура (INFRASTRUCTURE_RU),
@@ -179,12 +181,28 @@ npm run local
 
 Служебные команды HUB (без зависимости от `sqlite3`): `node apps/hub/src/cli.ts backup <папка>` — консистентная копия базы при работающем HUB, `restore <файл> --yes`, `check` — целостность, `version`.
 
+## Бесплатный запуск
+
+TS можно запустить для всей сети клубов **без платежей**: без аренды VPS, домена и магазинов приложений. Пошагово «для чайника» — [docs/FREE_SETUP_RU.md](docs/FREE_SETUP_RU.md).
+
+- **Облако на мини-ПК главного клуба.** `install.sh --with-cloud` ставит рядом с HUB службу `bills-cloud` (облако + кабинет владельца на порту 4320, база SQLite `/var/lib/bills/cloud.db`, без PostgreSQL); ночной таймер бэкапов копирует и её базу. Данные лежат в клубе, то есть в Казахстане, — это заодно выполняет требование закона РК о хранении персональных данных.
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/ansa-music/billS/main/deploy/linux/install.sh | sudo bash -s -- --with-cloud
+  sudo bills cloud init --company "Моя сеть" --email owner@example.kz      # владелец, печатает пароль
+  sudo bills cloud add-club --name "Клуб «Центр»" --connect                # клуб + подключение этого HUB
+  ```
+- **Доступ снаружи.** Рекомендуемый — Tailscale (`sudo bills tailscale`, по желанию `--https`): бесплатная частная сеть, кабинет видят только устройства владельца и HUB других клубов, в интернет ничего не открыто. Альтернатива — Cloudflare Tunnel (`sudo bills tunnel quick` — временный адрес `*.trycloudflare.com` для показа; `sudo bills tunnel token <ТОКЕН>` — постоянный адрес на своём домене). Запасной — бесплатное имя DuckDNS + HTTPS через Caddy (`sudo bills duckdns --domain … --token … --https`, нужен «белый» IP).
+- **Другие клубы** получают ключ `sudo bills cloud add-club --name "…"` на главном мини-ПК и подключаются `sudo bills connect-cloud --url http://<имя-в-tailscale>:4320 --hub-id … --key …` (Windows — `deploy/windows/connect-cloud.ps1`).
+- **Приложения без магазинов.** Страница «Скачать приложение» в кабинете (`#/apps`) и на экранах клуба раздаёт файлы из GitHub Releases: Android — APK напрямую, ПК — установщик, iPhone — кабинет через Safari «На экран „Домой“» (PWA).
+- **Платное — только при росте:** Google Play $25 один раз, Apple $99 в год, VPS в Казахстане — когда сеть вырастет и кабинет должен работать независимо от главного клуба.
+
 ## Установка в клубе
 
 Эксплуатация — этап 8, всё лежит в `deploy/` и `docs/`:
 
 | Что | Где |
 |---|---|
+| Бесплатный режим: облако на мини-ПК клуба, Tailscale / Cloudflare Tunnel / DuckDNS, приложения без магазинов | [docs/FREE_SETUP_RU.md](docs/FREE_SETUP_RU.md) |
 | Linux (Ubuntu Server LTS, основной вариант): установка одной командой, служба systemd, ночные бэкапы, обновление с автооткатом, восстановление | [deploy/linux/README.md](deploy/linux/README.md) |
 | Windows (запасной вариант): Планировщик вместо службы, бэкапы, обновление, вариант с NSSM | [deploy/windows/README.md](deploy/windows/README.md) |
 | Удалённая поддержка без открытия HUB в интернет: Tailscale или WireGuard, что открыть, регламент | [deploy/linux/remote-support.md](deploy/linux/remote-support.md) |
@@ -366,21 +384,30 @@ npm run start:hub
 
 Иконки «TS» (`apps/web/public/icons/`) рисует `npm run icons` (`scripts/icons.mjs`, чистый JS, без сети и зависимостей); манифест — `apps/web/public/manifest.webmanifest`; service worker собирает `vite-plugin-pwa` (`apps/web/vite.config.ts`); плашки установки и обновления — `apps/web/src/pwa.tsx`. HUB отдаёт `manifest.webmanifest` с типом `application/manifest+json`, а `sw.js`, `index.html` и иконки — с `Cache-Control: no-cache` (тест `apps/hub/test/static.test.ts`).
 
-## Публичный доступ
+### Приложение для ПК
 
-Бесплатно, по схеме прошлого проекта (nova-crm): сайты на **Firebase Hosting**, серверы на **Render**, база облака на **Supabase Postgres**. Пошаговая инструкция для того, кто делает это впервые, — [docs/PUBLIC_DEPLOY_RU.md](docs/PUBLIC_DEPLOY_RU.md).
+**TS для Windows и Linux** (`apps/desktop`, [Tauri 2](https://tauri.app)) — тот же интерфейс клуба в своём окне, для ПК кассы и мини-ПК у экрана зала. Окно использует системный движок (WebView2 на Windows, WebKitGTK на Linux), установщик ≈ 5–10 МБ. Интерфейс приложение не хранит у себя: окно открывает HUB клуба (`http://<адрес-хаба>:4310/`), поэтому новые версии экранов приходят вместе с обновлением HUB, как у планшетов.
 
-| Что | Где | Файлы |
-|---|---|---|
-| Кабинет владельца (PWA «TS», ставится на телефон) | Firebase Hosting, `https://<проект>.web.app` | `apps/cloud-web`, `firebase.json` (цель `cabinet`) |
-| Демо экрана клуба: плашка «Демо — данные сбрасываются каждую ночь», демо-ключи на входе | Firebase Hosting, `https://<проект>-demo.web.app` | `apps/web`, `firebase.json` (цель `demo`), `apps/web/src/demo.tsx` |
-| Облако (API кабинета, синхронизация клубов) | Render free, `ts-cloud` | `render.yaml`, `apps/cloud` |
-| Демо-HUB: симулятор ламп и ИБП, ключи `OWNER-2222-2222-2222-2222` и др., сброс в 04:00 | Render free, `ts-demo-hub` | `render.yaml`, `apps/hub/src/demo.ts` |
+**Установка.** `.msi` для Windows 10/11 и `.deb` для Ubuntu 22.04+ собирает GitHub Actions (`.github/workflows/desktop.yml`): установщики — в артефактах каждого запуска и в релизе по тегу `desktop-v<версия>`. Без подписи издателя Windows SmartScreen при первом запуске покажет «Неизвестный издатель» → «Подробнее» → «Выполнить в любом случае».
 
-- **Выкладка сама:** пуш в `main` → GitHub Actions (`.github/workflows/deploy.yml`): typecheck, тесты, сборка с `VITE_CLOUD_URL`/`VITE_HUB_URL`, `firebase deploy` (секрет `FIREBASE_SERVICE_ACCOUNT_TS`); для PR — preview-канал со ссылкой в PR. Render деплоит сам по `render.yaml`. `keepalive.yml` раз в 3 дня трогает базу, чтобы бесплатный Supabase не уснул.
-- **Имя проекта Firebase** меняется одной строкой — `"default"` в `.firebaserc`; цели сайтов заполняет `scripts/firebase-targets.mjs`.
-- **Через домены** экраны ходят с Bearer-токеном, cookie не нужны (Safari блокирует сторонние): облако пускает `*.web.app` и `*.firebaseapp.com` (`CLOUD_CORS_ORIGINS`), HUB — только если задан `HUB_CORS_ORIGINS`. Без `VITE_*_URL` фронтенды, как раньше, ходят на свой домен.
-- **Ограничения:** Render засыпает через 15 минут без запросов, первый запрос ждёт около минуты; Supabase ставит базу на паузу после 7 дней тишины. Серверы вне Казахстана — это **только для демо** и кабинета без персональных данных; пилот с реальными гостями хранит данные в клубе (бесплатный режим `docs/FREE_SETUP_RU.md`) до переезда облака на KZ-хостинг.
+![Настройки устройства в приложении TS для ПК](docs/img/desktop-settings.png)
+
+**Первый запуск.** Приложение ищет HUB само: `hub.local` (имя ПК с HUB по mDNS — назовите его `hub`), этот же ПК, затем вся сеть /24 на порту 4310 (проверяет `/api/health`). Один найденный HUB открывается сразу, несколько — на выбор; можно ввести адрес вручную (`192.168.1.10` → `http://192.168.1.10:4310`). Адрес запоминается; если HUB не отвечает (нет света, Wi‑Fi), экран «HUB не отвечает» повторяет попытку каждые 5 секунд. Настройки устройства из любого экрана TS: **Ctrl+Shift+S**.
+
+**Настройки устройства** (файл `settings.json` в `%APPDATA%\app.ts.desktop\` или `~/.config/app.ts.desktop/`):
+- **Киоск-режим** — окно на весь экран без рамки, нельзя закрыть (Alt+F4 не действует), экран не гаснет (Windows). Изменить настройки, сменить HUB или закрыть TS — только после ключа управляющего, владельца или супер-админа (приложение проверяет ключ входом на HUB и сразу закрывает эту сессию). Клавишу Windows и Ctrl+Alt+Del киоск не перехватывает: для полной блокировки ПК — «Ограниченный доступ» (Assigned Access) Windows с этим приложением.
+- **Автозапуск** при входе в Windows/сеанс Linux (`tauri-plugin-autostart`; для кассы включите автовход пользователя).
+- **Принтер чеков** — из списка принтеров системы или «по умолчанию». Кнопка печати чека в «Кассе» в приложении печатает сразу, без окна печати: `apps/web` видит `window.__TAURI__` (`apps/web/src/desktop.ts`) и вызывает команду `print_receipt`, которая печатает ту же вёрстку чека (`cash/print/*`) через WebView2 (`ICoreWebView2_16::Print`) или WebKitGTK (`PrintOperation`) на выбранный принтер с размером страницы по ширине ленты и высоте чека. В браузере и при ошибке принтера — обычный `window.print()` с диалогом.
+
+**HUB на этом же ПК.** «Установить HUB на этот ПК» в настройках запускает те же скрипты, что и ручная установка (`deploy/windows/install.ps1` от администратора — задача «billS HUB» при старте системы; на Linux `pkexec bash deploy/linux/install.sh` — systemd `bills-hub.service`), они лежат внутри установщика. После установки приложение подключается к `127.0.0.1:4310`.
+
+**Автообновление.** «Проверить обновления» в настройках: `tauri-plugin-updater` читает `latest.json` последнего релиза GitHub (`releases/latest/download/latest.json`), проверяет подпись открытым ключом из `tauri.conf.json` и ставит новую версию по кнопке (в киоске — после ключа управляющего); игры и деньги в HUB, перезапуск окна их не трогает. Закрытый ключ подписи — секреты репозитория `TAURI_SIGNING_PRIVATE_KEY` и `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (без них CI собирает установщики без файлов обновления).
+
+**Права страниц.** Страницам HUB разрешены только `print_receipt` и `open_settings` (`src-tauri/capabilities/hub.json`); остальные команды — только локальной странице настроек (`apps/desktop/ui/index.html`). Окно переходит только на свои страницы и выбранный HUB — ссылка наружу не уведёт из киоска.
+
+**Сборка у себя.** Нужны Node 24, Rust (`rustup`), на Windows — MSVC (Visual Studio Build Tools, «Разработка классических приложений на C++») с Windows SDK; на Linux — `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev`. Затем `npm ci`, `npm run dev -w @bills/desktop` (окно в режиме разработки) или `npm run build -w @bills/desktop -- --bundles msi` → `apps/desktop/src-tauri/target/release/bundle/msi/TS_<версия>_x64_ru-RU.msi`. Тесты Rust: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`. Иконки — из монограммы `apps/web/public/icons/icon-512.png`: `npm run icons -w @bills/desktop`.
+
+<!-- PUBLIC_ACCESS -->
 
 ---
 

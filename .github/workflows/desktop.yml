@@ -1,0 +1,108 @@
+# TS для ПК (apps/desktop, Tauri): установщики .msi (Windows) и .deb (Ubuntu/Debian).
+#
+# - pull request / ручной запуск: сборка и тесты, установщики — в артефактах запуска;
+# - тег desktop-v<версия> (например desktop-v0.1.0): релиз на GitHub с установщиками и latest.json
+#   для автообновления (tauri-plugin-updater читает releases/latest/download/latest.json).
+#
+# Подпись обновлений: секреты репозитория TAURI_SIGNING_PRIVATE_KEY (содержимое ключа) и
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD (пусто, если ключ без пароля). Без ключа сборка идёт,
+# но без файлов обновления (.sig, latest.json). Открытый ключ — plugins.updater.pubkey в tauri.conf.json.
+name: desktop
+
+on:
+  push:
+    tags: ['desktop-v*']
+  pull_request:
+    paths:
+      - 'apps/desktop/**'
+      - 'apps/web/src/desktop.ts'
+      - 'apps/web/src/cash/print/**'
+      - 'deploy/**'
+      - '.github/workflows/desktop.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bundles: msi
+          - os: ubuntu-22.04
+            bundles: deb
+    runs-on: ${{ matrix.os }}
+    env:
+      HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+
+      - name: Системные библиотеки (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - run: npm ci
+
+      - name: Тесты Rust
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+      - name: Без ключа подписи — без файлов обновления
+        if: ${{ env.HAS_SIGNING_KEY != 'true' }}
+        shell: bash
+        run: echo '{"bundle":{"createUpdaterArtifacts":false}}' > apps/desktop/src-tauri/tauri.ci.conf.json
+
+      - name: Сборка
+        if: ${{ !startsWith(github.ref, 'refs/tags/desktop-v') }}
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        working-directory: apps/desktop
+        run: |
+          extra=()
+          if [ -f src-tauri/tauri.ci.conf.json ]; then extra=(--config src-tauri/tauri.ci.conf.json); fi
+          npx tauri build --bundles ${{ matrix.bundles }} "${extra[@]}"
+
+      - name: Установщик в артефакты
+        if: ${{ !startsWith(github.ref, 'refs/tags/desktop-v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ts-desktop-${{ matrix.bundles }}
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/msi/*.msi*
+            apps/desktop/src-tauri/target/release/bundle/deb/*.deb*
+          if-no-files-found: error
+
+      - name: Релиз на GitHub (установщики и latest.json)
+        if: ${{ startsWith(github.ref, 'refs/tags/desktop-v') }}
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: npx tauri
+          args: --bundles ${{ matrix.bundles }}
+          tagName: ${{ github.ref_name }}
+          releaseName: 'TS для ПК __VERSION__'
+          releaseBody: 'Установщики TS для ПК кассы и мини-ПК: .msi — Windows 10/11, .deb — Ubuntu 22.04+.'
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true

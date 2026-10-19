@@ -17,6 +17,7 @@ import { hashApiKey } from './auth.ts';
 import type { SqlDriver } from './db/driver.ts';
 import { CloudError } from './errors.ts';
 import { projectEvent } from './projection.ts';
+import { hubBackOnline } from './push.ts';
 import type { ClubRow } from './settings.ts';
 import { loadSettings, saveSettings, tariffNames, toClubSettings } from './settings.ts';
 
@@ -29,6 +30,8 @@ export interface HubRow {
   last_seen_at: number | null;
   last_outbox_id: number | null;
   settings_version: number;
+  /** Set when a HUB_OFFLINE push went out; cleared when the HUB is heard again. */
+  offline_alerted_at: number | null;
 }
 
 export async function findHubByKey(db: SqlDriver, key: string): Promise<HubRow | null> {
@@ -65,7 +68,8 @@ export async function acceptEvents(
   return db.transaction(async (tx) => {
     const club = await clubOfHub(tx, hub);
     const settings = await loadSettings(tx, club);
-    const ctx = { hubId: hub.id, clubId: club.id, timezone: club.timezone, tariffNames: tariffNames(settings) };
+    const ctx = { hubId: hub.id, clubId: club.id, clubName: club.name, timezone: club.timezone, now, tariffNames: tariffNames(settings) };
+    await hubBackOnline(tx, now, hub, club.name);
 
     let inserted = 0;
     for (const event of [...req.events].sort((a, b) => a.id - b.id)) {
@@ -115,6 +119,7 @@ export async function acceptSnapshot(
     const club = await clubOfHub(tx, hub);
     const current = await loadSettings(tx, club);
     await tx.run('UPDATE hubs SET last_seen_at = ?, settings_version = ? WHERE id = ?', [now, req.settingsVersion, hub.id]);
+    await hubBackOnline(tx, now, hub, club.name);
     if (req.settingsVersion < current.version) {
       return { status: 409, body: { accepted: false, settingsVersion: current.version } };
     }

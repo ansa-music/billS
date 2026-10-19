@@ -1,5 +1,4 @@
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_PUBLIC_ORIGINS, parseOrigins } from '@bills/domain';
 
 export interface CloudConfig {
   host: string;
@@ -12,29 +11,33 @@ export interface CloudConfig {
   demoSeed: boolean;
   /** Mark the owner cookie `Secure` (only sent over HTTPS). */
   secureCookies: boolean;
-  /** Origins of cabinets on other domains (Firebase Hosting) allowed to call the API with a Bearer token. */
-  corsOrigins: string[];
-  /** TLS to PostgreSQL: on for remote hosts (Supabase), off for localhost; CLOUD_DATABASE_SSL=0/1 forces it. */
-  databaseSsl: boolean;
+  /** Built owner cabinet (apps/cloud-web/dist), served on `/` when the folder exists. */
+  webDistPath: string;
+  /** Address of the cloud for phones (the login QR); null → taken from each request. */
+  publicUrl: string | null;
+  /** A HUB not heard this long gets a HUB_OFFLINE push. */
+  hubOfflineMs: number;
+  /** A cash shift open this long gets a SHIFT_NOT_CLOSED push. */
+  shiftOpenMs: number;
+  /** Alerts older than this when they reach the cloud are not pushed. */
+  pushMaxAgeMs: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): CloudConfig {
-  // DATABASE_URL is what Render, Supabase and most hosts call it.
-  const databaseUrl = env.CLOUD_DATABASE_URL?.trim() || env.DATABASE_URL?.trim() || null;
+  const databaseUrl = env.CLOUD_DATABASE_URL?.trim() || null;
   // With SQLite (development) the demo seed is on unless switched off; with PostgreSQL it must be asked for.
   const demoSeed = env.CLOUD_DEMO_SEED === undefined ? databaseUrl === null : env.CLOUD_DEMO_SEED === '1';
   return {
     host: env.CLOUD_HOST ?? '127.0.0.1',
-    // PORT is set by Render and similar hosts.
-    port: Number(env.CLOUD_PORT ?? env.PORT ?? 4320),
+    port: Number(env.CLOUD_PORT ?? 4320),
     dbPath: env.CLOUD_DB_PATH ?? fileURLToPath(new URL('../data/cloud.db', import.meta.url)),
     databaseUrl,
     demoSeed,
     secureCookies: env.CLOUD_SECURE_COOKIES === '1',
-    corsOrigins: env.CLOUD_CORS_ORIGINS === undefined ? DEFAULT_PUBLIC_ORIGINS : parseOrigins(env.CLOUD_CORS_ORIGINS),
-    databaseSsl:
-      env.CLOUD_DATABASE_SSL === undefined || env.CLOUD_DATABASE_SSL === ''
-        ? databaseUrl !== null && !/@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(databaseUrl)
-        : env.CLOUD_DATABASE_SSL === '1',
+    webDistPath: env.CLOUD_WEB_DIST ?? fileURLToPath(new URL('../../cloud-web/dist', import.meta.url)),
+    publicUrl: env.CLOUD_PUBLIC_URL?.trim().replace(/\/+$/, '') || null,
+    hubOfflineMs: Number(env.CLOUD_HUB_OFFLINE_MINUTES ?? 10) * 60_000,
+    shiftOpenMs: Number(env.CLOUD_SHIFT_OPEN_HOURS ?? 20) * 3_600_000,
+    pushMaxAgeMs: Number(env.CLOUD_PUSH_MAX_AGE_MINUTES ?? 120) * 60_000,
   };
 }

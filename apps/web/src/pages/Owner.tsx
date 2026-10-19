@@ -21,6 +21,7 @@ const QUICK_LINKS: Array<{ to: string; query?: Record<string, string>; label: st
   { to: '/staff', label: 'Сотрудники', action: 'staff.view' },
   { to: '/journal', label: 'Журнал действий', action: 'audit.view' },
   { to: '/bar', label: 'Бар и меню', action: 'catalog.edit' },
+  { to: '/apps', label: 'Приложение на телефон и кассу', action: 'reports.view' },
 ];
 
 type ClubKey = 'current' | 'mock-2' | 'mock-3';
