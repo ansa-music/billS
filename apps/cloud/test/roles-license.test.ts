@@ -302,7 +302,8 @@ test('staff: a set of staff roles, the maxStaff limit, own and random six-digit 
   assert.deepEqual([upd.body.name, upd.body.roles], ['Анна К.', ['admin']]);
   assert.equal(upd.body.keys.length, 2);
   const list = await call<{ staff: CloudStaffView[] }>(c, 'GET', `/api/company/staff?clubId=${a.branch.id}`, r.manager);
-  assert.deepEqual(list.body.staff.map((s) => s.name), ['Анна К.', 'Борис']);
+  // Listed by creation time; both were created in the same millisecond here, so compare as a set.
+  assert.deepEqual(list.body.staff.map((s) => s.name).sort(), ['Анна К.', 'Борис']);
   const revoked = await call(c, 'POST', `/api/company/keys/${own.body.view.id}/revoke`, r.manager);
   assert.equal(revoked.status, 200);
   assert.equal(revoked.body.revokedAt, c.clock.now());

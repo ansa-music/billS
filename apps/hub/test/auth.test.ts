@@ -115,7 +115,7 @@ test('a malformed key is refused; valid keys typed sloppily still log in', async
   const hub = await secure(h);
   let device = 0;
   for (const bad of ['', 'abc', 'MGR-AAAA-BBBB', 'MGR-AAAA-BBBB-CCCC-DDDD-EEEE', 'WTR-0000-1111-2222-3333', '12345', '1234567', '1111']) {
-    const res = await hub.app.inject({ method: 'POST', url: '/api/auth/login', payload: { key: bad, device: `d${device++}` } });
+    const res = await hub.app.inject({ method: 'POST', url: '/api/auth/login', payload: { key: bad, device: `d${device}` }, remoteAddress: `10.2.0.${device++}` });
     assert.equal(res.statusCode, bad === '' ? 400 : 401, bad);
     if (bad !== '') assert.equal((res.json() as ErrorBody).error?.code, 'KEY_INVALID', bad);
   }

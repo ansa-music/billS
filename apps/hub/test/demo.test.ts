@@ -51,7 +51,7 @@ test('a real HUB refuses the four-digit demo keys, even when their rows are in i
   const { hub, app } = await h.start(undefined, { secure: true });
   assert.equal(hub.auth.issueFixedKeys(DEMO_KEYS).length, DEMO_KEYS.length);
   for (const k of DEMO_KEYS) {
-    const res = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { key: k.key, device: k.key } });
+    const res = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { key: k.key, device: k.key }, remoteAddress: `10.3.0.${k.key.charAt(0)}` });
     assert.equal(res.statusCode, 401, k.key);
     assert.equal(res.json().error.code, 'KEY_INVALID');
   }
