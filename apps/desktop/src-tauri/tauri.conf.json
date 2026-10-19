@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TS",
+  "version": "0.1.0",
+  "identifier": "app.ts.desktop",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "deb"],
+    "publisher": "TS",
+    "category": "Business",
+    "shortDescription": "TS для ПК кассы и мини-ПК",
+    "createUpdaterArtifacts": true,
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "resources": {
+      "../../../deploy/windows/": "deploy/windows/",
+      "../../../deploy/linux/": "deploy/linux/"
+    },
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "wix": { "language": "ru-RU" }
+    },
+    "linux": {
+      "deb": {
+        "depends": ["policykit-1 | pkexec"]
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDBEQTNFREY2OTk3N0JGRDUKUldUVnYzZVo5dTJqRFNmN0VEYkRrMWlJeWpoeUo5Ri80UW84TG5USEppSitwSU9ISXpUbVdHZDgK",
+      "endpoints": ["https://github.com/ansa-music/billS/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
+  }
+}
