@@ -7,6 +7,7 @@ import { useWakeLock } from './kiosk.ts';
 import { LoginPage } from './Login.tsx';
 import { OfflineBanner } from './OfflineBanner.tsx';
 import { PwaBanners } from './pwa.tsx';
+import { DemoBanner } from './demo.tsx';
 import { Link, navigate, REDIRECTS, ROUTES, routeFor, sectionOf, useLocation } from './router.tsx';
 import { BottomNav, Sidebar, Toast, Topbar } from './Shell.tsx';
 import type { NavBadges } from './Shell.tsx';
@@ -190,6 +191,7 @@ export function App() {
             canResolveAlerts={can('alert.resolve')}
             busy={commands.anyBusy}
           />
+          <DemoBanner />
           <OfflineBanner online={hub.online} />
           <PwaBanners />
           <ManualModeBanner

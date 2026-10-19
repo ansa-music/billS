@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { Action, HubState, MeResponse, OpenTableRequest, Role } from '@bills/domain';
-import { HubRequestError, UNAUTHORIZED_EVENT, command, fetchJson, fetchState, getAuthToken } from './api.ts';
+import { HubRequestError, UNAUTHORIZED_EVENT, command, fetchJson, fetchState, getAuthToken, hubUrl } from './api.ts';
 import { AUTH_CHANGED_EVENT, actorName, readAuth, writeAuth } from './auth.ts';
 
 /**
@@ -70,7 +70,7 @@ export function useHubConnection(): HubConnection {
     let lastSeen = Date.now();
 
     const connect = () => {
-      events = new EventSource('/api/events');
+      events = new EventSource(hubUrl('/api/events'));
       lastSeen = Date.now();
       events.onopen = () => {
         lastSeen = Date.now();

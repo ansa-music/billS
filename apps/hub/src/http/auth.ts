@@ -12,7 +12,7 @@ export interface AuthHookOptions {
 }
 
 /** Endpoints that work without a session: health and metrics for monitoring, login itself. */
-const PUBLIC = new Set(['/api/health', '/metrics', '/api/auth/login']);
+const PUBLIC = new Set(['/api/health', '/metrics', '/api/auth/login', '/api/demo']);
 /** Endpoints a browser cannot send headers to (SSE) or that exist only with the simulator. */
 const PUBLIC_PREFIXES = ['/api/events', '/api/dev/'];
 

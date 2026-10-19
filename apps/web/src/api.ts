@@ -23,6 +23,18 @@ export class HubRequestError extends Error {
   }
 }
 
+/**
+ * Where the HUB is. Empty (the usual case): the screen is served by the HUB itself or by
+ * Vite with a proxy, and requests go to the same origin. The public demo on Firebase Hosting
+ * is built with VITE_HUB_URL=https://<demo-hub>.onrender.com and calls it cross-origin (CORS).
+ */
+export const HUB_URL = (import.meta.env.VITE_HUB_URL ?? '').trim().replace(/\/+$/, '');
+
+/** `/api/...` → absolute URL on the HUB when it lives on another origin. */
+export function hubUrl(path: string): string {
+  return HUB_URL + path;
+}
+
 /** Fired on window when the HUB answers 401 to a request made with the current token. */
 export const UNAUTHORIZED_EVENT = 'bills:unauthorized';
 
@@ -81,7 +93,7 @@ export async function fetchJson<T>(path: string): Promise<T> {
   const token = authToken;
   let res: Response;
   try {
-    res = await fetch(path, { cache: 'no-store', headers: withAuth({}, token) });
+    res = await fetch(hubUrl(path), { cache: 'no-store', headers: withAuth({}, token) });
   } catch {
     throw new HubRequestError(0, 'OFFLINE', 'Нет связи с HUB');
   }
@@ -112,7 +124,7 @@ export async function command<T>(path: string, actor: string, body: object = {},
     if (attempt > 0) await sleep(500 * attempt);
     let res: Response;
     try {
-      res = await fetch(path, {
+      res = await fetch(hubUrl(path), {
         method,
         headers: withAuth(
           {
@@ -146,7 +158,7 @@ export async function command<T>(path: string, actor: string, body: object = {},
 export async function loginWithKey(body: LoginRequest): Promise<LoginResponse> {
   let res: Response;
   try {
-    res = await fetch('/api/auth/login', {
+    res = await fetch(hubUrl('/api/auth/login'), {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'idempotency-key': newKey() },
       body: JSON.stringify(body),
@@ -243,7 +255,7 @@ export interface UpsSimulatorPatch extends Partial<Omit<UpsSimulatorStatus, 'con
 async function devGet<T>(path: string): Promise<T | null> {
   let res: Response;
   try {
-    res = await fetch(path, { cache: 'no-store', headers: withAuth({}, authToken) });
+    res = await fetch(hubUrl(path), { cache: 'no-store', headers: withAuth({}, authToken) });
   } catch {
     throw new HubRequestError(0, 'OFFLINE', 'Нет связи с HUB');
   }
@@ -255,7 +267,7 @@ async function devGet<T>(path: string): Promise<T | null> {
 async function devPost<T>(path: string, patch: object): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(path, {
+    res = await fetch(hubUrl(path), {
       method: 'POST',
       headers: withAuth({ 'content-type': 'application/json' }, authToken),
       body: JSON.stringify(patch),

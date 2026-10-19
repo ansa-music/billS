@@ -1,6 +1,8 @@
+import type { OutgoingHttpHeaders } from 'node:http';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
-import { BillingError } from '@bills/domain';
+import { BillingError, DEMO_KEYS, originAllowed } from '@bills/domain';
+import type { DemoInfo } from '@bills/domain';
 import { HubError } from '../errors.ts';
 import type { Hub } from '../hub.ts';
 import type { ChangeEvent } from '../events.ts';
@@ -35,6 +37,10 @@ export interface AppOptions extends AuthHookOptions {
   version?: VersionInfo;
   /** Built hall screen (apps/web/dist) to serve on `/` with an SPA fallback; skipped when the folder is missing. */
   staticDir?: string;
+  /** Origin patterns (`https://*.web.app`) of screens on another domain; Bearer tokens only, no cookies. */
+  corsOrigins?: readonly string[];
+  /** Public demo club: GET /api/demo tells the screen to show the demo banner and keys. */
+  demo?: { resetAt: () => number };
 }
 
 export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
@@ -56,6 +62,24 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
     return reply.status(500).send({ error: { code: 'INTERNAL', message: 'Внутренняя ошибка HUB' } });
   });
 
+  // CORS for the public demo screen on Firebase Hosting. Registered before auth, so a
+  // preflight (no token) is answered here and never reaches the 401 check.
+  const corsOrigins = options.corsOrigins ?? [];
+  if (corsOrigins.length) {
+    app.addHook('onRequest', async (req, reply) => {
+      const origin = req.headers.origin;
+      if (!originAllowed(origin, corsOrigins)) return;
+      reply.header('access-control-allow-origin', origin);
+      reply.header('vary', 'Origin');
+      if (req.method === 'OPTIONS') {
+        reply.header('access-control-allow-methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        reply.header('access-control-allow-headers', 'authorization, content-type, idempotency-key, x-actor');
+        reply.header('access-control-max-age', '600');
+        return reply.status(204).send();
+      }
+    });
+  }
+
   // Resolves the Bearer token on every /api request; routes then check the role.
   registerAuth(app, hub, { trustActorHeader: options.trustActorHeader ?? false });
 
@@ -66,6 +90,11 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
     version: options.version ?? versionInfo(),
   };
   // Health for operators and monitoring (public); `now` stays the HUB clock, the rest is wall time.
+  const demo = options.demo;
+  if (demo) {
+    app.get('/api/demo', async (): Promise<DemoInfo> => ({ demo: true, keys: DEMO_KEYS, resetAt: demo.resetAt() }));
+  }
+
   app.get('/api/health', async () => ({
     ...collectHealth(healthCtx),
     now: hub.clock.now(),
@@ -276,6 +305,8 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
     reply.hijack();
     const res = reply.raw;
     res.writeHead(200, {
+      // Hijacked: headers set by hooks (CORS) are not sent by Fastify, pass them on by hand.
+      ...(reply.getHeaders() as OutgoingHttpHeaders),
       'content-type': 'text/event-stream; charset=utf-8',
       'cache-control': 'no-cache',
       connection: 'keep-alive',

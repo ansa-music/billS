@@ -90,6 +90,7 @@ apps/cloud-web    кабинет владельца сети (React + Vite): в�
 scripts/local.mjs своя копия клуба (HUB + экраны) на отдельных портах и с отдельной базой
 deploy/           установка HUB в клубе: Linux (systemd, бэкапы, обновления с откатом), Windows, удалённая поддержка
 docs/             регламенты: эксплуатация для управляющего (OPERATIONS_RU), инфраструктура (INFRASTRUCTURE_RU),
+                  публичный доступ бесплатно — Firebase + Render + Supabase (PUBLIC_DEPLOY_RU),
                   монтаж оборудования для электрика (INSTALL_HARDWARE_RU: щиток, реле, датчики, ключ ручного режима),
                   тестовый стенд ESP32 + реле + датчик тока + лампы 220 В (HARDWARE_TEST_BENCH_RU), фискализация (FISCAL_RU),
                   план приложений TS: браузер/PWA, приложение для ПК кассы и мини-ПК, мобильное приложение владельца (APP_PLAN_RU)
@@ -364,6 +365,22 @@ npm run start:hub
 **Проверка для разработчика.** `npm run build`, затем конфигурация `pwa-check` (`node scripts/local.mjs --hub-port=4800 --db=pwa-check --dist`): HUB отдаёт собранный `dist` на `http://localhost:4800/` (localhost браузер считает безопасным, флаг не нужен). В консоли браузера `navigator.serviceWorker.getRegistrations()` должен вернуть одну регистрацию, вкладка Application → Manifest в DevTools — манифест с иконками. Установку можно проверить без установки: вызвать в консоли событие `beforeinstallprompt` — появится плашка (скриншот: [docs/img/pwa-install-banner.jpg](docs/img/pwa-install-banner.jpg)); обновление — изменить `apps/web/dist/sw.js` и вызвать `(await navigator.serviceWorker.getRegistration()).update()` → плашка «Доступна новая версия», «Обновить» перезагружает экран с сохранённым входом. `npm run audit:pwa` прогоняет Lighthouse через `npx @lhci/cli` (нужен установленный Chrome; пакет в зависимости репозитория не добавлен, скачивается при запуске) по `http://localhost:4800/`, отчёт в `.lighthouseci/`; отдельной категории «PWA» в Lighthouse 12+ больше нет — установимость смотрят в DevTools → Application → Manifest. В dev-режиме (`npm run dev:web`) service worker не регистрируется, установка проверяется только на собранном `dist`.
 
 Иконки «TS» (`apps/web/public/icons/`) рисует `npm run icons` (`scripts/icons.mjs`, чистый JS, без сети и зависимостей); манифест — `apps/web/public/manifest.webmanifest`; service worker собирает `vite-plugin-pwa` (`apps/web/vite.config.ts`); плашки установки и обновления — `apps/web/src/pwa.tsx`. HUB отдаёт `manifest.webmanifest` с типом `application/manifest+json`, а `sw.js`, `index.html` и иконки — с `Cache-Control: no-cache` (тест `apps/hub/test/static.test.ts`).
+
+## Публичный доступ
+
+Бесплатно, по схеме прошлого проекта (nova-crm): сайты на **Firebase Hosting**, серверы на **Render**, база облака на **Supabase Postgres**. Пошаговая инструкция для того, кто делает это впервые, — [docs/PUBLIC_DEPLOY_RU.md](docs/PUBLIC_DEPLOY_RU.md).
+
+| Что | Где | Файлы |
+|---|---|---|
+| Кабинет владельца (PWA «TS», ставится на телефон) | Firebase Hosting, `https://<проект>.web.app` | `apps/cloud-web`, `firebase.json` (цель `cabinet`) |
+| Демо экрана клуба: плашка «Демо — данные сбрасываются каждую ночь», демо-ключи на входе | Firebase Hosting, `https://<проект>-demo.web.app` | `apps/web`, `firebase.json` (цель `demo`), `apps/web/src/demo.tsx` |
+| Облако (API кабинета, синхронизация клубов) | Render free, `ts-cloud` | `render.yaml`, `apps/cloud` |
+| Демо-HUB: симулятор ламп и ИБП, ключи `OWNER-2222-2222-2222-2222` и др., сброс в 04:00 | Render free, `ts-demo-hub` | `render.yaml`, `apps/hub/src/demo.ts` |
+
+- **Выкладка сама:** пуш в `main` → GitHub Actions (`.github/workflows/deploy.yml`): typecheck, тесты, сборка с `VITE_CLOUD_URL`/`VITE_HUB_URL`, `firebase deploy` (секрет `FIREBASE_SERVICE_ACCOUNT_TS`); для PR — preview-канал со ссылкой в PR. Render деплоит сам по `render.yaml`. `keepalive.yml` раз в 3 дня трогает базу, чтобы бесплатный Supabase не уснул.
+- **Имя проекта Firebase** меняется одной строкой — `"default"` в `.firebaserc`; цели сайтов заполняет `scripts/firebase-targets.mjs`.
+- **Через домены** экраны ходят с Bearer-токеном, cookie не нужны (Safari блокирует сторонние): облако пускает `*.web.app` и `*.firebaseapp.com` (`CLOUD_CORS_ORIGINS`), HUB — только если задан `HUB_CORS_ORIGINS`. Без `VITE_*_URL` фронтенды, как раньше, ходят на свой домен.
+- **Ограничения:** Render засыпает через 15 минут без запросов, первый запрос ждёт около минуты; Supabase ставит базу на паузу после 7 дней тишины. Серверы вне Казахстана — это **только для демо** и кабинета без персональных данных; пилот с реальными гостями хранит данные в клубе (бесплатный режим `docs/FREE_SETUP_RU.md`) до переезда облака на KZ-хостинг.
 
 ---
 

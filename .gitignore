@@ -9,3 +9,4 @@ apps/cloud/data/
 *.db-wal
 *.db-shm
 .lighthouseci/
+.firebase/

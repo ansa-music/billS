@@ -15,14 +15,26 @@ async function openDatabase(): Promise<{ db: SqlDriver; kind: string }> {
     // BIGINT (int8) and NUMERIC come back as strings by default; the cloud keeps everything in Number range.
     pg.types.setTypeParser(20, Number);
     pg.types.setTypeParser(1700, Number);
-    const pool = new pg.Pool({ connectionString: config.databaseUrl });
+    // Supabase and other hosted PostgreSQL need TLS; their certificate chain is not in Node's store,
+    // so the channel is encrypted without verifying the CA (leave `sslmode` out of the URL — it overrides this).
+    const pool = new pg.Pool({
+      connectionString: config.databaseUrl,
+      ...(config.databaseSsl ? { ssl: { rejectUnauthorized: false } } : {}),
+      max: 5,
+    });
     return { db: createPostgresDriver(pool), kind: 'postgres' };
   }
   return { db: openSqlite(config.dbPath), kind: `sqlite ${config.dbPath}` };
 }
 
 const { db, kind } = await openDatabase();
-const app = buildApp({ db, clock: systemClock, logger: true, secureCookies: config.secureCookies });
+const app = buildApp({
+  db,
+  clock: systemClock,
+  logger: true,
+  secureCookies: config.secureCookies,
+  corsOrigins: config.corsOrigins,
+});
 
 const applied = await migrate(db, Date.now());
 if (applied.length) app.log.info({ applied }, 'Миграции применены');

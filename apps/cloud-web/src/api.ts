@@ -20,6 +20,40 @@ export class CloudRequestError extends Error {
   }
 }
 
+/**
+ * Where the cloud API is. Empty: the same origin (Vite proxy in development, nginx in a club
+ * or on a KZ server). The public cabinet on Firebase Hosting is built with
+ * VITE_CLOUD_URL=https://<service>.onrender.com and calls it cross-origin.
+ */
+export const CLOUD_URL = (import.meta.env.VITE_CLOUD_URL ?? '').trim().replace(/\/+$/, '');
+
+/**
+ * Cross-origin the session cookie would be a third-party cookie (blocked by Safari), so the
+ * cabinet keeps the token from the login reply (X-Owner-Token) and sends it as Bearer.
+ */
+const TOKEN_KEY = 'ts.cloud.token';
+
+function readToken(): string | null {
+  if (!CLOUD_URL) return null;
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeToken(token: string | null): void {
+  memoryToken = token;
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // Private mode: the session lasts until the tab is closed.
+  }
+}
+
+let memoryToken: string | null = readToken();
+
 /** Connectivity and auth signals from every request, so the shell can show a banner or the login form. */
 export type ApiSignal = { type: 'online'; online: boolean } | { type: 'unauthorized' };
 
@@ -49,7 +83,9 @@ async function toError(res: Response): Promise<CloudRequestError> {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(path, { credentials: 'same-origin', cache: 'no-store', ...init });
+    const headers = new Headers(init.headers);
+    if (CLOUD_URL && memoryToken) headers.set('authorization', `Bearer ${memoryToken}`);
+    res = await fetch(CLOUD_URL + path, { credentials: 'same-origin', cache: 'no-store', ...init, headers });
   } catch {
     emit({ type: 'online', online: false });
     throw new CloudRequestError(0, 'OFFLINE', 'Нет связи с облаком');
@@ -60,7 +96,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new CloudRequestError(res.status, 'OFFLINE', 'Нет связи с облаком');
   }
   emit({ type: 'online', online: true });
+  if (CLOUD_URL) {
+    const issued = res.headers.get('x-owner-token');
+    if (issued) writeToken(issued);
+  }
   if (res.status === 401) {
+    if (CLOUD_URL && path !== '/api/auth/login') writeToken(null);
     emit({ type: 'unauthorized' });
     throw await toError(res);
   }
@@ -79,7 +120,11 @@ export function login(email: string, password: string): Promise<OwnerView> {
 }
 
 export async function logout(): Promise<void> {
-  await request<unknown>('/api/auth/logout', { method: 'POST' });
+  try {
+    await request<unknown>('/api/auth/logout', { method: 'POST' });
+  } finally {
+    writeToken(null);
+  }
 }
 
 export function fetchMe(): Promise<OwnerView> {

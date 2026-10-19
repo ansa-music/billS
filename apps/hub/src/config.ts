@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { parseOrigins } from '@bills/domain';
 
 export type LampDriverKind = 'simulator' | 'esp32-http' | 'modbus-tcp';
 export const LAMP_DRIVERS: readonly LampDriverKind[] = ['simulator', 'esp32-http', 'modbus-tcp'];
@@ -48,6 +49,15 @@ export interface HubConfig {
   hubId: string;
   /** How often the outbox is pushed to the cloud (also the heartbeat period). */
   cloudSyncIntervalMs: number;
+  /**
+   * Origins of screens served from another domain (the public demo on Firebase Hosting),
+   * e.g. `https://*.web.app`. Empty: no CORS — the club's own screens come from the HUB itself.
+   */
+  corsOrigins: string[];
+  /** Public demo club: fixed demo keys, GET /api/demo, the database is wiped nightly (src/demo.ts). */
+  demo: boolean;
+  /** Next demo reset, epoch ms; set by src/demo.ts for the child HUB. */
+  demoResetAt: number | null;
 }
 
 function int(value: string | undefined, fallback: number, name: string): number {
@@ -72,7 +82,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
   const cloudUrl = env.CLOUD_URL?.trim();
   return {
     host: env.HUB_HOST ?? '127.0.0.1',
-    port: int(env.HUB_PORT, 4310, 'HUB_PORT'),
+    // PORT is set by Render and similar hosts.
+    port: int(env.HUB_PORT ?? env.PORT, 4310, 'HUB_PORT'),
     dbPath: env.HUB_DB_PATH ?? fileURLToPath(new URL('../data/hub.db', import.meta.url)),
     demoTimezone: env.HUB_DEMO_TZ ?? 'Asia/Almaty',
     simulatorLatencyMs: int(env.HUB_SIM_LATENCY_MS, 300, 'HUB_SIM_LATENCY_MS'),
@@ -102,5 +113,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
     cloudApiKey: env.CLOUD_API_KEY ?? '',
     hubId: env.HUB_ID ?? '',
     cloudSyncIntervalMs: int(env.CLOUD_SYNC_INTERVAL_MS, 10_000, 'CLOUD_SYNC_INTERVAL_MS'),
+    corsOrigins: parseOrigins(env.HUB_CORS_ORIGINS),
+    demo: flag(env.HUB_DEMO, false),
+    demoResetAt: env.HUB_DEMO_RESET_AT ? int(env.HUB_DEMO_RESET_AT, 0, 'HUB_DEMO_RESET_AT') : null,
   };
 }

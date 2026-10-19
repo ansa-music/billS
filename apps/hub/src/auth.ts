@@ -282,8 +282,32 @@ export class AuthService {
     });
   }
 
-  #insertKey(staff: StaffRow, label: string | null, expiresAt: number | null, createdBy: string, now: number) {
-    const key = generateAccessKey(staff.role);
+  /**
+   * Public demo (HUB_DEMO=1): gives the first active employee of each role the
+   * fixed key from the list, unless that key already exists. Returns what was issued.
+   */
+  issueFixedKeys(keys: ReadonlyArray<{ role: Role; key: string }>): Array<{ name: string; role: Role; key: string }> {
+    const db = this.deps.db;
+    const now = this.deps.clock.now();
+    return transaction(db, () => {
+      const issued: Array<{ name: string; role: Role; key: string }> = [];
+      for (const { role, key } of keys) {
+        if (one(db, 'SELECT id FROM access_keys WHERE key_hash = ?', sha256(key))) continue;
+        const staff = one<StaffRow>(
+          db,
+          `SELECT id, club_id, name, role, is_active FROM staff WHERE role = ? AND is_active = 1 ORDER BY created_at, name LIMIT 1`,
+          role,
+        );
+        if (!staff) continue;
+        this.#insertKey(staff, 'демо-ключ', null, SYSTEM, now, key);
+        issued.push({ name: staff.name, role, key });
+      }
+      return issued;
+    });
+  }
+
+  #insertKey(staff: StaffRow, label: string | null, expiresAt: number | null, createdBy: string, now: number, fixedKey?: string) {
+    const key = fixedKey ?? generateAccessKey(staff.role);
     const row: KeyRow = {
       id: randomUUID(),
       club_id: staff.club_id,

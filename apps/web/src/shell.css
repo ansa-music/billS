@@ -633,3 +633,29 @@
     animation: none;
   }
 }
+
+/* Public demo (demo.tsx): a green strip (placed like .pwa-banner) and the demo keys on the login page. */
+.demo-banner {
+  border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+  background: color-mix(in oklab, var(--accent) 12%, var(--surface));
+}
+
+.demo-keys-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.demo-key {
+  width: 100%;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+}
+
+.demo-key-role {
+  font-weight: 600;
+}

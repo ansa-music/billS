@@ -71,6 +71,10 @@ node --env-file-if-exists=.env apps/cloud/src/main.ts    # или: npm run dev -
 | `CLOUD_DATABASE_URL` | — | строка подключения PostgreSQL; если задана, SQLite не используется |
 | `CLOUD_DEMO_SEED` | `1` для SQLite, `0` для PostgreSQL | демо-сид на пустой базе |
 | `CLOUD_SECURE_COOKIES` | `0` | ставить флаг `Secure` на cookie владельца (только за HTTPS) |
+| `DATABASE_URL` | — | то же, что `CLOUD_DATABASE_URL` (так её называют Render и Supabase) |
+| `CLOUD_DATABASE_SSL` | `1` для не-локальной базы | TLS к PostgreSQL без проверки CA (Supabase); `0` — выключить |
+| `CLOUD_CORS_ORIGINS` | `https://*.web.app,https://*.firebaseapp.com` | кабинеты на других доменах; вход отдаёт токен в `X-Owner-Token`, дальше `Authorization: Bearer` (cookie через домены не ходят) |
+| `PORT` | — | порт от хостинга (Render), если `CLOUD_PORT` не задан |
 
 Демо-сид создаёт компанию «Демо сеть», владельца `owner@demo.kz` / `demo1234`, клубы
 «Клуб «Демо»» и «Клуб «Север»» (Asia/Almaty) и по одному HUB с фиксированными ключами —
@@ -84,10 +88,22 @@ node --env-file-if-exists=.env apps/cloud/src/main.ts    # или: npm run dev -
 - **SQLite** (разработка, один клуб-два клуба): файл `CLOUD_DB_PATH`, WAL, внешние ключи
   включены. Так работает всё, что покрыто тестами.
 - **PostgreSQL** (продакшен): `CLOUD_DATABASE_URL=postgres://user:pass@host:5432/bills`.
-  Драйвер покрыт тестами на fake-клиенте (перевод плейсхолдеров, BEGIN/COMMIT/ROLLBACK,
-  миграции без запрещённых конструкций). **На живой базе PostgreSQL режим не проверялся** —
-  перед вводом в эксплуатацию прогоните миграции и тестовую синхронизацию с HUB на стенде.
-  `BIGINT`/`NUMERIC` приходят из `pg` строками; `main.ts` настраивает парсер типов в `Number`.
+  Диалект проверен на настоящем PostgreSQL: тесты гоняют драйвер через
+  [PGlite](https://pglite.dev) — PostgreSQL 18 (парсер, планировщик, типы, `ON CONFLICT`,
+  транзакции), собранный в WASM и запущенный в процессе, без сервера. Адаптер
+  `test/pglite.ts` отдаёт PGlite как `pg.Pool` (одно соединение под мьютексом).
+  - `test/pg-dialect.test.ts` всегда идёт на PGlite: миграции и сид (повторный запуск ничего
+    не меняет), один и тот же поток HUB + кабинет владельца (смена, оплаты, скидки, возврат,
+    предоплата, пауза, отключение питания, тревоги, Z-отчёт, снапшот, настройки, тарифы)
+    на SQLite и на PostgreSQL — все HTTP-ответы совпадают; параллельные пачки двух HUB.
+  - Весь набор тестов на PostgreSQL: `CLOUD_TEST_DB=pglite npm test -w @bills/cloud`
+    (по умолчанию тесты идут на SQLite).
+
+  Чего PGlite не покрывает: сетевой `pg.Pool` с несколькими соединениями (настоящая
+  конкуренция транзакций), SSL, права пользователя БД. Перед вводом в эксплуатацию всё равно
+  прогоните миграции и тестовую синхронизацию с HUB на стенде с живой базой.
+  `BIGINT`/`NUMERIC` приходят из `pg` строками; `main.ts` настраивает парсер типов в `Number`
+  (адаптер PGlite делает то же).
 
 ## HTTP
 
@@ -112,7 +128,7 @@ HUB (`Authorization: Bearer <ключ>`; `hubId` в теле должен сов
 | `GET /api/owner/clubs/:id` | `ClubDetails` |
 | `GET /api/owner/clubs/:id/sessions?day=YYYY-MM-DD` | `CloudSessionView[]` (по умолчанию — сегодня клуба) |
 | `PUT /api/owner/clubs/:id/tariffs` | `UpdateTariffsRequest` → `UpdateTariffsResponse`; 400 `TARIFF_INVALID` |
-| `GET /api/health` | `{ ok: true, now }` |
+| `GET /api/health` | `{ ok: true, now }`; с `?db=1` ещё читает таблицу (`companies`) — keep-alive для бесплатного Supabase |
 
 Типы — в `packages/domain/src/cloud.ts`.
 

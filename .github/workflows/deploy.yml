@@ -1,0 +1,84 @@
+name: Deploy TS to Firebase Hosting
+
+# Push to main: tests, build, deploy of both sites (owner's cabinet and the public demo
+# of the club screen). Pull request: the same build to a preview channel, link in the PR.
+# The servers (cloud, demo HUB) are deployed by Render itself from render.yaml.
+#
+# One-time setup (docs/PUBLIC_DEPLOY_RU.md):
+#   secret   FIREBASE_SERVICE_ACCOUNT_TS — JSON key of the Firebase service account
+#   variable TS_CLOUD_URL     — https://<ts-cloud>.onrender.com (default below)
+#   variable TS_DEMO_HUB_URL  — https://<ts-demo-hub>.onrender.com (default below)
+#   variables FIREBASE_CABINET_SITE / FIREBASE_DEMO_SITE — only if the site names differ
+#   from <project> and <project>-demo (project = "default" in .firebaserc)
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      FIREBASE_SERVICE_ACCOUNT_TS: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TS }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        env:
+          VITE_CLOUD_URL: ${{ vars.TS_CLOUD_URL || 'https://ts-cloud.onrender.com' }}
+          VITE_HUB_URL: ${{ vars.TS_DEMO_HUB_URL || 'https://ts-demo-hub.onrender.com' }}
+          VITE_DEMO: "1"
+        run: npm run build
+
+      - name: Firebase Hosting targets
+        env:
+          FIREBASE_CABINET_SITE: ${{ vars.FIREBASE_CABINET_SITE }}
+          FIREBASE_DEMO_SITE: ${{ vars.FIREBASE_DEMO_SITE }}
+        run: node scripts/firebase-targets.mjs
+
+      - name: Deploy (live)
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && env.FIREBASE_SERVICE_ACCOUNT_TS != ''
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TS }}
+          channelId: live
+
+      # Preview channels expire after 7 days; PRs from forks have no secrets and are skipped.
+      - name: Deploy (preview channel)
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && env.FIREBASE_SERVICE_ACCOUNT_TS != ''
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TS }}
+          expires: 7d
+
+      - name: No Firebase secret
+        if: env.FIREBASE_SERVICE_ACCOUNT_TS == ''
+        run: echo "::notice::Секрета FIREBASE_SERVICE_ACCOUNT_TS нет — сборка проверена, выкладка пропущена (docs/PUBLIC_DEPLOY_RU.md)."

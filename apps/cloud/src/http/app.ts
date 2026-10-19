@@ -7,6 +7,7 @@ import type {
   SyncSnapshotRequest,
   UpdateTariffsRequest,
 } from '@bills/domain';
+import { originAllowed } from '@bills/domain';
 import {
   authenticateOwner,
   createSession,
@@ -33,7 +34,16 @@ export interface AppDeps {
   logger?: boolean;
   /** Mark the owner cookie `Secure`; only behind HTTPS. */
   secureCookies?: boolean;
+  /**
+   * Origins (patterns such as `https://*.web.app`) of cabinets served from another domain.
+   * They sign in with the token from the `X-Owner-Token` header of the login reply and send it
+   * as `Authorization: Bearer`; cookies are never allowed cross-origin.
+   */
+  corsOrigins?: readonly string[];
 }
+
+/** Header of the login reply carrying the session token for cabinets on another domain. */
+export const OWNER_TOKEN_HEADER = 'x-owner-token';
 
 const MAX_BATCH = 1000;
 
@@ -119,6 +129,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return reply.status(500).send({ error: { code: 'INTERNAL', message: 'Внутренняя ошибка облака' } });
   });
 
+  // CORS for the cabinet on Firebase Hosting; a preflight is answered here, before routing.
+  const corsOrigins = deps.corsOrigins ?? [];
+  if (corsOrigins.length) {
+    app.addHook('onRequest', async (req, reply) => {
+      const origin = req.headers.origin;
+      if (!originAllowed(origin, corsOrigins)) return;
+      reply.header('access-control-allow-origin', origin);
+      reply.header('vary', 'Origin');
+      reply.header('access-control-expose-headers', OWNER_TOKEN_HEADER);
+      if (req.method === 'OPTIONS') {
+        reply.header('access-control-allow-methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        reply.header('access-control-allow-headers', 'authorization, content-type, idempotency-key');
+        reply.header('access-control-max-age', '600');
+        return reply.status(204).send();
+      }
+    });
+  }
+
   app.setNotFoundHandler((_req, reply) =>
     reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'Такого адреса нет' } }),
   );
@@ -137,7 +165,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return hub;
   }
 
+  /** The cabinet on this domain sends the cookie; one on another domain sends the token as Bearer. */
   function ownerToken(req: FastifyRequest): string | null {
+    const header = req.headers.authorization;
+    if (typeof header === 'string' && header.startsWith('Bearer ')) return header.slice('Bearer '.length).trim() || null;
     return parseCookies(req.headers.cookie)[OWNER_COOKIE] ?? null;
   }
 
@@ -166,7 +197,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   // --- health ---------------------------------------------------------------
 
-  app.get('/api/health', async () => ({ ok: true, now: clock.now() }));
+  // `?db=1` also reads a table: the keep-alive job (.github/workflows/keepalive.yml) uses it so a
+  // free Supabase database sees activity and is not paused.
+  app.get<{ Querystring: { db?: string } }>('/api/health', async (req) => {
+    if (req.query.db === '1') {
+      const rows = await db.all<{ n: number }>('SELECT COUNT(*) AS n FROM companies');
+      return { ok: true, now: clock.now(), companies: Number(rows[0]?.n ?? 0) };
+    }
+    return { ok: true, now: clock.now() };
+  });
 
   // --- HUB sync -------------------------------------------------------------
 
@@ -207,6 +246,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (!owner) throw new CloudError(401, 'INVALID_CREDENTIALS', 'Неверная почта или пароль');
     const token = await createSession(db, owner.id, clock.now());
     setOwnerCookie(reply, token);
+    reply.header(OWNER_TOKEN_HEADER, token);
     return owner;
   });
 

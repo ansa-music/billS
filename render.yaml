@@ -1,0 +1,80 @@
+# Render Blueprint: the TS servers on the free plan (https://render.com → New → Blueprint → this repo).
+# Render redeploys both services by itself on every push to main. See docs/PUBLIC_DEPLOY_RU.md.
+#
+# Free plan: a service sleeps after 15 minutes without requests, the first request then waits
+# about a minute; the disk is wiped on every restart and deploy (the cloud keeps its data in
+# Supabase, the demo HUB starts from a fresh demo club anyway).
+services:
+  # Cloud: HUB sync, owner's cabinet API. Database — Supabase Postgres (DATABASE_URL).
+  - type: web
+    name: ts-cloud
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: main
+    autoDeploy: true
+    buildCommand: npm ci --omit=dev --no-audit --no-fund
+    startCommand: node apps/cloud/src/main.ts
+    healthCheckPath: /api/health
+    buildFilter:
+      paths:
+        - apps/cloud/**
+        - packages/domain/**
+        - package.json
+        - package-lock.json
+        - render.yaml
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: CLOUD_HOST
+        value: 0.0.0.0
+      # Supabase → Connect → Session pooler (port 5432, IPv4). Asked for when the Blueprint is created.
+      - key: DATABASE_URL
+        sync: false
+      # Owner cookie only over HTTPS (Render serves HTTPS).
+      - key: CLOUD_SECURE_COOKIES
+        value: "1"
+      # Demo company and owner owner@demo.kz / demo1234 on an empty database. Set "0" before real data.
+      - key: CLOUD_DEMO_SEED
+        value: "1"
+      # Cabinets on Firebase Hosting (Bearer token, no cookies cross-origin). This is also the default.
+      - key: CLOUD_CORS_ORIGINS
+        value: https://*.web.app,https://*.firebaseapp.com
+
+  # Public demo of the club screen: a HUB with simulated lamps and UPS, simple demo keys,
+  # the database wiped every night at 04:00 Almaty time (apps/hub/src/demo.ts).
+  - type: web
+    name: ts-demo-hub
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: main
+    autoDeploy: true
+    buildCommand: npm ci --omit=dev --no-audit --no-fund
+    startCommand: node apps/hub/src/demo.ts
+    healthCheckPath: /api/health
+    buildFilter:
+      paths:
+        - apps/hub/**
+        - packages/domain/**
+        - package.json
+        - package-lock.json
+        - render.yaml
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: HUB_HOST
+        value: 0.0.0.0
+      - key: HUB_DEMO
+        value: "1"
+      - key: HUB_DEMO_TZ
+        value: Asia/Almaty
+      - key: HUB_DEMO_RESET_HOUR
+        value: "4"
+      - key: HUB_LAMP_DRIVER
+        value: simulator
+      - key: HUB_UPS
+        value: simulator
+      # The demo screen on Firebase Hosting calls this HUB from another domain.
+      - key: HUB_CORS_ORIGINS
+        value: https://*.web.app,https://*.firebaseapp.com
