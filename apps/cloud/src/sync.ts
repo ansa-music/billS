@@ -65,7 +65,7 @@ export async function acceptEvents(
   return db.transaction(async (tx) => {
     const club = await clubOfHub(tx, hub);
     const settings = await loadSettings(tx, club);
-    const ctx = { clubId: club.id, timezone: club.timezone, tariffNames: tariffNames(settings) };
+    const ctx = { hubId: hub.id, clubId: club.id, timezone: club.timezone, tariffNames: tariffNames(settings) };
 
     let inserted = 0;
     for (const event of [...req.events].sort((a, b) => a.id - b.id)) {

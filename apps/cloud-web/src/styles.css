@@ -527,6 +527,59 @@ a:focus-visible {
   font-size: 30px;
 }
 
+.stat-refund {
+  color: var(--danger);
+}
+
+.stat .stat-split {
+  font-size: 13px;
+  margin: 2px 0;
+}
+
+.stat[data-compact] .stat-split {
+  font-size: 12px;
+}
+
+/* Money by payment method: «нал 12 000 ₸ · карта 8 000 ₸ · QR 1 500 ₸» */
+
+.split {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.split-label {
+  color: var(--muted);
+  font-size: 0.86em;
+}
+
+.split-item[data-method='total'] {
+  font-weight: 650;
+}
+
+/* Z report difference */
+
+.diff {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.diff[data-diff='ok'] {
+  color: var(--accent);
+}
+
+.diff[data-diff='surplus'],
+.diff[data-diff='shortage'] {
+  color: var(--danger);
+  font-weight: 650;
+}
+
+.refund {
+  color: var(--danger);
+}
+
 /* Club cards (overview) */
 
 .clubs {
@@ -588,6 +641,49 @@ a:focus-visible {
 .club-foot [data-alert] {
   color: var(--danger);
   font-weight: 600;
+}
+
+/* Shift status on the club card */
+
+.shift-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.shift-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+
+.shift-status[data-open] .shift-dot {
+  background: var(--lamp);
+  box-shadow: 0 0 8px 1px color-mix(in oklab, var(--lamp) 50%, transparent);
+}
+
+.shift-status[data-open] {
+  border-color: color-mix(in oklab, var(--lamp) 40%, var(--border));
+}
+
+.tag-live {
+  background: color-mix(in oklab, var(--lamp) 18%, var(--surface));
+  color: var(--lamp);
+  border: 1px solid color-mix(in oklab, var(--lamp) 50%, transparent);
+}
+
+.panel-aside {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
 
 /* HUB status */
@@ -729,6 +825,51 @@ a:focus-visible {
   fill: var(--danger);
 }
 
+.chart-line {
+  stroke: var(--lamp);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.chart-mark {
+  fill: var(--lamp);
+  pointer-events: none;
+}
+
+.legend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-item::before {
+  content: '';
+  flex: none;
+  width: 12px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--felt);
+}
+
+.legend-item[data-kind='line']::before {
+  height: 2px;
+  background: var(--lamp);
+}
+
+.legend-item[data-kind='dot']::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
 .chart-label,
 .chart-max {
   font-size: 11px;
@@ -814,6 +955,73 @@ a:focus-visible {
   white-space: nowrap;
 }
 
+.grid-wrap {
+  overflow-x: auto;
+  margin: 0 -18px;
+  padding: 0 18px;
+}
+
+.cell-stack {
+  display: inline-grid;
+  gap: 1px;
+  justify-items: start;
+  text-align: left;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.grid .num .cell-stack {
+  justify-items: end;
+  text-align: right;
+}
+
+.cell-sub {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.grid .note {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.grid tfoot .total-row td {
+  border-top: 2px solid var(--border);
+  font-weight: 650;
+  background: var(--surface-2);
+}
+
+.shifts-grid {
+  font-size: 13px;
+}
+
+.shifts-grid th,
+.shifts-grid td {
+  padding: 7px 8px;
+}
+
+.shifts-grid .note {
+  max-width: 160px;
+}
+
+.shifts-grid tr[data-open] td {
+  background: color-mix(in oklab, var(--lamp) 7%, transparent);
+}
+
+.shifts-grid tr[data-mismatch] td:first-child {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
+.grid tr[data-ongoing] td {
+  background: color-mix(in oklab, var(--danger) 8%, transparent);
+}
+
 .meter {
   display: inline-block;
   width: 64px;
@@ -849,6 +1057,12 @@ a:focus-visible {
 
 .status-chip[data-status='AWAITING_PAYMENT'] {
   color: var(--warn);
+}
+
+.status-chip[data-status='PAUSED'] {
+  color: var(--lamp);
+  border-style: dashed;
+  border-color: color-mix(in oklab, var(--lamp) 60%, transparent);
 }
 
 .status-chip[data-status='CLOSED'] {

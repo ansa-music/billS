@@ -98,13 +98,24 @@ test('a failing transaction rolls back and still releases the client', async () 
   assert.equal(f.clients(), 0);
 });
 
-test('migrations are portable SQL and migrate() applies every CREATE through the fake client', async () => {
-  const forbidden = /\b(AUTOINCREMENT|SERIAL|PRAGMA|WITHOUT ROWID|ILIKE|datetime\(|now\()|::/i;
+test('migrations are portable SQL and migrate() applies every statement through the fake client', async () => {
+  const forbidden = /\b(AUTOINCREMENT|SERIAL|PRAGMA|WITHOUT ROWID|ILIKE|datetime\(|now\(|IF EXISTS|RENAME COLUMN|DROP COLUMN)|::/i;
+  // Statement shapes both engines run unchanged.
+  const allowed = /^(CREATE (TABLE|INDEX|UNIQUE INDEX) IF NOT EXISTS |ALTER TABLE \w+ (ADD COLUMN \w+ (BIGINT|INTEGER|TEXT)( NOT NULL DEFAULT \d+)?|RENAME TO \w+)$|INSERT INTO \w+ \(|DROP TABLE \w+$)/;
   const migrations = listMigrations();
-  assert.ok(migrations.length >= 1);
+  assert.deepEqual(migrations.map((m) => [m.version, m.file]), [[1, '001_init.sql'], [2, '002_money.sql']]);
   for (const m of migrations) {
     assert.doesNotMatch(m.sql, forbidden, m.file);
-    for (const s of splitStatements(m.sql)) assert.match(s, /^CREATE (TABLE|INDEX|UNIQUE INDEX) IF NOT EXISTS /, `${m.file}: ${s.slice(0, 40)}`);
+    for (const s of splitStatements(m.sql)) assert.match(s, allowed, `${m.file}: ${s.slice(0, 60)}`);
+  }
+  // 002 rebuilds sessions for the PAUSED status and recreates its indexes under the same names.
+  const money = migrations[1]!.sql;
+  assert.match(money, /CREATE TABLE IF NOT EXISTS sessions_v2 \([\s\S]*'PAUSED'/);
+  assert.match(money, /INSERT INTO sessions_v2 \([\s\S]*FROM sessions;/);
+  assert.match(money, /DROP TABLE sessions;/);
+  assert.match(money, /ALTER TABLE sessions_v2 RENAME TO sessions;/);
+  for (const ix of ['ix_sessions_club_requested', 'ix_sessions_club_stopped', 'ix_sessions_live']) {
+    assert.match(money, new RegExp(`CREATE INDEX IF NOT EXISTS ${ix} ON sessions`));
   }
 
   const f = fakePool();
@@ -115,15 +126,23 @@ test('migrations are portable SQL and migrate() applies every CREATE through the
   const texts = f.log.map((r) => r.text);
   assert.equal(texts[0], 'CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at BIGINT NOT NULL)');
   assert.equal(texts[1], 'SELECT version FROM schema_migrations');
-  const creates = f.log.filter((r) => r.via === 'client' && r.text.startsWith('CREATE'));
+  const statements = f.log.filter((r) => r.via === 'client' && /^(CREATE|ALTER|INSERT INTO sessions_v2|DROP)/.test(r.text));
   const expected = migrations.flatMap((m) => splitStatements(m.sql));
-  assert.equal(creates.length, expected.length);
-  for (const table of ['companies', 'clubs', 'owners', 'owner_sessions', 'hubs', 'club_settings', 'events', 'sessions', 'alerts', 'daily_stats']) {
-    assert.ok(creates.some((r) => r.text.startsWith(`CREATE TABLE IF NOT EXISTS ${table} (`)), table);
+  assert.deepEqual(statements.map((r) => r.text), expected);
+  const tables = ['companies', 'clubs', 'owners', 'owner_sessions', 'hubs', 'club_settings', 'events', 'sessions', 'alerts', 'daily_stats',
+    'sessions_v2', 'checks', 'payments', 'shifts', 'cash_movements', 'power_outages'];
+  for (const table of tables) {
+    assert.ok(statements.some((r) => r.text.startsWith(`CREATE TABLE IF NOT EXISTS ${table} (`)), table);
+  }
+  const counters = new Set(['checks_paid', 'cancelled_games', 'power_outages']);
+  for (const column of ['paid_total', 'paid_cash', 'paid_card', 'paid_qr', 'refunded', 'checks_paid', 'discounts', 'cancelled_games', 'power_outages']) {
+    const type = counters.has(column) ? 'INTEGER' : 'BIGINT';
+    assert.ok(statements.some((r) => r.text === `ALTER TABLE daily_stats ADD COLUMN ${column} ${type} NOT NULL DEFAULT 0`), column);
   }
   const inserts = f.log.filter((r) => r.text.startsWith('INSERT INTO schema_migrations'));
   assert.equal(inserts.length, migrations.length);
   assert.deepEqual(inserts[0]?.values, [1, '001_init.sql', 123]);
+  assert.deepEqual(inserts[1]?.values, [2, '002_money.sql', 123]);
   assert.equal(texts.filter((x) => x === 'BEGIN').length, migrations.length);
   assert.equal(texts.filter((x) => x === 'COMMIT').length, migrations.length);
   assert.equal(f.clients(), 0);
