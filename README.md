@@ -90,9 +90,10 @@ apps/cloud-web    кабинет владельца сети (React + Vite): в�
 apps/desktop      приложение TS для ПК кассы и мини-ПК (Tauri 2, Rust): окно с интерфейсом HUB, киоск, тихая печать чеков,
                   автозапуск, установка HUB службой, автообновление; установщики .msi и .deb
 scripts/local.mjs своя копия клуба (HUB + экраны) на отдельных портах и с отдельной базой
+supabase/         публичное облако на Supabase: миграции (схема, RLS, отчёты RPC), Edge Functions sync/owner/notify, тесты на PGlite
 deploy/           установка HUB в клубе: Linux (systemd, бэкапы, обновления с откатом), Windows, удалённая поддержка
 docs/             регламенты: эксплуатация для управляющего (OPERATIONS_RU), инфраструктура (INFRASTRUCTURE_RU),
-                  публичный доступ бесплатно — Firebase + Render + Supabase (PUBLIC_DEPLOY_RU),
+                  публичный доступ бесплатно — Supabase + Cloudflare/GitHub Pages (PUBLIC_DEPLOY_RU),
                   монтаж оборудования для электрика (INSTALL_HARDWARE_RU: щиток, реле, датчики, ключ ручного режима),
                   тестовый стенд ESP32 + реле + датчик тока + лампы 220 В (HARDWARE_TEST_BENCH_RU), фискализация (FISCAL_RU),
                   план приложений TS: браузер/PWA, приложение для ПК кассы и мини-ПК, мобильное приложение владельца (APP_PLAN_RU)
@@ -407,7 +408,22 @@ npm run start:hub
 
 **Сборка у себя.** Нужны Node 24, Rust (`rustup`), на Windows — MSVC (Visual Studio Build Tools, «Разработка классических приложений на C++») с Windows SDK; на Linux — `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev`. Затем `npm ci`, `npm run dev -w @bills/desktop` (окно в режиме разработки) или `npm run build -w @bills/desktop -- --bundles msi` → `apps/desktop/src-tauri/target/release/bundle/msi/TS_<версия>_x64_ru-RU.msi`. Тесты Rust: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`. Иконки — из монограммы `apps/web/public/icons/icon-512.png`: `npm run icons -w @bills/desktop`.
 
-<!-- PUBLIC_ACCESS -->
+## Публичный доступ
+
+Бесплатно, без своего сервера и без Firebase. Пошагово для того, кто делает это впервые, — [docs/PUBLIC_DEPLOY_RU.md](docs/PUBLIC_DEPLOY_RU.md).
+
+| Что | Где | Файлы |
+|---|---|---|
+| Облако целиком: база, RLS, вход владельца (Supabase Auth), отчёты (RPC), тревоги в реальном времени (Realtime), приём событий HUB, push | **Supabase** (Free) | `supabase/migrations`, `supabase/functions` (`sync`, `owner`, `notify`), логика — `apps/cloud/src` |
+| Кабинет владельца (PWA «TS», ставится на телефон) | **Cloudflare Pages** `ts-cabinet` или **GitHub Pages** `/billS/cabinet/` | `apps/cloud-web` (режим Supabase при `VITE_SUPABASE_URL`) |
+| Демо экрана клуба: HUB работает прямо в браузере, плашка «Демо — данные сбрасываются каждую ночь», ключи `OWNER-2222-2222-2222-2222` и др. | Cloudflare Pages `ts-demo` или GitHub Pages `/billS/demo/` | `apps/web` (`VITE_DEMO_LOCAL=1`) |
+
+- **Выкладка сама.** При пуше в `main` workflow `.github/workflows/deploy.yml` прогоняет typecheck и тесты, затем `supabase db push` и `supabase functions deploy`, собирает сайты и выкладывает их через `wrangler pages deploy`. Для PR создаются preview-копии сайтов со ссылкой в PR. Запасной workflow `pages.yml` выкладывает на GitHub Pages: там нельзя задать HTTP-заголовки (`_headers` не работает), поэтому обновление PWA приходит до 10 минут позже.
+- **HUB клуба** шлёт события в Supabase без изменений кода: `CLOUD_URL=https://<ID>.supabase.co/functions/v1`. Компании, клубы и ключи создаёт `node scripts/supabase-sql.ts` — он печатает SQL для SQL Editor.
+- **Push без Firebase.** Кабинет, установленный как PWA, получает Web Push (VAPID, ключи — `npm run vapid`). Приложение на Android получает уведомления через ntfy. FCM остаётся только в самостоятельном облаке `apps/cloud`.
+- **Проверено** на PostgreSQL (PGlite) с заглушками Supabase (`npm run test:supabase`). На живом проекте Supabase, Cloudflare и GitHub Pages **не проверялось**.
+- **Ограничения.** Supabase ставит бесплатный проект на паузу после 7 дней тишины (`keepalive.yml` будит его раз в 3 дня). Все сервисы находятся **вне Казахстана**, поэтому это для демо и кабинета без персональных данных. Пилот с реальными гостями хранит данные в клубе (`docs/FREE_SETUP_RU.md`), пока облако не переедет на KZ-хостинг.
+
 
 ---
 

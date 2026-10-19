@@ -1,0 +1,50 @@
+# Supabase CLI project config for TS (https://supabase.com/docs/guides/local-development/cli/config).
+# The live project is linked in CI with `supabase link --project-ref $SUPABASE_PROJECT_REF`;
+# migrations (supabase/migrations) go up with `supabase db push`, functions with `supabase functions deploy`.
+project_id = "ts"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 17
+
+[realtime]
+enabled = true
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+# Cabinet address for magic links; the live values are set in Dashboard → Authentication → URL Configuration.
+site_url = "http://127.0.0.1:5180"
+additional_redirect_urls = ["http://127.0.0.1:5180/**", "http://localhost:5180/**"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+# Companies and owners are created by the platform, not by sign-up from the internet:
+# an Auth user is linked to an existing owner by e-mail (see migrations).
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = true
+
+# HUBs authenticate with their own key (Bearer), not a Supabase JWT.
+[functions.sync]
+verify_jwt = false
+
+# The owner's own requests: Supabase checks the user's JWT.
+[functions.owner]
+verify_jwt = true
+
+# Called by pg_cron with the x-ts-cron secret.
+[functions.notify]
+verify_jwt = false

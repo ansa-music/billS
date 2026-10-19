@@ -13,8 +13,22 @@ import { App } from './App.tsx';
 
 applyStoredTheme();
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+function render() {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+}
+
+// Public demo without a server (VITE_DEMO_LOCAL=1): start the HUB inside the page first.
+// Other builds drop this branch and never load the demo HUB.
+if (import.meta.env.VITE_DEMO_LOCAL === '1') {
+  document.getElementById('root')!.textContent = 'Запускаем демо-клуб…';
+  void import('./demo-hub/boot.ts')
+    .then((m) => m.startDemoHub())
+    .catch((err: unknown) => console.error('[demo] the in-browser HUB did not start', err))
+    .then(render);
+} else {
+  render();
+}

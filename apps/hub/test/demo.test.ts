@@ -9,12 +9,12 @@ import { nextDemoReset, wipeDemoDatabase } from '../src/demo.ts';
 import { buildApp } from '../src/http/app.ts';
 import { Harness, MONDAY_NOON } from './helpers.ts';
 
-const ORIGIN = 'https://ts-app-demo.web.app';
+const ORIGIN = 'https://ts-demo.pages.dev';
 
 async function demoHub(t: { after(fn: () => Promise<void>): void }) {
   const h = new Harness();
   const { hub } = await h.start();
-  const app = buildApp(hub, { corsOrigins: ['https://*.web.app'], demo: { resetAt: () => MONDAY_NOON + 1000 } });
+  const app = buildApp(hub, { corsOrigins: ['https://*.pages.dev'], demo: { resetAt: () => MONDAY_NOON + 1000 } });
   await app.ready();
   t.after(async () => {
     await app.close();
@@ -50,7 +50,7 @@ test('GET /api/demo is public on a demo HUB and absent otherwise', async (t) => 
   assert.equal((await plain.app.inject({ method: 'GET', url: '/api/demo' })).statusCode, 404);
 });
 
-test('CORS: preflight without a token, Bearer from the Firebase origin, other origins ignored', async (t) => {
+test('CORS: preflight without a token, Bearer from the Pages origin, other origins ignored', async (t) => {
   const { hub, app } = await demoHub(t);
   hub.auth.issueFixedKeys(DEMO_KEYS);
 
@@ -110,11 +110,11 @@ test('wipeDemoDatabase removes the database, WAL files and bootstrap keys', () =
 });
 
 test('config: HUB_DEMO, HUB_CORS_ORIGINS, PORT', () => {
-  const c = loadConfig({ HUB_DEMO: '1', HUB_CORS_ORIGINS: 'https://*.web.app, https://*.firebaseapp.com', PORT: '10000', HUB_DEMO_RESET_AT: '123' });
+  const c = loadConfig({ HUB_DEMO: '1', HUB_CORS_ORIGINS: 'https://*.pages.dev, https://*.github.io', PORT: '10000', HUB_DEMO_RESET_AT: '123' });
   assert.equal(c.demo, true);
   assert.equal(c.port, 10000);
   assert.equal(c.demoResetAt, 123);
-  assert.deepEqual(c.corsOrigins, ['https://*.web.app', 'https://*.firebaseapp.com']);
+  assert.deepEqual(c.corsOrigins, ['https://*.pages.dev', 'https://*.github.io']);
   const d = loadConfig({});
   assert.equal(d.demo, false);
   assert.deepEqual(d.corsOrigins, []);

@@ -4,13 +4,13 @@ import { DEFAULT_PUBLIC_ORIGINS, DEMO_KEYS, isAccessKeyShape, originAllowed, par
 
 test('originAllowed: exact, wildcard subdomain, star', () => {
   const p = DEFAULT_PUBLIC_ORIGINS;
-  assert.equal(originAllowed('https://ts-app.web.app', p), true);
-  assert.equal(originAllowed('https://ts-app--pr12-abc123.web.app', p), true);
-  assert.equal(originAllowed('https://ts-app-demo.firebaseapp.com', p), true);
-  assert.equal(originAllowed('http://ts-app.web.app', p), false);
-  assert.equal(originAllowed('https://web.app', p), false);
-  assert.equal(originAllowed('https://evil.com/.web.app', p), false);
-  assert.equal(originAllowed('https://ts-app.web.app.evil.com', p), false);
+  assert.equal(originAllowed('https://ts-demo.pages.dev', p), true);
+  assert.equal(originAllowed('https://a1b2c3d4.ts-demo.pages.dev', p), true);
+  assert.equal(originAllowed('https://ansa-music.github.io', p), true);
+  assert.equal(originAllowed('http://ts-demo.pages.dev', p), false);
+  assert.equal(originAllowed('https://pages.dev', p), false);
+  assert.equal(originAllowed('https://evil.com/.pages.dev', p), false);
+  assert.equal(originAllowed('https://ts-demo.pages.dev.evil.com', p), false);
   assert.equal(originAllowed(undefined, p), false);
   assert.equal(originAllowed('http://localhost:5173', ['http://localhost:5173']), true);
   assert.equal(originAllowed('https://any.example', ['*']), true);
@@ -18,7 +18,7 @@ test('originAllowed: exact, wildcard subdomain, star', () => {
 });
 
 test('parseOrigins trims, drops trailing slashes and empties', () => {
-  assert.deepEqual(parseOrigins(' https://a.web.app/ , ,https://b.example'), ['https://a.web.app', 'https://b.example']);
+  assert.deepEqual(parseOrigins(' https://a.pages.dev/ , ,https://b.example'), ['https://a.pages.dev', 'https://b.example']);
   assert.deepEqual(parseOrigins(undefined), []);
 });
 

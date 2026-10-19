@@ -2,15 +2,18 @@ import { useEffect, useState } from 'react';
 import type { DemoInfo } from '@bills/domain';
 import { DEMO_KEYS } from '@bills/domain';
 import { hubUrl } from './api.ts';
+import { DEMO_LOCAL, resetDemo } from './demo-hub/storage.ts';
 
 /**
- * Public demo (the screen on Firebase Hosting talking to a demo HUB with
+ * Public demo (the screen on a static host talking to a demo HUB with
  * HUB_DEMO=1). The banner shows when the HUB answers GET /api/demo — or right
  * away when the build says VITE_DEMO=1, so it is there while a sleeping free
  * server wakes up. A real club's HUB has no /api/demo: nothing is shown.
+ * With VITE_DEMO_LOCAL=1 the demo HUB runs inside the page (demo-hub/boot.ts) and
+ * answers /api/demo itself; the banner then also offers «Сбросить демо».
  */
 
-const BUILT_AS_DEMO = import.meta.env.VITE_DEMO === '1';
+const BUILT_AS_DEMO = import.meta.env.VITE_DEMO === '1' || DEMO_LOCAL;
 
 let cached: Promise<DemoInfo | null> | null = null;
 
@@ -46,6 +49,19 @@ export function DemoBanner() {
         <strong>Демо</strong> — данные сбрасываются каждую ночь. Лампы и ИБП здесь симулируются: попробуйте раздел
         «Оборудование».
       </p>
+      {DEMO_LOCAL && (
+        <div className="pwa-banner-actions">
+          <button
+            type="button"
+            className="btn btn-small"
+            onClick={() => {
+              if (window.confirm('Сбросить демо-клуб? Все изменения на этом устройстве пропадут.')) resetDemo();
+            }}
+          >
+            Сбросить демо
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -57,8 +73,10 @@ export function DemoKeys({ onPick }: { onPick: (key: string) => void }) {
   return (
     <aside className="login-help demo-keys" aria-label="Демо-ключи">
       <p>
-        <strong>Демо — данные сбрасываются каждую ночь.</strong> Войдите любым ключом (нажмите, чтобы подставить).
-        Бесплатный сервер засыпает без посетителей: первый вход после паузы может занять до минуты.
+        <strong>Демо — данные сбрасываются каждую ночь.</strong> Войдите любым ключом (нажмите, чтобы подставить).{' '}
+        {DEMO_LOCAL
+          ? 'Клуб работает прямо в браузере и хранится только на этом устройстве.'
+          : 'Бесплатный сервер засыпает без посетителей: первый вход после паузы может занять до минуты.'}
       </p>
       <ul className="demo-keys-list">
         {keys.map((k) => (

@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { OwnerView } from '@bills/domain';
 import { normalizeCloudUrl, parseLoginQr } from '@bills/domain';
-import { CloudRequestError, login, loginByKey } from './api.ts';
+import { CloudRequestError, SUPABASE_MODE, login, loginByKey, sendMagicLink, takeLinkError } from './api.ts';
 import { BrandMark } from './BrandMark.tsx';
 import { nativeBridge } from './platform.ts';
 
-type Mode = 'password' | 'key';
+/** 'key' — self-hosted only (owner keys); 'link' — Supabase only (magic link to the e-mail). */
+type Mode = 'password' | 'key' | 'link';
 
 const NOT_TS_QR = 'Этот QR-код не от TS. Откройте кабинет на компьютере → «Телефон и уведомления» → «Создать ключ для телефона».';
 
@@ -19,6 +20,8 @@ function describe(err: unknown, mode: Mode, cloudUrl: string | null): string {
       : 'Нет связи с облаком. Проверьте интернет.';
   }
   if (e.code === 'NO_CLOUD') return 'Укажите адрес облака';
+  // Supabase mode: api-supabase.ts already words every error for the owner.
+  if (SUPABASE_MODE) return e.message || 'Не удалось войти';
   if (e.status === 401) {
     return mode === 'key' ? 'Ключ не подходит: неверный или отозван' : 'Неверный e-mail или пароль';
   }
@@ -27,14 +30,25 @@ function describe(err: unknown, mode: Mode, cloudUrl: string | null): string {
 }
 
 export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
-  const bridge = nativeBridge();
+  // With Supabase the app signs in like the browser: no cloud address, no owner keys.
+  const bridge = SUPABASE_MODE ? null : nativeBridge();
+  const inApp = nativeBridge() !== null;
   const [mode, setMode] = useState<Mode>(bridge ? 'key' : 'password');
+  const [linkSentTo, setLinkSentTo] = useState<string | null>(null);
   const [cloud, setCloud] = useState(() => bridge?.cloudUrl() ?? '');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // A magic link that did not work (expired, used twice) comes back here with the reason.
+  useEffect(() => {
+    if (!SUPABASE_MODE) return;
+    void takeLinkError().then((e) => {
+      if (e) setError(e);
+    });
+  }, []);
 
   /** In the app: checks and saves the cloud address; returns it, or null after showing an error. */
   async function saveCloud(input: string): Promise<string | null | false> {
@@ -67,6 +81,15 @@ export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
       if (cloudUrl === false) return;
       if (mode === 'password') {
         await run('password', () => login(email.trim(), password), cloudUrl);
+        return;
+      }
+      if (mode === 'link') {
+        try {
+          await sendMagicLink(email.trim());
+          setLinkSentTo(email.trim());
+        } catch (err) {
+          setError(describe(err, 'link', null));
+        }
         return;
       }
       // A pasted QR text («ts://login?…») works as well as the bare key.
@@ -148,6 +171,35 @@ export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
           </>
         )}
 
+        {SUPABASE_MODE ? (
+          <div className="seg" role="tablist" aria-label="Способ входа">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'password'}
+              onClick={() => {
+                setMode('password');
+                setError(null);
+              }}
+            >
+              Почта и пароль
+            </button>
+            {/* In the app a link from the mail would open the phone's browser, not the app. */}
+            {!inApp && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === 'link'}
+                onClick={() => {
+                  setMode('link');
+                  setError(null);
+                }}
+              >
+                Ссылка на почту
+              </button>
+            )}
+          </div>
+        ) : (
         <div className="seg" role="tablist" aria-label="Способ входа">
           <button
             type="button"
@@ -172,8 +224,27 @@ export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
             Ключ владельца
           </button>
         </div>
+        )}
 
-        {mode === 'password' ? (
+        {mode === 'link' ? (
+          linkSentTo ? (
+            <p className="saved" role="status">
+              Письмо со ссылкой отправлено на {linkSentTo}. Откройте ссылку на этом устройстве — кабинет откроется уже
+              с входом. Письма нет — проверьте «Спам».
+            </p>
+          ) : (
+            <label className="field">
+              <span>E-mail</span>
+              <input
+                type="email"
+                autoComplete="username"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </label>
+          )
+        ) : mode === 'password' ? (
           <>
             <label className="field">
               <span>E-mail</span>
@@ -220,9 +291,21 @@ export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
             {error}
           </p>
         )}
-        <button type="submit" className="btn btn-primary" disabled={busy}>
-          {busy ? 'Входим…' : 'Войти'}
-        </button>
+        {mode === 'link' ? (
+          linkSentTo ? (
+            <button type="button" className="btn" onClick={() => setLinkSentTo(null)}>
+              Отправить ещё раз
+            </button>
+          ) : (
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {busy ? 'Отправляем…' : 'Прислать ссылку для входа'}
+            </button>
+          )
+        ) : (
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            {busy ? 'Входим…' : 'Войти'}
+          </button>
+        )}
       </form>
       <a className="link login-apps" href="#/apps">
         Скачать приложение для телефона и кассы

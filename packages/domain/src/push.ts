@@ -75,10 +75,69 @@ export function pushKindOfAlert(alertKind: string): PushKind {
 // Devices and rules (cabinet API)
 // ---------------------------------------------------------------------------
 
-export type DevicePlatform = 'android' | 'ios' | 'web';
+/**
+ * How a device gets pushes:
+ * - `android` / `ios` / `web`: FCM registration token (self-hosted apps/cloud with a Firebase key);
+ * - `webpush`: Web Push with VAPID (cabinet PWA); token = JSON of the browser's PushSubscription;
+ * - `ntfy`: ntfy topic (Android app without Google services); token = topic URL `https://ntfy.sh/ts-…`.
+ */
+export type DevicePlatform = 'android' | 'ios' | 'web' | 'webpush' | 'ntfy';
+
+export const DEVICE_PLATFORMS: readonly DevicePlatform[] = ['android', 'ios', 'web', 'webpush', 'ntfy'];
+
+export function isDevicePlatform(value: unknown): value is DevicePlatform {
+  return typeof value === 'string' && (DEVICE_PLATFORMS as readonly string[]).includes(value);
+}
+
+/** What a `webpush` device token holds: `JSON.stringify(pushSubscription)` (only these fields are used). */
+export interface WebPushSubscriptionJson {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}
+
+/** Parses a `webpush` token; null when it is not a usable https subscription. */
+export function parseWebPushToken(token: string): WebPushSubscriptionJson | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(token);
+  } catch {
+    return null;
+  }
+  if (typeof raw !== 'object' || raw === null) return null;
+  const r = raw as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } | null };
+  if (typeof r.endpoint !== 'string' || !/^https:\/\/[^\s/]+\//.test(r.endpoint)) return null;
+  const p256dh = r.keys?.p256dh;
+  const auth = r.keys?.auth;
+  if (typeof p256dh !== 'string' || typeof auth !== 'string' || !p256dh || !auth) return null;
+  return { endpoint: r.endpoint, keys: { p256dh, auth } };
+}
+
+/** An ntfy topic URL: https, no credentials/query, one path segment of 24-64 safe chars (topics are public: the name is the secret). */
+export function isNtfyTopicUrl(token: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(token);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return false;
+  return /^\/[A-Za-z0-9_-]{24,64}$/.test(url.pathname);
+}
+
+/** Deep link to a club page of the cabinet (hash routing): `https://cabinet.example/#/clubs/<id>`. */
+export function cabinetClubUrl(cabinetUrl: string, clubId: string): string {
+  return `${cabinetUrl.replace(/\/+$/, '')}/#/clubs/${encodeURIComponent(clubId)}`;
+}
+
+/** JSON a Web Push message carries to the cabinet's service worker. */
+export interface WebPushPayload {
+  title: string;
+  body: string;
+  data: PushData & { url?: string };
+}
 
 export interface RegisterDeviceRequest {
-  /** FCM registration token. */
+  /** FCM registration token, PushSubscription JSON (`webpush`) or ntfy topic URL (`ntfy`). */
   token: string;
   platform: DevicePlatform;
   /** "Pixel 8", shown in the device list. */

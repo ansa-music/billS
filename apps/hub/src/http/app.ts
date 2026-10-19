@@ -37,7 +37,7 @@ export interface AppOptions extends AuthHookOptions {
   version?: VersionInfo;
   /** Built hall screen (apps/web/dist) to serve on `/` with an SPA fallback; skipped when the folder is missing. */
   staticDir?: string;
-  /** Origin patterns (`https://*.web.app`) of screens on another domain; Bearer tokens only, no cookies. */
+  /** Origin patterns (`https://*.pages.dev`) of screens on another domain; Bearer tokens only, no cookies. */
   corsOrigins?: readonly string[];
   /** Public demo club: GET /api/demo tells the screen to show the demo banner and keys. */
   demo?: { resetAt: () => number };
@@ -62,7 +62,7 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
     return reply.status(500).send({ error: { code: 'INTERNAL', message: 'Внутренняя ошибка HUB' } });
   });
 
-  // CORS for the public demo screen on Firebase Hosting. Registered before auth, so a
+  // CORS for a club screen served from another domain (Cloudflare/GitHub Pages). Registered before auth, so a
   // preflight (no token) is answered here and never reaches the 401 check.
   const corsOrigins = options.corsOrigins ?? [];
   if (corsOrigins.length) {

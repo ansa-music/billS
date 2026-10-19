@@ -297,7 +297,7 @@ export class SyncWorker {
   start(): void {
     if (this.#timer) return;
     this.#timer = setInterval(() => this.#maybeTick(), this.#intervalMs);
-    this.#timer.unref();
+    this.#timer.unref?.();
     this.#events.on('changed', this.#onChanged);
     this.kick();
   }
@@ -319,7 +319,7 @@ export class SyncWorker {
       this.#kickTimer = undefined;
       this.#maybeTick();
     }, this.#kickDelayMs);
-    this.#kickTimer.unref();
+    this.#kickTimer.unref?.();
   }
 
   status(): SyncStatus {

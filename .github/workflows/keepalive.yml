@@ -1,9 +1,9 @@
-name: Keep Supabase awake
+# Бесплатный проект Supabase ставится на паузу, если к нему 7 дней никто не обращался.
+# Раз в 3 дня этот workflow делает запрос к API проекта (PostgREST) с публичным anon-ключом.
+# Нужны переменные репозитория SUPABASE_PROJECT_REF и SUPABASE_ANON_KEY; без них шаг пропускается.
+# GitHub выключает расписание, если в репозитории 60 дней не было коммитов, — включите его во вкладке Actions.
+name: keepalive
 
-# A free Supabase project is paused after 7 days without database activity. Every 3 days
-# this reads one table: straight from the database when SUPABASE_DB_URL is set (works even
-# while Render sleeps), otherwise through the cloud (wakes it, ~1 minute).
-# GitHub turns scheduled workflows off after 60 days without commits — re-enable it in Actions.
 on:
   schedule:
     - cron: "17 5 */3 * *"
@@ -16,13 +16,12 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     env:
-      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-      CLOUD_URL: ${{ vars.TS_CLOUD_URL || 'https://ts-cloud.onrender.com' }}
+      REF: ${{ (vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF) }}
+      ANON: ${{ (vars.SUPABASE_ANON_KEY || secrets.SUPABASE_ANON_KEY) }}
     steps:
-      - name: Query the database
-        if: env.SUPABASE_DB_URL != ''
-        run: psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "SELECT COUNT(*) FROM companies;"
-
-      - name: Query through the cloud
-        if: env.SUPABASE_DB_URL == ''
-        run: curl --fail --silent --show-error --retry 6 --retry-delay 20 --retry-all-errors --max-time 120 "$CLOUD_URL/api/health?db=1"
+      - name: Ping Supabase
+        if: env.REF != '' && env.ANON != ''
+        run: |
+          curl --fail-with-body --silent --show-error --retry 3 --retry-delay 10 \
+            -H "apikey: $ANON" -H "content-type: application/json" \
+            -X POST "https://$REF.supabase.co/rest/v1/rpc/ts_ping" -d '{}'

@@ -28,13 +28,36 @@ apps/mobile
   `ts://login?cloud=<адрес>&key=<ключ>`; кнопка «Сканировать QR» на телефоне заполняет и адрес,
   и ключ. Токен сессии (30 дней) хранится в `@capacitor/preferences` — в песочнице приложения,
   резервное копирование Android выключено (`allowBackup=false`).
-- **Push:** после входа приложение просит разрешение на уведомления, получает FCM-токен
+- **Push (своё облако, FCM — устаревший путь, см. ниже про Supabase и ntfy):** после входа приложение просит разрешение на уведомления, получает FCM-токен
   (`@capacitor-firebase/messaging`, Android и iOS) и регистрирует его в облаке
   (`POST /api/owner/devices`); при выходе устройство удаляется. Канал Android — `alerts`
   («Тревоги клуба», высокая важность). Тап по уведомлению открывает клуб (`#/clubs/<id>`).
   Что и кому присылать — правила в кабинете; серверная часть — `apps/cloud/README.md`.
 - **Release** ходит в облако только по HTTPS; debug разрешает `http://` (тестовое облако в
   локальной сети) — `android/app/src/debug/res/xml/network_security_config.xml`.
+
+## Сборка под Supabase: уведомления через ntfy
+
+Если при сборке заданы `VITE_SUPABASE_URL` и `VITE_SUPABASE_ANON_KEY` (переменные окружения или
+`apps/mobile/.env`), приложение работает с Supabase, как кабинет на сайте:
+
+- **вход** — по почте и паролю (Supabase Auth); адрес облака и ключи владельца не нужны;
+- **push — через [ntfy](https://ntfy.sh)**: в WebView нет Web Push, поэтому на странице
+  «Телефон и уведомления» кнопка «Получать уведомления через ntfy» создаёт секретную тему
+  `https://ntfy.sh/ts-…` (или на своём сервере ntfy), регистрирует её как устройство `ntfy` и
+  показывает кнопку «Подписаться в ntfy». Владелец ставит бесплатное приложение ntfy
+  (F-Droid — без Google, или Google Play) и подписывается на тему;
+- **FCM не регистрируется**: `@capacitor-firebase/messaging` в такой сборке не вызывается.
+
+```bash
+VITE_SUPABASE_URL=https://<ref>.supabase.co VITE_SUPABASE_ANON_KEY=<anon key> npm run build:android-debug -w @bills/mobile
+```
+
+**FCM — устаревший путь, только для своего облака (apps/cloud на мини-ПК клуба).** Для него нужны
+консоль Firebase, `google-services.json` и сервисный аккаунт Google, а значит — Google-аккаунт
+проекта и привязка к биллингу Google Cloud. В публичной версии на Supabase этого нет: ntfy
+бесплатен и не требует ни Firebase, ни Google. Код FCM оставлен, потому что своё облако
+по-прежнему рассылает push через FCM.
 
 ## Сборка Android (debug APK)
 

@@ -149,7 +149,8 @@ export class Hub {
     this.lamps.recover();
     this.prepaid.start();
     this.#reconcileTimer = setInterval(() => this.lamps.reconcile(), this.#reconcileIntervalMs);
-    this.#reconcileTimer.unref();
+    // `?.`: the in-browser demo (apps/web/src/demo-hub) runs the HUB with browser timers, which have no unref.
+    this.#reconcileTimer.unref?.();
     this.monitor.start();
     this.power.start();
     this.sync?.start();

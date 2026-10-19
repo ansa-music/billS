@@ -14,3 +14,8 @@ apps/cloud/data/
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/tauri.ci.conf.json
+
+# Supabase Edge Functions: bundle of apps/cloud built by scripts/bundle-edge.mjs
+supabase/functions/_shared/core.js
+supabase/.temp/
+supabase/.branches/

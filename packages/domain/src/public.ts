@@ -1,16 +1,15 @@
 import type { Role } from './permissions.ts';
 
 /**
- * Public deployment: the screens are served from one domain (Firebase Hosting,
- * https://<project>.web.app) and call the HUB or the cloud on another
- * (Render, https://<service>.onrender.com). Both servers then answer CORS for
- * the allowed origins. Requests carry a Bearer token, never cookies, so no
+ * Screens served from one domain (Cloudflare Pages https://<project>.pages.dev,
+ * GitHub Pages https://<owner>.github.io) may call a HUB on another (a server
+ * demo HUB, HUB_CORS_ORIGINS). The HUB then answers CORS for the allowed origins. Requests carry a Bearer token, never cookies, so no
  * credentials are allowed cross-origin and a wildcard such as
  * `https://*.web.app` cannot be used to act as a signed-in user.
  */
 
-/** Firebase Hosting domains: the cloud allows them unless CLOUD_CORS_ORIGINS says otherwise. */
-export const DEFAULT_PUBLIC_ORIGINS = ['https://*.web.app', 'https://*.firebaseapp.com'];
+/** Static hosting domains of the public sites (Cloudflare Pages, GitHub Pages). */
+export const DEFAULT_PUBLIC_ORIGINS = ['https://*.pages.dev', 'https://*.github.io'];
 
 /** "a, b ,c" → ["a", "b", "c"]; empty and missing → []. */
 export function parseOrigins(raw: string | undefined): string[] {
@@ -22,8 +21,8 @@ export function parseOrigins(raw: string | undefined): string[] {
 
 /**
  * Whether `origin` (scheme://host[:port] from the Origin header) matches one of
- * the patterns: an exact origin, `*` (anyone), or `https://*.web.app` — any
- * subdomain, at any depth (preview channels are `project--pr12-abc.web.app`).
+ * the patterns: an exact origin, `*` (anyone), or `https://*.pages.dev` — any
+ * subdomain, at any depth (previews are `<hash>.<project>.pages.dev`).
  */
 export function originAllowed(origin: string | undefined, patterns: readonly string[]): origin is string {
   if (!origin) return false;

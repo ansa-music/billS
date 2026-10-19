@@ -1730,3 +1730,79 @@ html:has(.apps-page) body {
     width: 100%;
   }
 }
+
+/* ---- Supabase mode: alert toasts (Realtime), ntfy steps ---- */
+
+.toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 32px));
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in oklab, var(--danger) 55%, transparent);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--danger) 14%, var(--surface));
+  color: var(--text);
+  box-shadow: var(--shadow);
+  overflow-wrap: anywhere;
+}
+
+.toast-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+.toast-text {
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.toast-text:hover {
+  text-decoration: underline;
+}
+
+.toast-close {
+  flex: none;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.steps {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+}
+
+.ntfy-server {
+  margin-top: 12px;
+}
+
+.ntfy-server summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.ntfy-server .field {
+  margin: 8px 0;
+}

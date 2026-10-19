@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+const REFRESH_EVENT = 'ts:refresh';
+
+/** Every polled screen reloads now (a Realtime alert arrived) instead of waiting for its timer. */
+export function requestRefresh(): void {
+  window.dispatchEvent(new Event(REFRESH_EVENT));
+}
+
 /**
  * Loads data once and then every `intervalMs`; the last good value stays on screen
  * while the cloud is unreachable (the shell shows the offline banner).
@@ -34,9 +41,12 @@ export function usePoll<T>(load: () => Promise<T>, intervalMs: number) {
       if (document.visibilityState === 'visible') void reload();
     };
     document.addEventListener('visibilitychange', onVisible);
+    const onRefresh = () => void reload();
+    window.addEventListener(REFRESH_EVENT, onRefresh);
     return () => {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener(REFRESH_EVENT, onRefresh);
     };
   }, [reload, intervalMs]);
 

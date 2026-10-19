@@ -1,7 +1,17 @@
 import { createSign, randomUUID } from 'node:crypto';
+import type { webcrypto } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import type { DeviceView, DevicePlatform, PushData, PushKind, PushRule, PushSettingsView, TestPushResponse } from '@bills/domain';
-import { isPushKind, PUSH_KINDS, pushRuleAllows } from '@bills/domain';
+import type {
+  DeviceView,
+  DevicePlatform,
+  PushData,
+  PushKind,
+  PushRule,
+  PushSettingsView,
+  TestPushResponse,
+  WebPushPayload,
+} from '@bills/domain';
+import { cabinetClubUrl, isNtfyTopicUrl, isPushKind, parseWebPushToken, PUSH_KINDS, pushRuleAllows } from '@bills/domain';
 import type { SqlDriver } from './db/driver.ts';
 
 /**
@@ -26,6 +36,8 @@ export interface PushMessage {
   title: string;
   body: string;
   data: PushData;
+  /** Platform of the device the token belongs to; RoutingSender picks the channel by it (FCM when absent). */
+  platform?: DevicePlatform;
 }
 
 export type SendResult = { ok: true } | { ok: false; error: string; /** The token is dead: forget the device. */ unregistered: boolean };
@@ -257,6 +269,14 @@ const toDeviceView = (r: DeviceRow): DeviceView => ({
   lastError: r.last_error,
 });
 
+const DEFAULT_DEVICE_NAME: Record<DevicePlatform, string> = {
+  android: 'Android',
+  ios: 'iPhone',
+  web: 'Браузер',
+  webpush: 'Браузер',
+  ntfy: 'Телефон (ntfy)',
+};
+
 /** Registers (or refreshes) a phone. A token already known moves to this owner. */
 export async function registerDevice(
   db: SqlDriver,
@@ -265,7 +285,7 @@ export async function registerDevice(
   req: { token: string; platform: DevicePlatform; name?: string },
 ): Promise<DeviceView> {
   return db.transaction(async (tx) => {
-    const name = req.name?.trim().slice(0, 80) || (req.platform === 'ios' ? 'iPhone' : req.platform === 'android' ? 'Android' : 'Браузер');
+    const name = req.name?.trim().slice(0, 80) || DEFAULT_DEVICE_NAME[req.platform];
     const existing = await tx.all<DeviceRow>('SELECT * FROM owner_devices WHERE token = ?', [req.token]);
     if (existing[0]) {
       await tx.run('UPDATE owner_devices SET owner_id = ?, platform = ?, name = ?, last_seen_at = ?, last_error = NULL WHERE id = ?', [
@@ -377,6 +397,7 @@ export class PushDispatcher {
       for (const d of devices) {
         const ok = await this.#deliver(d, {
           token: d.token,
+          platform: d.platform,
           title: row.title,
           body: row.body,
           data: { kind, clubId: row.club_id, ...(row.alert_id ? { alertId: row.alert_id } : {}) },
@@ -443,6 +464,7 @@ export class PushDispatcher {
     for (const d of devices) {
       const ok = await this.#deliver(d, {
         token: d.token,
+        platform: d.platform,
         title: 'TS: проверка уведомлений',
         body: 'Если вы это видите — тревоги клуба будут приходить на этот телефон.',
         data: { kind: 'OTHER', clubId },
@@ -547,4 +569,417 @@ export async function hubBackOnline(
     body: `HUB «${hub.name}» снова передаёт данные в облако.`,
     at: now,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Senders without Firebase: Web Push (cabinet PWA) and ntfy (Android app)
+// ---------------------------------------------------------------------------
+//
+// Both use only `fetch` and WebCrypto (`globalThis.crypto.subtle`), so they run
+// unchanged in Node and in Deno (Supabase Edge Functions).
+
+/** fetch with a binary body; the shape both runtimes' `fetch` accepts. */
+export type PushFetch = (
+  url: string,
+  init: { method: string; headers: Record<string, string>; body: string | Uint8Array<ArrayBuffer> },
+) => Promise<{ status: number; text(): Promise<string> }>;
+
+const defaultFetch = (): PushFetch => globalThis.fetch as unknown as PushFetch;
+
+type Bytes = Uint8Array<ArrayBuffer>;
+
+const utf8 = (text: string): Bytes => new TextEncoder().encode(text) as Bytes;
+
+export function b64urlEncode(bytes: Uint8Array): string {
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+export function b64urlDecode(text: string): Bytes {
+  const b64 = text.trim().replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+
+export function concatBytes(...parts: Uint8Array[]): Bytes {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let offset = 0;
+  for (const p of parts) {
+    out.set(p, offset);
+    offset += p.length;
+  }
+  return out;
+}
+
+const subtle = (): webcrypto.SubtleCrypto => globalThis.crypto.subtle;
+
+/** JWK of a P-256 point given as 65 uncompressed bytes (0x04 || x || y), optionally with the private scalar. */
+export function p256Jwk(publicKey: Uint8Array, d?: Uint8Array): webcrypto.JsonWebKey {
+  if (publicKey.length !== 65 || publicKey[0] !== 4) throw new Error('P-256: нужен несжатый открытый ключ (65 байт)');
+  return {
+    kty: 'EC',
+    crv: 'P-256',
+    x: b64urlEncode(publicKey.subarray(1, 33)),
+    y: b64urlEncode(publicKey.subarray(33, 65)),
+    ...(d ? { d: b64urlEncode(d) } : {}),
+    ext: true,
+  };
+}
+
+/** HKDF-SHA-256 (RFC 5869) of `length` bytes. */
+export async function hkdf(salt: Bytes, ikm: Bytes, info: Bytes, length: number): Promise<Bytes> {
+  const key = await subtle().importKey('raw', ikm, 'HKDF', false, ['deriveBits']);
+  return new Uint8Array(await subtle().deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info }, key, length * 8));
+}
+
+export interface EcKeyPairBytes {
+  /** 65 bytes, uncompressed point. */
+  publicKey: Bytes;
+  /** 32 bytes, the private scalar d. */
+  privateKey: Bytes;
+}
+
+export interface WebPushEncryptOptions {
+  /** 16 random bytes by default; fixed only in tests (RFC 8291 test vector). */
+  salt?: Bytes;
+  /** A fresh ECDH key pair per message by default; fixed only in tests. */
+  serverKeys?: EcKeyPairBytes;
+  /** Record size written to the header (RFC 8188); 4096 by default. */
+  recordSize?: number;
+}
+
+/** Largest plaintext that fits one 4096-byte aes128gcm record (minus header, delimiter and tag). */
+export const WEB_PUSH_MAX_PLAINTEXT = 4096 - 86 - 1 - 16;
+
+/**
+ * Message encryption for Web Push, RFC 8291 (aes128gcm, RFC 8188), single record:
+ * salt(16) || rs(4) || idlen(1) || as_public(65) || AES-128-GCM(plaintext || 0x02).
+ */
+export async function encryptWebPush(
+  plaintext: Uint8Array,
+  subscription: { p256dh: Bytes; auth: Bytes },
+  options: WebPushEncryptOptions = {},
+): Promise<Bytes> {
+  if (plaintext.length > WEB_PUSH_MAX_PLAINTEXT) throw new Error('Web Push: сообщение слишком длинное');
+  const uaPublic = subscription.p256dh;
+  const salt = options.salt ?? globalThis.crypto.getRandomValues(new Uint8Array(16));
+  const rs = options.recordSize ?? 4096;
+
+  let asPublic: Bytes;
+  let asPrivate: webcrypto.CryptoKey;
+  if (options.serverKeys) {
+    asPublic = options.serverKeys.publicKey;
+    asPrivate = await subtle().importKey(
+      'jwk',
+      p256Jwk(options.serverKeys.publicKey, options.serverKeys.privateKey),
+      { name: 'ECDH', namedCurve: 'P-256' },
+      false,
+      ['deriveBits'],
+    );
+  } else {
+    const pair = (await subtle().generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits'])) as webcrypto.CryptoKeyPair;
+    asPublic = new Uint8Array(await subtle().exportKey('raw', pair.publicKey));
+    asPrivate = pair.privateKey;
+  }
+
+  const uaKey = await subtle().importKey('raw', uaPublic, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+  const ecdhSecret = new Uint8Array(await subtle().deriveBits({ name: 'ECDH', public: uaKey }, asPrivate, 256));
+  const ikm = await hkdf(subscription.auth, ecdhSecret, concatBytes(utf8('WebPush: info\0'), uaPublic, asPublic), 32);
+  const cek = await hkdf(salt, ikm, utf8('Content-Encoding: aes128gcm\0'), 16);
+  const nonce = await hkdf(salt, ikm, utf8('Content-Encoding: nonce\0'), 12);
+
+  const key = await subtle().importKey('raw', cek, 'AES-GCM', false, ['encrypt']);
+  const ciphertext = new Uint8Array(
+    await subtle().encrypt({ name: 'AES-GCM', iv: nonce, tagLength: 128 }, key, concatBytes(plaintext, new Uint8Array([2]))),
+  );
+  const header = new Uint8Array(21);
+  header.set(salt, 0);
+  new DataView(header.buffer).setUint32(16, rs);
+  header[20] = asPublic.length;
+  return concatBytes(header, asPublic, ciphertext);
+}
+
+/** VAPID keys as printed by `node scripts/vapid-keys.mjs`. */
+export interface VapidConfig {
+  /** base64url of the 65-byte uncompressed P-256 point. */
+  publicKey: string;
+  /** base64url of the 32-byte private scalar d. */
+  privateKey: string;
+  /** `mailto:…` or an https URL: who to contact about this sender (RFC 8292). */
+  subject: string;
+}
+
+/** VAPID JWT (RFC 8292): ES256 over {aud, exp, sub}, signature as raw r||s. */
+export async function vapidJwt(vapid: VapidConfig, audience: string, expSeconds: number): Promise<string> {
+  const publicKey = b64urlDecode(vapid.publicKey);
+  const key = await subtle().importKey(
+    'jwk',
+    p256Jwk(publicKey, b64urlDecode(vapid.privateKey)),
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['sign'],
+  );
+  const header = b64urlEncode(utf8(JSON.stringify({ typ: 'JWT', alg: 'ES256' })));
+  const claims = b64urlEncode(utf8(JSON.stringify({ aud: audience, exp: expSeconds, sub: vapid.subject })));
+  const signature = new Uint8Array(await subtle().sign({ name: 'ECDSA', hash: 'SHA-256' }, key, utf8(`${header}.${claims}`)));
+  return `${header}.${claims}.${b64urlEncode(signature)}`;
+}
+
+/** Checks the VAPID keys once at start-up, so a typo in a secret shows up in the log, not at the first alert. */
+export function checkVapidConfig(vapid: VapidConfig): void {
+  let pub: Uint8Array;
+  let priv: Uint8Array;
+  try {
+    pub = b64urlDecode(vapid.publicKey);
+    priv = b64urlDecode(vapid.privateKey);
+  } catch {
+    throw new Error('VAPID: ключи должны быть в base64url');
+  }
+  if (pub.length !== 65 || pub[0] !== 4) throw new Error('VAPID_PUBLIC_KEY: нужен несжатый ключ P-256 (65 байт)');
+  if (priv.length !== 32) throw new Error('VAPID_PRIVATE_KEY: нужен ключ P-256 (32 байта)');
+  if (!/^(mailto:|https:\/\/)/.test(vapid.subject)) throw new Error('VAPID_SUBJECT: нужен mailto: или https:// адрес');
+}
+
+export interface WebPushOptions {
+  fetch?: PushFetch;
+  now?: () => number;
+  /** How long the push service keeps an undelivered message; one day by default. */
+  ttlSeconds?: number;
+  /** Cabinet address: the click opens `<cabinet>/#/clubs/<id>`. */
+  cabinetUrl?: string | null;
+  encrypt?: WebPushEncryptOptions;
+}
+
+/**
+ * Web Push to the cabinet PWA (Chrome/Android, Firefox, Safari/iOS 16.4+ installed PWA).
+ * Token = JSON of the browser's PushSubscription. 404/410 from the push service
+ * mean the subscription is gone: the device is forgotten.
+ */
+export class WebPushSender implements PushSender {
+  readonly enabled = true;
+  readonly #vapid: VapidConfig;
+  readonly #fetch: PushFetch;
+  readonly #now: () => number;
+  readonly #ttl: number;
+  readonly #cabinetUrl: string | null;
+  readonly #encrypt: WebPushEncryptOptions;
+  readonly #jwts = new Map<string, { value: string; exp: number }>();
+
+  constructor(vapid: VapidConfig, options: WebPushOptions = {}) {
+    checkVapidConfig(vapid);
+    this.#vapid = vapid;
+    this.#fetch = options.fetch ?? defaultFetch();
+    this.#now = options.now ?? Date.now;
+    this.#ttl = options.ttlSeconds ?? 24 * 3600;
+    this.#cabinetUrl = options.cabinetUrl?.trim() || null;
+    this.#encrypt = options.encrypt ?? {};
+  }
+
+  async #jwt(audience: string): Promise<string> {
+    const nowSec = Math.floor(this.#now() / 1000);
+    const cached = this.#jwts.get(audience);
+    if (cached && cached.exp - 3600 > nowSec) return cached.value;
+    const exp = nowSec + 12 * 3600;
+    const value = await vapidJwt(this.#vapid, audience, exp);
+    this.#jwts.set(audience, { value, exp });
+    return value;
+  }
+
+  /** The JSON the service worker receives. */
+  payloadOf(message: PushMessage): WebPushPayload {
+    return {
+      title: message.title,
+      body: message.body,
+      data: {
+        ...message.data,
+        ...(this.#cabinetUrl && message.data.clubId ? { url: cabinetClubUrl(this.#cabinetUrl, message.data.clubId) } : {}),
+      },
+    };
+  }
+
+  async send(message: PushMessage): Promise<SendResult> {
+    const sub = parseWebPushToken(message.token);
+    if (!sub) return { ok: false, error: 'Web Push: подписка браузера повреждена', unregistered: true };
+    let body: Bytes;
+    let jwt: string;
+    try {
+      const payload = this.payloadOf(message);
+      let text = utf8(JSON.stringify(payload));
+      if (text.length > WEB_PUSH_MAX_PLAINTEXT) text = utf8(JSON.stringify({ ...payload, body: payload.body.slice(0, 500) }));
+      body = await encryptWebPush(text, { p256dh: b64urlDecode(sub.keys.p256dh), auth: b64urlDecode(sub.keys.auth) }, this.#encrypt);
+      jwt = await this.#jwt(new URL(sub.endpoint).origin);
+    } catch (e) {
+      return { ok: false, error: `Web Push: ${(e as Error).message}`, unregistered: false };
+    }
+    let res: { status: number; text(): Promise<string> };
+    try {
+      res = await this.#fetch(sub.endpoint, {
+        method: 'POST',
+        headers: {
+          authorization: `vapid t=${jwt}, k=${this.#vapid.publicKey}`,
+          ttl: String(this.#ttl),
+          urgency: 'high',
+          'content-encoding': 'aes128gcm',
+          'content-type': 'application/octet-stream',
+        },
+        body,
+      });
+    } catch (e) {
+      return { ok: false, error: `Web Push: сервис недоступен: ${(e as Error).message}`, unregistered: false };
+    }
+    if (res.status >= 200 && res.status < 300) return { ok: true };
+    const text = await res.text().catch(() => '');
+    return {
+      ok: false,
+      error: `Web Push ${res.status}: ${text.slice(0, 200)}`,
+      unregistered: res.status === 404 || res.status === 410,
+    };
+  }
+}
+
+/** ntfy priority: 5 = urgent, 4 = high, 3 = default. */
+const NTFY_PRIORITY: Partial<Record<PushKind, number>> = {
+  POWER_CRITICAL: 5,
+  POWER_ON_BATTERY: 5,
+  LIGHT_WITHOUT_GAME: 4,
+  LAMP_DARK_DURING_GAME: 4,
+  HUB_OFFLINE: 4,
+  SHIFT_NOT_CLOSED: 4,
+  UPS_UNREACHABLE: 4,
+  LAMP_FAILED: 4,
+  PREPAID_NOT_STARTED: 4,
+};
+
+/** ntfy tags that are emoji short codes, shown in front of the title. */
+const NTFY_TAGS: Partial<Record<PushKind, string>> = {
+  POWER_CRITICAL: 'rotating_light',
+  POWER_ON_BATTERY: 'zap',
+  LIGHT_WITHOUT_GAME: 'bulb',
+  LAMP_DARK_DURING_GAME: 'warning',
+  HUB_OFFLINE: 'satellite',
+  SHIFT_NOT_CLOSED: 'moneybag',
+  UPS_UNREACHABLE: 'battery',
+  LAMP_FAILED: 'bulb',
+  PREPAID_NOT_STARTED: 'hourglass',
+};
+
+/** HTTP headers are Latin-1: non-ASCII text goes as an RFC 2047 encoded-word, which ntfy decodes. */
+export function headerText(text: string): string {
+  if (/^[\x20-\x7e]*$/.test(text)) return text;
+  let bin = '';
+  for (const b of utf8(text)) bin += String.fromCharCode(b);
+  return `=?UTF-8?B?${btoa(bin)}?=`;
+}
+
+export interface NtfyOptions {
+  fetch?: PushFetch;
+  /** Access token of a protected ntfy server (`NTFY_TOKEN`). */
+  token?: string | null;
+  /** Cabinet address: tapping the notification opens `<cabinet>/#/clubs/<id>`. */
+  cabinetUrl?: string | null;
+}
+
+/** ntfy (ntfy.sh or self-hosted): POST the text to the topic URL kept as the device token. */
+export class NtfySender implements PushSender {
+  readonly enabled = true;
+  readonly #fetch: PushFetch;
+  readonly #token: string | null;
+  readonly #cabinetUrl: string | null;
+
+  constructor(options: NtfyOptions = {}) {
+    this.#fetch = options.fetch ?? defaultFetch();
+    this.#token = options.token?.trim() || null;
+    this.#cabinetUrl = options.cabinetUrl?.trim() || null;
+  }
+
+  async send(message: PushMessage): Promise<SendResult> {
+    if (!isNtfyTopicUrl(message.token)) return { ok: false, error: 'ntfy: неверный адрес темы', unregistered: true };
+    const kind = message.data.kind;
+    const headers: Record<string, string> = {
+      title: headerText(message.title),
+      tags: NTFY_TAGS[kind] ?? 'bell',
+      priority: String(NTFY_PRIORITY[kind] ?? 3),
+      'content-type': 'text/plain; charset=utf-8',
+    };
+    if (this.#cabinetUrl && message.data.clubId) headers.click = cabinetClubUrl(this.#cabinetUrl, message.data.clubId);
+    if (this.#token) headers.authorization = `Bearer ${this.#token}`;
+    let res: { status: number; text(): Promise<string> };
+    try {
+      res = await this.#fetch(message.token, { method: 'POST', headers, body: utf8(message.body) });
+    } catch (e) {
+      return { ok: false, error: `ntfy недоступен: ${(e as Error).message}`, unregistered: false };
+    }
+    if (res.status >= 200 && res.status < 300) return { ok: true };
+    const text = await res.text().catch(() => '');
+    return { ok: false, error: `ntfy ${res.status}: ${text.slice(0, 200)}`, unregistered: false };
+  }
+}
+
+type Channel = 'webpush' | 'ntfy' | 'fcm';
+
+/**
+ * Picks the channel by the device platform: `webpush` → Web Push, `ntfy` → ntfy,
+ * `android`/`ios`/`web` → FCM. A channel that is not configured is skipped and logged.
+ */
+export class RoutingSender implements PushSender {
+  readonly #routes: Partial<Record<Channel, PushSender>> = {};
+  readonly #log: Log;
+
+  constructor(routes: Partial<Record<Channel, PushSender | null>>, log: Log = () => {}) {
+    for (const [name, sender] of Object.entries(routes) as Array<[Channel, PushSender | null | undefined]>) {
+      if (sender) this.#routes[name] = sender;
+    }
+    this.#log = log;
+  }
+
+  get enabled(): boolean {
+    return Object.values(this.#routes).some((s) => s.enabled);
+  }
+
+  /** Channels that will actually send, for start-up logs. */
+  get channels(): Channel[] {
+    return (Object.entries(this.#routes) as Array<[Channel, PushSender]>).filter(([, s]) => s.enabled).map(([name]) => name);
+  }
+
+  async send(message: PushMessage): Promise<SendResult> {
+    const platform = message.platform ?? 'android';
+    const channel: Channel = platform === 'webpush' ? 'webpush' : platform === 'ntfy' ? 'ntfy' : 'fcm';
+    const sender = this.#routes[channel];
+    if (!sender || !sender.enabled) {
+      this.#log(`Push на устройство ${platform} не настроен (${channel}): «${message.title}» не отправлено`);
+      return { ok: false, error: `PUSH_DISABLED: канал ${channel} не настроен`, unregistered: false };
+    }
+    return sender.send(message);
+  }
+}
+
+/**
+ * Senders from environment variables (Supabase secrets or .env):
+ * VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY (+ VAPID_SUBJECT, else TS_CABINET_URL) → Web Push;
+ * ntfy is always on unless NTFY_DISABLED=1 (NTFY_TOKEN optional);
+ * CLOUD_FCM_SERVICE_ACCOUNT_JSON → FCM. TS_CABINET_URL is where a tap leads.
+ */
+export function pushSenderFromEnv(env: Record<string, string | undefined>, log: Log = () => {}): RoutingSender {
+  const cabinetUrl = env.TS_CABINET_URL?.trim() || null;
+  let webpush: PushSender | null = null;
+  const publicKey = env.VAPID_PUBLIC_KEY?.trim();
+  const privateKey = env.VAPID_PRIVATE_KEY?.trim();
+  if (publicKey && privateKey) {
+    const subject = env.VAPID_SUBJECT?.trim() || cabinetUrl || '';
+    try {
+      webpush = new WebPushSender({ publicKey, privateKey, subject }, { cabinetUrl });
+    } catch (e) {
+      log(`Web Push выключен: ${(e as Error).message}`);
+    }
+  }
+  const ntfy = env.NTFY_DISABLED === '1' ? null : new NtfySender({ token: env.NTFY_TOKEN ?? null, cabinetUrl });
+  let fcm: PushSender | null = null;
+  try {
+    const account = env.CLOUD_FCM_SERVICE_ACCOUNT_JSON?.trim() ? loadServiceAccount(env) : null;
+    if (account) fcm = new FcmSender(account);
+  } catch (e) {
+    log(`FCM выключен: ${(e as Error).message}`);
+  }
+  return new RoutingSender({ webpush, ntfy, fcm }, log);
 }

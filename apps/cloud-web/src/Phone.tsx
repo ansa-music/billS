@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import QRCode from 'qrcode';
 import type {
   ClubSummary,
   CreateOwnerKeyResponse,
-  DevicePlatform,
   OwnerKeyView,
   PushKind,
   PushRule,
@@ -13,6 +11,7 @@ import type {
 } from '@bills/domain';
 import { PUSH_KINDS, pushRuleAllows } from '@bills/domain';
 import {
+  SUPABASE_MODE,
   createOwnerKey,
   fetchOverview,
   fetchOwnerKeys,
@@ -23,6 +22,12 @@ import {
   updatePushRules,
 } from './api.ts';
 import { formatDateTime } from './format.ts';
+import { QrImage } from './QrImage.tsx';
+import { localDeviceIds } from './localDevices.ts';
+import { NtfySection } from './NtfySection.tsx';
+import { forgetNtfy, currentNtfyTopic } from './ntfy.ts';
+import { WebPushSection } from './WebPushSection.tsx';
+import { disableWebPush, webPushDeviceId } from './webPush.ts';
 import { enablePhonePush, usePhonePushStatus } from './phonePush.ts';
 import type { PhonePushStatus } from './phonePush.ts';
 import { nativeBridge } from './platform.ts';
@@ -30,11 +35,17 @@ import { Section, loadingText } from './shared.tsx';
 
 const LOCAL_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-const PLATFORM_LABEL: Record<DevicePlatform, string> = {
+const PLATFORM_LABEL: Record<string, string> = {
   android: 'Android',
   ios: 'iPhone',
   web: 'Браузер',
+  webpush: 'Браузер / приложение с экрана «Домой»',
+  ntfy: 'ntfy',
 };
+
+function platformLabel(p: string): string {
+  return PLATFORM_LABEL[p] ?? p;
+}
 
 function when(ms: number): string {
   return formatDateTime(ms, LOCAL_ZONE);
@@ -169,10 +180,11 @@ function phoneStatusText(s: PhonePushStatus): { text: string; tone: 'ok' | 'warn
   }
 }
 
+/** The FCM phone of the self-hosted cloud. With Supabase the phone uses ntfy instead (NtfySection). */
 function ThisPhone() {
   const bridge = nativeBridge();
   const status = usePhonePushStatus();
-  if (!bridge) return null;
+  if (!bridge || SUPABASE_MODE) return null;
   const { text, tone } = phoneStatusText(status);
   return (
     <Section title="Этот телефон">
@@ -214,7 +226,9 @@ function ThisPhone() {
 function testResultText(r: TestPushResponse, devices: number): string {
   if (!r.pushEnabled) return 'Push-уведомления на облаке выключены — ничего не отправлено.';
   if (devices === 0 && r.sent === 0 && r.failed === 0) {
-    return 'Нет устройств: войдите в приложение TS на телефоне и включите уведомления.';
+    return SUPABASE_MODE
+      ? 'Нет устройств: включите уведомления на этом устройстве или через ntfy.'
+      : 'Нет устройств: войдите в приложение TS на телефоне и включите уведомления.';
   }
   return r.failed > 0 ? `Отправлено: ${r.sent}, не доставлено: ${r.failed}.` : `Отправлено: ${r.sent}.`;
 }
@@ -232,6 +246,8 @@ function Devices({ settings, reload }: { settings: PushSettingsView; reload: () 
     try {
       await removeDevice(id);
       if (bridge && bridge.deviceId() === id) await bridge.setDeviceId(null);
+      if (webPushDeviceId() === id) await disableWebPush();
+      if (currentNtfyTopic()?.deviceId === id) forgetNtfy();
       await reload();
     } catch (e) {
       setError(`Не удалось удалить: ${(e as Error).message}`);
@@ -255,21 +271,31 @@ function Devices({ settings, reload }: { settings: PushSettingsView; reload: () 
     }
   }
 
+  const mine = new Set(localDeviceIds());
+  const nativeId = bridge?.deviceId();
+  if (nativeId) mine.add(nativeId);
+
   return (
     <Section title="Устройства">
       {settings.devices.length === 0 ? (
-        <p className="empty">Пока ни одного телефона. Войдите в приложение TS на телефоне — он появится здесь.</p>
+        <p className="empty">
+          {SUPABASE_MODE
+            ? 'Пока ни одного устройства. Включите уведомления выше — устройство появится здесь.'
+            : 'Пока ни одного телефона. Войдите в приложение TS на телефоне — он появится здесь.'}
+        </p>
       ) : (
         <ul className="plain-list">
           {settings.devices.map((d) => (
             <li key={d.id} className="list-item">
               <div className="list-main">
                 <strong>
-                  {d.name || PLATFORM_LABEL[d.platform]}
-                  {bridge?.deviceId() === d.id && <span className="tag tag-new">этот телефон</span>}
+                  {d.name || platformLabel(d.platform)}
+                  {mine.has(d.id) && (
+                    <span className="tag tag-new">{bridge ? 'этот телефон' : 'это устройство'}</span>
+                  )}
                 </strong>
                 <span className="hint">
-                  {PLATFORM_LABEL[d.platform]} · добавлено {when(d.createdAt)}
+                  {platformLabel(d.platform)} · добавлено {when(d.createdAt)}
                 </span>
                 {d.lastError && <span className="form-error">Последняя ошибка: {d.lastError}</span>}
               </div>
@@ -277,7 +303,7 @@ function Devices({ settings, reload }: { settings: PushSettingsView; reload: () 
                 type="button"
                 className="btn btn-small"
                 disabled={busy !== null}
-                onClick={() => void remove(d.id, d.name || PLATFORM_LABEL[d.platform])}
+                onClick={() => void remove(d.id, d.name || platformLabel(d.platform))}
               >
                 Удалить
               </button>
@@ -308,26 +334,6 @@ function Devices({ settings, reload }: { settings: PushSettingsView; reload: () 
 // Owner keys
 // ---------------------------------------------------------------------------
 
-function QrImage({ text }: { text: string }) {
-  const [src, setSrc] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    QRCode.toDataURL(text, { width: 640, margin: 2, errorCorrectionLevel: 'M', color: { dark: '#000000', light: '#ffffff' } })
-      .then((url) => {
-        if (!cancelled) setSrc(url);
-      })
-      .catch(() => {
-        if (!cancelled) setSrc(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [text]);
-  return (
-    <div className="qr">{src ? <img src={src} alt="QR-код для входа с телефона" /> : <span className="hint">QR…</span>}</div>
-  );
-}
-
 function NewKey({ created, onDone }: { created: CreateOwnerKeyResponse; onDone: () => void }) {
   const [copied, setCopied] = useState(false);
   const keyRef = useRef<HTMLElement>(null);
@@ -355,7 +361,7 @@ function NewKey({ created, onDone }: { created: CreateOwnerKeyResponse; onDone: 
         <strong>Ключ показывается один раз.</strong> Отсканируйте QR приложением TS на телефоне или введите ключ
         вручную. Облако хранит только его отпечаток — потом ключ не посмотреть, можно только создать новый.
       </p>
-      <QrImage text={created.qr} />
+      <QrImage text={created.qr} alt="QR-код для входа с телефона" />
       <div className="key-line">
         <code ref={keyRef} className="key-text">
           {created.key}
@@ -484,6 +490,17 @@ function Keys() {
   );
 }
 
+/** Supabase mode: no owner keys — the phone signs in like the browser. */
+function PhoneSignIn() {
+  return (
+    <Section title="Вход на телефоне">
+      <p className="hint">
+        Вход на телефоне — по почте и паролю или ссылке на почту. Ключи владельца и QR для входа не нужны.
+      </p>
+    </Section>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -564,10 +581,14 @@ export function Phone() {
         <>
           {!settings.pushEnabled && (
             <p className="notice" role="status">
-              Push-уведомления на облаке выключены: не задан ключ FCM. Правила сохраняются, но ничего не отправляется.
+              {SUPABASE_MODE
+                ? 'Push-уведомления на сервере выключены: не заданы ключи VAPID. Правила сохраняются, но ничего не отправляется.'
+                : 'Push-уведомления на облаке выключены: не задан ключ FCM. Правила сохраняются, но ничего не отправляется.'}
             </p>
           )}
           <ThisPhone />
+          {SUPABASE_MODE && !nativeBridge() && <WebPushSection onChange={reload} />}
+          {SUPABASE_MODE && <NtfySection onChange={reload} />}
           <RulesTable
             rules={settings.rules}
             clubs={clubs}
@@ -578,7 +599,7 @@ export function Phone() {
           <Devices settings={settings} reload={reload} />
         </>
       )}
-      <Keys />
+      {SUPABASE_MODE ? <PhoneSignIn /> : <Keys />}
     </main>
   );
 }

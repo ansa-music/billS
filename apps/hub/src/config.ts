@@ -50,8 +50,8 @@ export interface HubConfig {
   /** How often the outbox is pushed to the cloud (also the heartbeat period). */
   cloudSyncIntervalMs: number;
   /**
-   * Origins of screens served from another domain (the public demo on Firebase Hosting),
-   * e.g. `https://*.web.app`. Empty: no CORS — the club's own screens come from the HUB itself.
+   * Origins of screens served from another domain (a club screen on Cloudflare/GitHub Pages),
+   * e.g. `https://*.pages.dev`. Empty: no CORS — the club's own screens come from the HUB itself.
    */
   corsOrigins: string[];
   /** Public demo club: fixed demo keys, GET /api/demo, the database is wiped nightly (src/demo.ts). */
