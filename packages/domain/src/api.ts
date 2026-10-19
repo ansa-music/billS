@@ -110,7 +110,10 @@ export interface HubState {
   tariffs: Array<{ id: string; name: string; config: TariffConfig }>;
   tables: TableView[];
   unpaid: SessionView[];
-  /** Open bar orders on live and unpaid games (stage 4). */
+  /**
+   * Open bar orders: on live and unpaid games, plus orders on no check whose game is
+   * already over (e.g. a prepaid game) — those are paid on a check of their own.
+   */
   orders: OrderView[];
   alerts: AlertView[];
   manualMode: ManualModeView;
@@ -152,11 +155,16 @@ export type CheckStatus = 'OPEN' | 'PAID' | 'VOID';
 
 export interface CheckItemView {
   id: string;
-  /** ORDER is reserved for bar orders (stage 4). */
+  /** GAME — time on a table; ORDER — one line of a bar order. */
   kind: 'GAME' | 'ORDER';
-  /** "Стол 1" for a game. */
+  /** "Стол 1" for a game, the product name for an order line. */
   title: string;
   amount: Minor;
+  /** ORDER lines: the order, quantity and price per unit (amount = qty × unitPrice). */
+  orderId: string | null;
+  qty: number | null;
+  unitPrice: Minor | null;
+  /** The game of the line — for an ORDER line, the game the order was made at. Lines follow their game. */
   sessionId: string | null;
   tableId: string | null;
   startedAt: number | null;
@@ -266,12 +274,20 @@ export interface ShiftReport extends ShiftTotals {
   discounts: Minor;
   /** Unpaid games voided with approval during the shift. */
   cancelledGames: number;
+  /**
+   * Checks paid during the shift split by what was sold: time on tables and the bar.
+   * A check discount is spread over both in proportion; time + bar = their totals.
+   */
+  revenue: { time: Minor; bar: Minor };
   movements: CashMovementView[];
 }
 
 /** POST /api/checks */
 export interface CreateCheckRequest {
+  /** Stopped games; their open bar orders join the check as ORDER lines. */
   sessionIds: string[];
+  /** Open bar orders to bill without their game (paid separately, e.g. after a prepaid game). */
+  orderIds?: string[];
 }
 
 /** POST /api/checks/:checkId/items */
@@ -518,7 +534,8 @@ export interface UpdateProductRequest {
   isActive?: boolean;
 }
 
-export type OrderStatus = 'OPEN' | 'CANCELLED';
+/** OPEN — not paid yet (maybe already on a check); CLOSED — its check is paid; CANCELLED — with a reason. */
+export type OrderStatus = 'OPEN' | 'CLOSED' | 'CANCELLED';
 
 export interface OrderItemView {
   id: string;
@@ -544,6 +561,10 @@ export interface OrderView {
   cancelledAt: number | null;
   cancelledBy: string | null;
   cancelReason: string | null;
+  /** The guest check it is billed on; null until a check takes it. */
+  checkId: string | null;
+  /** When its check was paid. */
+  closedAt: number | null;
 }
 
 /** POST /api/sessions/:sessionId/orders (201 → OrderView). The game must be ACTIVE or AWAITING_PAYMENT. */

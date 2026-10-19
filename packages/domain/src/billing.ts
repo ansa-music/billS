@@ -94,6 +94,26 @@ export function checkTotals(
   return { subtotal, discount: disc, total, paid, refunded, due: Math.max(0, total - (paid - refunded)) };
 }
 
+/**
+ * What a paid check earned from time and from the bar. The discount is spread in
+ * proportion to the two parts (half up for the bar), so time + bar = subtotal − discount.
+ */
+export function splitRevenue(
+  lines: ReadonlyArray<{ kind: 'GAME' | 'ORDER'; amount: Minor }>,
+  discount: Minor,
+): { time: Minor; bar: Minor } {
+  let time = 0;
+  let bar = 0;
+  for (const l of lines) {
+    if (l.kind === 'ORDER') bar += l.amount;
+    else time += l.amount;
+  }
+  const subtotal = time + bar;
+  if (subtotal === 0 || discount === 0) return { time, bar };
+  const barDiscount = Math.round((discount * bar) / subtotal);
+  return { time: time - (discount - barDiscount), bar: bar - barDiscount };
+}
+
 /** Money taken by each method minus what was refunded by it: the most that can be refunded. */
 export function netPaidByMethod(entries: readonly LedgerEntry[]): Record<PaymentMethod, Minor> {
   const net: Record<PaymentMethod, Minor> = { CASH: 0, CARD: 0, QR: 0 };
