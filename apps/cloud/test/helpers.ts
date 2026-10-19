@@ -5,6 +5,8 @@ import type { SqlDriver } from '../src/db/driver.ts';
 import { migrate } from '../src/db/migrate.ts';
 import { openSqlite } from '../src/db/sqlite.ts';
 import { buildApp } from '../src/http/app.ts';
+import type { PushSender } from '../src/push.ts';
+import { DisabledSender, PushDispatcher } from '../src/push.ts';
 import { DEMO_HUBS, DEMO_OWNER, seedDemo } from '../src/seed.ts';
 
 /** Monday 2026-10-12, 12:00 in Almaty (UTC+5). */
@@ -18,21 +20,37 @@ export interface TestCloud {
   db: SqlDriver;
   clock: ManualClock;
   app: FastifyInstance;
+  push: PushDispatcher;
+  /** Lines the push dispatcher wrote to its log. */
+  pushLog: string[];
   close(): Promise<void>;
 }
 
+export interface TestCloudOptions {
+  sender?: PushSender;
+  maxAgeMs?: number;
+}
+
 /** A cloud on an in-memory SQLite with the demo seed. */
-export async function createTestCloud(): Promise<TestCloud> {
+export async function createTestCloud(options: TestCloudOptions = {}): Promise<TestCloud> {
   const clock = new ManualClock(MONDAY_NOON);
   const db = openSqlite(':memory:');
   await migrate(db, clock.now());
   await seedDemo(db, clock.now());
-  const app = buildApp({ db, clock });
+  const pushLog: string[] = [];
+  const log = (m: string) => pushLog.push(m);
+  const push = new PushDispatcher(db, options.sender ?? new DisabledSender(log), () => clock.now(), {
+    log,
+    ...(options.maxAgeMs !== undefined ? { maxAgeMs: options.maxAgeMs } : {}),
+  });
+  const app = buildApp({ db, clock, push });
   await app.ready();
   return {
     db,
     clock,
     app,
+    push,
+    pushLog,
     async close() {
       await app.close();
       await db.close();
@@ -40,8 +58,8 @@ export async function createTestCloud(): Promise<TestCloud> {
   };
 }
 
-export function cloud(t: { after: (fn: () => Promise<void>) => void }): Promise<TestCloud> {
-  const p = createTestCloud();
+export function cloud(t: { after: (fn: () => Promise<void>) => void }, options: TestCloudOptions = {}): Promise<TestCloud> {
+  const p = createTestCloud(options);
   t.after(async () => (await p).close());
   return p;
 }

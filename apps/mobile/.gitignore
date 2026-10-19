@@ -1,0 +1,7 @@
+www/
+# Firebase app configs and signing material stay out of git (see docs/MOBILE_RELEASE_RU.md).
+android/app/google-services.json
+ios/App/App/GoogleService-Info.plist
+android/keystore.properties
+*.jks
+*.keystore

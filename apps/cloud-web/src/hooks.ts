@@ -50,11 +50,13 @@ export type Route =
   | { kind: 'apps' }
   | { kind: 'club'; id: string }
   | { kind: 'tariffs'; id: string }
-  | { kind: 'shifts'; id: string };
+  | { kind: 'shifts'; id: string }
+  | { kind: 'phone' };
 
 export function parseHash(hash: string): Route {
   const path = hash.replace(/^#/, '').replace(/\/+$/, '') || '/';
   if (path === '/apps') return { kind: 'apps' };
+  if (path === '/phone') return { kind: 'phone' };
   const m = /^\/clubs\/([^/]+)(?:\/(tariffs|shifts))?$/.exec(path);
   if (m && m[1]) {
     const id = decodeURIComponent(m[1]);
@@ -65,7 +67,7 @@ export function parseHash(hash: string): Route {
   return { kind: 'overview' };
 }
 
-/** Routing by `location.hash`: #/, #/apps, #/clubs/:id,#/clubs/:id/tariffs, #/clubs/:id/shifts. */
+/** Routing by `location.hash`: #/, #/apps, #/clubs/:id, #/clubs/:id/tariffs, #/clubs/:id/shifts, #/phone. */
 export function useHashRoute(): Route {
   const [route, setRoute] = useState<Route>(() => parseHash(location.hash));
   useEffect(() => {

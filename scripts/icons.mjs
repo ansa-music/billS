@@ -55,7 +55,7 @@ const STROKE = 0.17; // толщина штриха
 // 1 − 2R = 2R − STROKE  →  R = (1 + STROKE) / 4. Высота S = 1u.
 const S_R = (1 + STROKE) / 4;
 const GAP = 0.14; // просвет между T и S
-const TEXT_WIDTH = T_WIDTH + GAP + 2 * S_R; // ≈ 1.52u
+export const TEXT_WIDTH = T_WIDTH + GAP + 2 * S_R; // ≈ 1.52u
 
 /** Точка (x, y) в единицах «u» внутри буквы T? */
 function inT(x, y) {
@@ -86,7 +86,7 @@ function inS(x, y) {
 }
 
 /** Надпись «TS» в пикселях: левый верхний угол (ox, oy), высота букв u. */
-function inText(px, py, ox, oy, u) {
+export function inText(px, py, ox, oy, u) {
   const x = (px - ox) / u;
   const y = (py - oy) / u;
   if (inT(x, y)) return true;
@@ -99,7 +99,7 @@ function inText(px, py, ox, oy, u) {
  * Цвет точки (x, y) в непрерывных координатах.
  * size — сторона квадрата, textFrac — доля стороны под высоту букв.
  */
-function makeScene(size, textFrac) {
+export function makeScene(size, textFrac) {
   const u = size * textFrac;
   const ox = (size - TEXT_WIDTH * u) / 2;
   const oy = (size - u) / 2;
@@ -115,8 +115,7 @@ function makeScene(size, textFrac) {
 }
 
 /** Растеризация в RGBA с supersampling SS×SS на пиксель. */
-function render(size, textFrac, SS = 4) {
-  const colorAt = makeScene(size, textFrac);
+export function render(size, textFrac, SS = 4, colorAt = makeScene(size, textFrac)) {
   const data = new Uint8Array(size * size * 4);
   const inv = 1 / (SS * SS);
   for (let y = 0; y < size; y++) {
@@ -176,7 +175,7 @@ function chunk(type, data) {
 }
 
 /** Кодирует RGBA-буфер в PNG (8 бит, color type 6, фильтр 0 на каждую строку). */
-function encodePNG(width, height, rgba) {
+export function encodePNG(width, height, rgba) {
   const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
   const ihdr = Buffer.alloc(13);
@@ -240,28 +239,32 @@ function svgIcon() {
 }
 
 // ---------- main ----------
+// apps/mobile/scripts/icons.mjs берёт отсюда рисование и PNG; иконки PWA пишутся только при прямом запуске.
 
-const targets = [
-  { file: "icon-192.png", size: 192, textFrac: 0.39 }, // maskable: надпись в безопасной зоне 80 %
-  { file: "icon-512.png", size: 512, textFrac: 0.39 },
-  { file: "apple-touch-icon.png", size: 180, textFrac: 0.42 }, // iOS скругляет сам
-];
+if (import.meta.main) {
 
-mkdirSync(OUT_DIR, { recursive: true });
+  const targets = [
+    { file: "icon-192.png", size: 192, textFrac: 0.39 }, // maskable: надпись в безопасной зоне 80 %
+    { file: "icon-512.png", size: 512, textFrac: 0.39 },
+    { file: "apple-touch-icon.png", size: 180, textFrac: 0.42 }, // iOS скругляет сам
+  ];
 
-const written = [];
-for (const t of targets) {
-  const png = encodePNG(t.size, t.size, render(t.size, t.textFrac));
-  const path = join(OUT_DIR, t.file);
-  writeFileSync(path, png);
-  written.push({ path, bytes: png.length, dims: `${t.size}×${t.size}` });
-}
+  mkdirSync(OUT_DIR, { recursive: true });
 
-const svg = svgIcon();
-const svgPath = join(OUT_DIR, "icon.svg");
-writeFileSync(svgPath, svg, "utf8");
-written.push({ path: svgPath, bytes: Buffer.byteLength(svg, "utf8"), dims: "vector" });
+  const written = [];
+  for (const t of targets) {
+    const png = encodePNG(t.size, t.size, render(t.size, t.textFrac));
+    const path = join(OUT_DIR, t.file);
+    writeFileSync(path, png);
+    written.push({ path, bytes: png.length, dims: `${t.size}×${t.size}` });
+  }
 
-for (const w of written) {
-  console.log(`${w.path.replace(ROOT, ".").replaceAll("\\", "/")}  ${w.dims}  ${w.bytes} bytes`);
+  const svg = svgIcon();
+  const svgPath = join(OUT_DIR, "icon.svg");
+  writeFileSync(svgPath, svg, "utf8");
+  written.push({ path: svgPath, bytes: Buffer.byteLength(svg, "utf8"), dims: "vector" });
+
+  for (const w of written) {
+    console.log(`${w.path.replace(ROOT, ".").replaceAll("\\", "/")}  ${w.dims}  ${w.bytes} bytes`);
+  }
 }

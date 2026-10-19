@@ -163,14 +163,14 @@ export function formatSize(bytes: number): string {
 }
 
 /** The platform of the device the page is open on, for putting its section first. */
-export type DevicePlatform = 'android' | 'ios' | 'windows' | 'linux' | 'mac' | 'other';
+export type VisitorPlatform = 'android' | 'ios' | 'windows' | 'linux' | 'mac' | 'other';
 
 /**
  * Guesses the device from `navigator.userAgent` (and `maxTouchPoints`, because
  * iPadOS Safari reports itself as a Mac). Android goes before Linux: its user
  * agent contains both.
  */
-export function detectPlatform(userAgent: string, maxTouchPoints = 0): DevicePlatform {
+export function detectPlatform(userAgent: string, maxTouchPoints = 0): VisitorPlatform {
   const ua = userAgent;
   if (/Android/i.test(ua)) return 'android';
   if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';

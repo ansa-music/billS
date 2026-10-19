@@ -13,6 +13,14 @@ export interface CloudConfig {
   secureCookies: boolean;
   /** Built owner cabinet (apps/cloud-web/dist), served on `/` when the folder exists. */
   webDistPath: string;
+  /** Address of the cloud for phones (the login QR); null → taken from each request. */
+  publicUrl: string | null;
+  /** A HUB not heard this long gets a HUB_OFFLINE push. */
+  hubOfflineMs: number;
+  /** A cash shift open this long gets a SHIFT_NOT_CLOSED push. */
+  shiftOpenMs: number;
+  /** Alerts older than this when they reach the cloud are not pushed. */
+  pushMaxAgeMs: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): CloudConfig {
@@ -27,5 +35,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CloudConfig {
     demoSeed,
     secureCookies: env.CLOUD_SECURE_COOKIES === '1',
     webDistPath: env.CLOUD_WEB_DIST ?? fileURLToPath(new URL('../../cloud-web/dist', import.meta.url)),
+    publicUrl: env.CLOUD_PUBLIC_URL?.trim().replace(/\/+$/, '') || null,
+    hubOfflineMs: Number(env.CLOUD_HUB_OFFLINE_MINUTES ?? 10) * 60_000,
+    shiftOpenMs: Number(env.CLOUD_SHIFT_OPEN_HOURS ?? 20) * 3_600_000,
+    pushMaxAgeMs: Number(env.CLOUD_PUSH_MAX_AGE_MINUTES ?? 120) * 60_000,
   };
 }

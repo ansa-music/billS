@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { ClassifiedRelease, DevicePlatform, ReleaseAsset } from '@bills/domain';
+import type { ClassifiedRelease, VisitorPlatform, ReleaseAsset } from '@bills/domain';
 import { detectPlatform, formatSize, releasesPageUrl } from '@bills/domain';
 import { Icon } from '../icons.tsx';
 import { useInstallPrompt, useStandalone } from '../pwa.tsx';
@@ -17,13 +17,13 @@ import './apps.css';
 
 type SectionKey = 'android' | 'ios' | 'desktop' | 'screen';
 
-function sectionOrder(platform: DevicePlatform): SectionKey[] {
+function sectionOrder(platform: VisitorPlatform): SectionKey[] {
   if (platform === 'ios') return ['ios', 'screen', 'android', 'desktop'];
   if (platform === 'windows' || platform === 'linux' || platform === 'mac') return ['desktop', 'screen', 'android', 'ios'];
   return ['android', 'screen', 'ios', 'desktop'];
 }
 
-function devicePlatform(): DevicePlatform {
+function devicePlatform(): VisitorPlatform {
   try {
     return detectPlatform(navigator.userAgent, navigator.maxTouchPoints ?? 0);
   } catch {
