@@ -107,7 +107,9 @@ a {
 .app {
   max-width: 1440px;
   margin: 0 auto;
-  padding: 16px 24px 48px;
+  /* Safe areas: the phone app draws under the status bar and the notch (0 in a browser). */
+  padding: calc(16px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right))
+    calc(48px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left));
   display: grid;
   gap: 20px;
 }
@@ -384,7 +386,12 @@ a:focus-visible {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: calc(24px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+    calc(24px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
+}
+
+.offline + .login-page {
+  padding-top: 24px;
 }
 
 .login {
@@ -1271,4 +1278,288 @@ a:focus-visible {
   .btn-small {
     min-height: 44px;
   }
+}
+
+/* Phone: the login form and «Телефон и уведомления» are the phone app's main screens,
+   so they work down to 360px; the rest of the cabinet keeps the tablet minimum. */
+
+body:has(.login-page),
+body:has(.phone-page) {
+  min-width: 0;
+}
+
+@media (max-width: 600px) {
+  .app {
+    padding-left: calc(12px + env(safe-area-inset-left));
+    padding-right: calc(12px + env(safe-area-inset-right));
+    gap: 16px;
+  }
+
+  .login {
+    padding: 20px;
+  }
+
+  .panel {
+    padding: 14px;
+  }
+
+  .grid-wrap {
+    margin: 0 -14px;
+    padding: 0 14px;
+  }
+
+  .club-page-head h2 {
+    font-size: 22px;
+  }
+}
+
+.btn-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.btn-link[aria-current='page'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Login: way to sign in */
+
+.seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.seg button {
+  min-height: 38px;
+  border: none;
+  border-radius: 9px;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.seg button[aria-selected='true'] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.2);
+}
+
+.btn-scan {
+  min-height: 56px;
+  font-size: 17px;
+}
+
+.key-input,
+.key-text {
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  letter-spacing: 0.02em;
+}
+
+/* «Телефон и уведомления» */
+
+.phone-page {
+  display: grid;
+  gap: 20px;
+  max-width: 980px;
+  width: 100%;
+  min-width: 0;
+}
+
+.notice {
+  padding: 12px 14px;
+  border: 1px solid color-mix(in oklab, var(--warn) 55%, transparent);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--warn) 14%, var(--surface));
+  font-size: 14px;
+}
+
+.phone-status {
+  font-weight: 600;
+}
+
+.phone-status[data-tone='ok'] {
+  color: var(--accent);
+}
+
+.phone-status[data-tone='warn'] {
+  color: color-mix(in oklab, var(--warn) 70%, var(--text));
+}
+
+.phone-status[data-tone='muted'] {
+  color: var(--muted);
+}
+
+.facts {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.facts div {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr;
+  gap: 12px;
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.break {
+  overflow-wrap: anywhere;
+}
+
+.rules-wrap {
+  -webkit-overflow-scrolling: touch;
+}
+
+.rules-grid th.rules-cell {
+  text-transform: none;
+  letter-spacing: 0;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rules-grid .rules-kind {
+  min-width: 170px;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+
+.rules-grid .rules-cell {
+  text-align: center;
+  min-width: 84px;
+}
+
+.rules-grid td.rules-cell[data-own] {
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+}
+
+.rules-check {
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.list-item:first-child {
+  border-top: none;
+}
+
+.list-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.list-main strong {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.list-item .btn {
+  flex: none;
+}
+
+.key-form .btn {
+  align-self: end;
+}
+
+.new-key {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.new-key-warn {
+  font-size: 14px;
+  color: color-mix(in oklab, var(--warn) 55%, var(--text));
+}
+
+.qr {
+  width: min(320px, 100%);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  padding: 8px;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.qr img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+.key-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  max-width: 100%;
+}
+
+.key-text {
+  font-size: 16px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.key-label {
+  font-weight: 400;
+}
+
+.key-label::before {
+  content: '· ';
+  color: var(--muted);
 }

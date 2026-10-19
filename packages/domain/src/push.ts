@@ -204,3 +204,12 @@ export function normalizeCloudUrl(input: string): string | null {
   if (!url.hostname) return null;
   return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, '')}`;
 }
+
+/** Whether a push of `kind` about `clubId` goes out: a club rule beats an all-clubs rule, which beats the default. */
+export function pushRuleAllows(rules: ReadonlyArray<PushRule>, kind: PushKind, clubId: string): boolean {
+  const forClub = rules.find((r) => r.kind === kind && r.clubId === clubId);
+  if (forClub) return forClub.enabled;
+  const forAll = rules.find((r) => r.kind === kind && r.clubId === null);
+  if (forAll) return forAll.enabled;
+  return PUSH_KINDS.find((k) => k.kind === kind)?.defaultOn ?? false;
+}

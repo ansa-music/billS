@@ -1,0 +1,36 @@
+{
+  "name": "@bills/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "sync": "npm run build && cap sync",
+    "build:android-debug": "node scripts/android.mjs assembleDebug",
+    "build:android-release": "node scripts/android.mjs bundleRelease",
+    "icons": "node scripts/icons.mjs"
+  },
+  "dependencies": {
+    "@bills/domain": "*",
+    "@capacitor-firebase/messaging": "^8.5.2",
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/barcode-scanner": "^3.1.3",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/device": "^8.0.0",
+    "@capacitor/ios": "^8.5.3",
+    "@capacitor/preferences": "^8.0.1",
+    "@capacitor/splash-screen": "^8.0.0",
+    "firebase": "^12.6.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "vite": "^8.3.4"
+  }
+}

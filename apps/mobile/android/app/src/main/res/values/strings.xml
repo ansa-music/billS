@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">TS</string>
+    <string name="title_activity_main">TS</string>
+    <string name="package_name">kz.ts.owner</string>
+    <string name="custom_url_scheme">kz.ts.owner</string>
+</resources>

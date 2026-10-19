@@ -71,6 +71,11 @@ node --env-file-if-exists=.env apps/cloud/src/main.ts    # или: npm run dev -
 | `CLOUD_DATABASE_URL` | — | строка подключения PostgreSQL; если задана, SQLite не используется |
 | `CLOUD_DEMO_SEED` | `1` для SQLite, `0` для PostgreSQL | демо-сид на пустой базе |
 | `CLOUD_SECURE_COOKIES` | `0` | ставить флаг `Secure` на cookie владельца (только за HTTPS) |
+| `CLOUD_FCM_SERVICE_ACCOUNT` / `CLOUD_FCM_SERVICE_ACCOUNT_JSON` | — | ключ сервисного аккаунта Firebase (путь к JSON или сам JSON); без него push выключены |
+| `CLOUD_PUBLIC_URL` | из запроса | HTTPS-адрес облака для QR входа с телефона |
+| `CLOUD_HUB_OFFLINE_MINUTES` | `10` | через сколько минут тишины HUB считается пропавшим (push `HUB_OFFLINE`) |
+| `CLOUD_SHIFT_OPEN_HOURS` | `20` | через сколько часов открытая смена даёт push `SHIFT_NOT_CLOSED` |
+| `CLOUD_PUSH_MAX_AGE_MINUTES` | `120` | тревоги, дошедшие до облака позже (HUB догоняет журнал), не пушатся |
 
 Демо-сид создаёт компанию «Демо сеть», владельца `owner@demo.kz` / `demo1234`, клубы
 «Клуб «Демо»» и «Клуб «Север»» (Asia/Almaty) и по одному HUB с фиксированными ключами —
@@ -115,6 +120,49 @@ HUB (`Authorization: Bearer <ключ>`; `hubId` в теле должен сов
 | `GET /api/health` | `{ ok: true, now }` |
 
 Типы — в `packages/domain/src/cloud.ts`.
+
+## Телефон владельца: вход по ключу и push
+
+Приложение `apps/mobile` (Capacitor) — тот же кабинет, но запросы идут на адрес облака из
+настроек приложения с `Authorization: Bearer <токен сессии>` и `x-ts-app: 1`, без cookie.
+Облако принимает владельца и по cookie, и по Bearer; при `x-ts-app: 1` ответы входа содержат
+`token` и cookie не ставят. CORS отвечает только на источники WebView приложения
+(`https://localhost`, `capacitor://localhost`, `http://localhost`).
+
+| Метод и путь | Ответ |
+|---|---|
+| `POST /api/auth/key { key }` | вход по ключу `OWNER-…` → `CloudLoginResponse` (401 `INVALID_KEY`) |
+| `GET /api/owner/keys` | `OwnerKeyView[]` — живые ключи владельца |
+| `POST /api/owner/keys { label? }` | `CreateOwnerKeyResponse`: ключ (один раз) и текст QR `ts://login?cloud=…&key=…` |
+| `DELETE /api/owner/keys/:id` | отозвать ключ |
+| `POST /api/owner/devices { token, platform, name? }` | `DeviceView` — регистрация FCM-токена (повтор с тем же токеном обновляет запись) |
+| `DELETE /api/owner/devices/:id` | убрать телефон (при выходе из приложения) |
+| `GET /api/owner/push` | `PushSettingsView`: включены ли push на облаке, виды, правила, устройства |
+| `PUT /api/owner/push/rules { rules }` | полный список правил → `PushSettingsView` |
+| `POST /api/owner/push/test` | тестовый push на свои устройства → `TestPushResponse` |
+
+Ключи владельца хранятся sha256-хэшем (`owner_keys`), как ключи HUB.
+
+**Что пушится** (`src/push.ts`, типы — `packages/domain/src/push.ts`):
+- тревоги HUB (`alert.raised`): свет без игры, игра без света, клуб на ИБП, батарея ИБП
+  на исходе — включены по умолчанию; ИБП не отвечает, лампа не сработала, предоплаченная игра
+  не началась, прочее — выключены по умолчанию;
+- `HUB_OFFLINE` — HUB молчит дольше `CLOUD_HUB_OFFLINE_MINUTES` (один раз за эпизод; когда HUB
+  снова на связи — push «HUB снова на связи», сторож перевзводится);
+- `SHIFT_NOT_CLOSED` — кассовая смена открыта дольше `CLOUD_SHIFT_OPEN_HOURS` (один раз на смену).
+
+**Кому:** всем владельцам компании клуба, у кого правило разрешает вид: правило для клуба
+важнее правила «все клубы», то — важнее умолчания (`pushRuleAllows`).
+
+**Как:** проекция и сторож (раз в минуту в `main.ts`) кладут уведомление в `push_queue` в той же
+транзакции, что и событие; `dedupe_key` защищает от повторов при повторной доставке пачки.
+После коммита `PushDispatcher.flush()` рассылает очередь через FCM HTTP v1: OAuth-токен
+получается из ключа сервисного аккаунта (JWT RS256 через `node:crypto`, без SDK Google) и
+кэшируется на час. Токен, о котором FCM отвечает `UNREGISTERED`/404, удаляет устройство.
+Тревоги старше `CLOUD_PUSH_MAX_AGE_MINUTES` помечаются `STALE`. **Без ключа** — режим
+«push выключены»: очередь помечается `DISABLED`, каждое уведомление пишется в лог, правила и
+устройства сохраняются. Тесты (`test/push.test.ts`) гоняют настоящий `FcmSender` на фейковом
+FCM с проверкой подписи JWT.
 
 ## Персональные данные и хостинг
 

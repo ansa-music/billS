@@ -1,7 +1,7 @@
 import { createSign, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import type { DeviceView, DevicePlatform, PushData, PushKind, PushRule, PushSettingsView, TestPushResponse } from '@bills/domain';
-import { isPushKind, PUSH_KINDS } from '@bills/domain';
+import { isPushKind, PUSH_KINDS, pushRuleAllows } from '@bills/domain';
 import type { SqlDriver } from './db/driver.ts';
 
 /**
@@ -212,15 +212,6 @@ interface RuleRow {
   enabled: number;
 }
 
-/** A rule for the club beats a rule for all clubs, which beats the kind's default. */
-export function ruleAllows(rules: ReadonlyArray<{ clubId: string | null; kind: string; enabled: boolean }>, kind: PushKind, clubId: string): boolean {
-  const forClub = rules.find((r) => r.kind === kind && r.clubId === clubId);
-  if (forClub) return forClub.enabled;
-  const forAll = rules.find((r) => r.kind === kind && r.clubId === null);
-  if (forAll) return forAll.enabled;
-  return PUSH_KINDS.find((k) => k.kind === kind)?.defaultOn ?? false;
-}
-
 export async function loadRules(db: SqlDriver, ownerId: string): Promise<PushRule[]> {
   const rows = await db.all<RuleRow>('SELECT club_id, kind, enabled FROM push_rules WHERE owner_id = ? ORDER BY kind, club_id', [ownerId]);
   return rows
@@ -418,7 +409,7 @@ export class PushDispatcher {
     );
     const out: DeviceRow[] = [];
     for (const o of owners) {
-      if (!ruleAllows(await loadRules(this.#db, o.id), kind, clubId)) continue;
+      if (!pushRuleAllows(await loadRules(this.#db, o.id), kind, clubId)) continue;
       out.push(...(await this.#db.all<DeviceRow>('SELECT * FROM owner_devices WHERE owner_id = ? ORDER BY created_at', [o.id])));
     }
     return out;
