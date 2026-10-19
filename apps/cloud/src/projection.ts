@@ -1,6 +1,8 @@
 import type { SyncEvent } from '@bills/domain';
+import { pushKindOfAlert } from '@bills/domain';
 import type { SqlDriver } from './db/driver.ts';
 import { localDay } from './localtime.ts';
+import { alertTitle, enqueuePush } from './push.ts';
 
 /**
  * Applies one HUB event to the read model (sessions, checks, payments, shifts,
@@ -14,7 +16,11 @@ import { localDay } from './localtime.ts';
 export interface ProjectionContext {
   hubId: string;
   clubId: string;
+  /** For push titles. */
+  clubName: string;
   timezone: string;
+  /** Receive time of the batch: the push queue's created_at. */
+  now: number;
   /** tariffId → name from the club settings. */
   tariffNames: Map<string, string>;
 }
@@ -602,7 +608,19 @@ export async function projectEvent(tx: SqlDriver, ctx: ProjectionContext, event:
           str(data.message) ?? '',
         ],
       );
-      if (inserted > 0) await bumpDay(tx, ctx.clubId, localDay(at, ctx.timezone), { alerts: 1 });
+      if (inserted > 0) {
+        await bumpDay(tx, ctx.clubId, localDay(at, ctx.timezone), { alerts: 1 });
+        const kind = pushKindOfAlert(str(data.kind) ?? 'UNKNOWN');
+        await enqueuePush(tx, ctx.now, {
+          dedupeKey: `alert:${entityId}`,
+          clubId: ctx.clubId,
+          kind,
+          alertId: entityId,
+          title: alertTitle(ctx.clubName, kind),
+          body: str(data.message) ?? '',
+          at,
+        });
+      }
       return;
     }
     case 'alert.resolved': {
