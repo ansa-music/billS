@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TS</title>
+    <style>
+      :root {
+        --brand: #14211b;
+        --bg: #f4f6f5;
+        --card: #ffffff;
+        --ink: #14211b;
+        --muted: #5d6b64;
+        --line: #dde3e0;
+        --accent: #1f7a4d;
+        --danger: #b42318;
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        color: var(--ink);
+        background: var(--bg);
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; display: flex; align-items: flex-start; justify-content: center; background: var(--bg); }
+      main { width: min(640px, 100% - 32px); margin: 48px 0; display: grid; gap: 16px; }
+      header { display: flex; align-items: center; gap: 14px; }
+      .mark { width: 48px; height: 48px; border-radius: 12px; background: var(--brand); color: #fff; display: grid; place-items: center; font-weight: 800; font-size: 20px; letter-spacing: -0.5px; }
+      h1 { margin: 0; font-size: 22px; }
+      header small { color: var(--muted); }
+      section { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; display: grid; gap: 12px; }
+      h2 { margin: 0; font-size: 16px; }
+      p { margin: 0; color: var(--muted); line-height: 1.45; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+      input[type='text'], input[type='password'], select { flex: 1; min-width: 200px; font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink); }
+      button { font: inherit; padding: 10px 16px; border-radius: 10px; border: 1px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; }
+      button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+      button.danger { color: var(--danger); }
+      button:disabled { opacity: 0.55; cursor: default; }
+      label.check { display: flex; gap: 10px; align-items: flex-start; }
+      label.check input { margin-top: 3px; width: 18px; height: 18px; }
+      label.check span small { display: block; color: var(--muted); }
+      .found { display: grid; gap: 6px; }
+      .found button { text-align: left; }
+      .status { font-size: 14px; color: var(--muted); min-height: 1.2em; }
+      .status.error { color: var(--danger); }
+      .status.ok { color: var(--accent); }
+      [hidden] { display: none !important; }
+      kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="mark" aria-hidden="true">TS</div>
+        <div>
+          <h1>TS</h1>
+          <small id="version"></small>
+        </div>
+      </header>
+
+      <section id="hub">
+        <h2>HUB клуба</h2>
+        <p id="hub-text">Приложение показывает интерфейс TS с HUB клуба. Найдите HUB в сети или введите адрес.</p>
+        <div class="row">
+          <button id="search" class="primary">Найти HUB в сети</button>
+          <button id="back" hidden>Вернуться к HUB</button>
+        </div>
+        <div id="found" class="found"></div>
+        <form id="manual" class="row">
+          <input id="address" type="text" placeholder="hub.local или 192.168.1.10:4310" autocomplete="off" />
+          <button type="submit">Подключиться</button>
+        </form>
+        <div id="hub-status" class="status" role="status"></div>
+      </section>
+
+      <section id="lock" hidden>
+        <h2>Настройки защищены</h2>
+        <p>Киоск-режим: чтобы изменить настройки или закрыть TS, приложите ключ управляющего или владельца.</p>
+        <form id="unlock" class="row">
+          <input id="key" type="password" placeholder="Ключ" autocomplete="off" />
+          <button type="submit" class="primary">Открыть</button>
+        </form>
+        <div id="lock-status" class="status" role="status"></div>
+      </section>
+
+      <section id="device" hidden>
+        <h2>Это устройство</h2>
+        <label class="check">
+          <input id="kiosk" type="checkbox" />
+          <span>Киоск-режим<small>Окно на весь экран без рамки, экран не гаснет, закрыть можно только ключом управляющего.</small></span>
+        </label>
+        <label class="check">
+          <input id="autostart" type="checkbox" />
+          <span>Запускать TS при включении ПК</span>
+        </label>
+        <div class="row">
+          <select id="printer" aria-label="Принтер чеков"><option value="">Принтер по умолчанию</option></select>
+          <button id="printers">Обновить список</button>
+        </div>
+        <p>Чеки печатаются на этот принтер сразу, без окна печати. Ширину ленты (58/80 мм) выбирают в разделе «Касса».</p>
+        <div id="device-status" class="status" role="status"></div>
+      </section>
+
+      <section id="maintenance" hidden>
+        <h2>Обслуживание</h2>
+        <div class="row">
+          <button id="update">Проверить обновления</button>
+          <button id="install-hub">Установить HUB на этот ПК</button>
+          <button id="quit" class="danger">Закрыть TS</button>
+        </div>
+        <p>«Установить HUB» ставит HUB клуба на этот ПК как службу (нужны права администратора); адрес после установки — этот же ПК.</p>
+        <div id="maintenance-status" class="status" role="status"></div>
+      </section>
+
+      <p>Вернуться к этим настройкам из интерфейса TS: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>.</p>
+    </main>
+
+    <script>
+      const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
+      const $ = (id) => document.getElementById(id);
+      let state = null;
+      let retry = null;
+
+      function say(id, text, kind = '') {
+        const el = $(id);
+        el.textContent = text;
+        el.className = `status ${kind}`;
+      }
+
+      function busy(button, on) {
+        button.disabled = on;
+      }
+
+      async function refresh() {
+        state = await invoke('get_state');
+        $('version').textContent = `версия ${state.version}`;
+        const s = state.settings;
+        $('back').hidden = !s.hubUrl;
+        $('hub-text').textContent = s.hubUrl
+          ? `Адрес HUB: ${s.hubUrl}`
+          : 'Приложение показывает интерфейс TS с HUB клуба. Найдите HUB в сети или введите адрес.';
+        $('lock').hidden = !state.locked;
+        $('device').hidden = state.locked;
+        $('maintenance').hidden = state.locked;
+        $('search').disabled = state.locked && Boolean(s.hubUrl);
+        $('manual').hidden = state.locked && Boolean(s.hubUrl);
+        $('kiosk').checked = s.kiosk;
+        $('autostart').checked = s.autostart;
+        setPrinter(s.printer);
+      }
+
+      function setPrinter(name) {
+        const select = $('printer');
+        if (name && ![...select.options].some((o) => o.value === name)) select.add(new Option(name, name));
+        select.value = name || '';
+      }
+
+      async function loadPrinters() {
+        const names = await invoke('list_printers');
+        const select = $('printer');
+        const current = state?.settings.printer ?? '';
+        select.length = 1;
+        for (const name of names) select.add(new Option(name, name));
+        setPrinter(current);
+      }
+
+      async function connect(address) {
+        clearTimeout(retry);
+        say('hub-status', 'Подключение…');
+        try {
+          await invoke('connect', { address });
+        } catch (e) {
+          say('hub-status', String(e), 'error');
+          return false;
+        }
+        return true;
+      }
+
+      async function search() {
+        const button = $('search');
+        busy(button, true);
+        say('hub-status', 'Ищу HUB: hub.local, этот ПК, затем вся сеть… (до 15 секунд)');
+        const list = $('found');
+        list.replaceChildren();
+        try {
+          const found = await invoke('discover');
+          if (found.length === 0) {
+            say('hub-status', 'HUB не найден. Проверьте, что HUB включён и ПК в той же сети, или введите адрес вручную.', 'error');
+          } else if (found.length === 1 && !state.settings.hubUrl) {
+            await connect(found[0]);
+          } else {
+            say('hub-status', `Найдено: ${found.length}. Выберите HUB.`, 'ok');
+            for (const origin of found) {
+              const b = document.createElement('button');
+              b.textContent = origin;
+              b.onclick = () => connect(origin);
+              list.append(b);
+            }
+          }
+        } finally {
+          busy(button, false);
+        }
+      }
+
+      async function save(patch, statusId = 'device-status') {
+        try {
+          state.settings = await invoke('save_settings', { patch });
+          say(statusId, 'Сохранено', 'ok');
+        } catch (e) {
+          say(statusId, String(e), 'error');
+          await refresh();
+        }
+      }
+
+      $('search').onclick = search;
+      $('back').onclick = () => connect(null);
+      $('manual').onsubmit = (e) => {
+        e.preventDefault();
+        connect($('address').value);
+      };
+      $('unlock').onsubmit = async (e) => {
+        e.preventDefault();
+        say('lock-status', 'Проверка…');
+        try {
+          await invoke('unlock', { key: $('key').value });
+          $('key').value = '';
+          say('lock-status', '');
+          await refresh();
+          await loadPrinters();
+        } catch (err) {
+          say('lock-status', String(err), 'error');
+        }
+      };
+      $('kiosk').onchange = (e) => save({ kiosk: e.target.checked });
+      $('autostart').onchange = (e) => save({ autostart: e.target.checked });
+      $('printer').onchange = (e) => save({ printer: e.target.value });
+      $('printers').onclick = loadPrinters;
+      $('quit').onclick = async () => {
+        try {
+          await invoke('quit');
+        } catch (e) {
+          say('maintenance-status', String(e), 'error');
+        }
+      };
+      $('update').onclick = async (e) => {
+        const button = e.target;
+        busy(button, true);
+        say('maintenance-status', 'Проверяю обновления…');
+        try {
+          const version = await invoke('check_update');
+          if (!version) {
+            say('maintenance-status', 'Установлена последняя версия', 'ok');
+          } else if (confirm(`Доступна версия ${version}. Установить сейчас? TS перезапустится, открытые игры не пострадают — они хранятся в HUB.`)) {
+            say('maintenance-status', `Скачиваю и устанавливаю ${version}…`);
+            await invoke('install_update');
+          } else {
+            say('maintenance-status', `Доступна версия ${version}`, 'ok');
+          }
+        } catch (err) {
+          say('maintenance-status', String(err), 'error');
+        } finally {
+          busy(button, false);
+        }
+      };
+      $('install-hub').onclick = async (e) => {
+        const button = e.target;
+        busy(button, true);
+        say('maintenance-status', 'Идёт установка HUB в отдельном окне (подтвердите запрос администратора)…');
+        try {
+          say('maintenance-status', await invoke('install_hub'), 'ok');
+          await connect('127.0.0.1');
+        } catch (err) {
+          say('maintenance-status', String(err), 'error');
+        } finally {
+          busy(button, false);
+        }
+      };
+
+      async function start() {
+        await refresh();
+        if (!state.locked) loadPrinters().catch(() => {});
+        if (location.hash === '#settings') return;
+        if (!state.settings.hubUrl) {
+          await search();
+          return;
+        }
+        // Saved HUB: open it; if it is down (power cut, Wi-Fi), keep retrying.
+        const attempt = async () => {
+          if (await connect(null)) return;
+          say('hub-status', `HUB не отвечает (${state.settings.hubUrl}). Повтор через 5 секунд…`, 'error');
+          retry = setTimeout(attempt, 5000);
+        };
+        await attempt();
+      }
+
+      start().catch((e) => say('hub-status', String(e), 'error'));
+    </script>
+  </body>
+</html>

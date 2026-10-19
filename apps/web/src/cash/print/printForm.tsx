@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
+import { isDesktopApp, printSilently } from '../../desktop.ts';
 import type { Paper } from './paper.ts';
 import { getPaper } from './paper.ts';
 import './print.css';
@@ -18,6 +19,7 @@ let cleanup: (() => void) | null = null;
  * Prints one form on the receipt printer: renders it into #print-root (a direct child of
  * <body>; @media print shows only that, open dialogs included), sizes the page to the paper
  * width and the form's height, calls window.print() and removes everything on `afterprint`.
+ * In the TS desktop app the same print view goes to the receipt printer without the dialog.
  *
  * @page cannot be scoped by a class, so the rule is injected into <head> for this print only.
  * The height is measured on screen: the form uses mm units and the same styles in both media.
@@ -52,6 +54,15 @@ export function printForm(form: ReactNode, paper: Paper = getPaper()): void {
   // Out of the event: afterprint can fire inside window.print(), still in a React handler.
   const onAfterPrint = () => window.setTimeout(finish, 0);
   cleanup = finish;
-  window.addEventListener('afterprint', onAfterPrint);
-  window.print();
+  const withDialog = () => {
+    if (done) return;
+    window.addEventListener('afterprint', onAfterPrint);
+    window.print();
+  };
+  if (!isDesktopApp()) {
+    withDialog();
+    return;
+  }
+  // TS desktop app: straight to the receipt printer; if that fails, the usual print dialog.
+  printSilently(Number(paper), heightMm).then(finish, withDialog);
 }

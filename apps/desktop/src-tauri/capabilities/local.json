@@ -1,0 +1,21 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "local",
+  "description": "Local setup and settings page (ui/index.html).",
+  "windows": ["main"],
+  "local": true,
+  "permissions": [
+    "core:default",
+    "allow-get-state",
+    "allow-discover",
+    "allow-connect",
+    "allow-unlock",
+    "allow-save-settings",
+    "allow-list-printers",
+    "allow-quit",
+    "allow-install-hub",
+    "allow-check-update",
+    "allow-install-update",
+    "allow-open-settings"
+  ]
+}

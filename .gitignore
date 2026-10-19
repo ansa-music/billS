@@ -9,3 +9,8 @@ apps/cloud/data/
 *.db-wal
 *.db-shm
 .lighthouseci/
+
+# Tauri (apps/desktop)
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/tauri.ci.conf.json

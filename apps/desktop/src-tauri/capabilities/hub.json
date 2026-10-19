@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "hub",
+  "description": "Pages of the club HUB (apps/web): silent printing and the way back to the settings. The window navigates only to the HUB chosen in the settings (on_navigation in lib.rs).",
+  "windows": ["main"],
+  "local": false,
+  "remote": {
+    "urls": ["http://*", "http://*:*", "https://*", "https://*:*"]
+  },
+  "permissions": ["core:event:default", "allow-print-receipt", "allow-open-settings"]
+}
