@@ -2,6 +2,8 @@ import type { DiscountKind, PaymentMethod } from './billing.ts';
 import type { SyncStatus } from './cloud.ts';
 import type { Minor } from './money.ts';
 import type { PauseSpan } from './pause.ts';
+import type { KeyKind } from './auth.ts';
+import type { LicenseStatus } from './license.ts';
 import type { Role } from './permissions.ts';
 import type { CashMovementKind, ShiftTotals } from './shift.ts';
 import type { SessionStatus } from './session.ts';
@@ -120,6 +122,8 @@ export interface HubState {
   power: PowerView;
   /** Cloud sync status (stage 6); enabled=false when the club runs without a cloud. */
   sync: SyncStatus;
+  /** License of this branch (banner, read-only mode); null when licenses are not enforced. */
+  license: LicenseStatus | null;
 }
 
 export interface TransferRequest {
@@ -584,7 +588,10 @@ export interface CancelOrderRequest {
 export interface AuthStaff {
   id: string;
   name: string;
+  /** The highest of `roles` (primaryRole): shown first, names the key prefix. */
   role: Role;
+  /** Everything the person holds; rights are the union (`can(roles, action)`). */
+  roles: Role[];
   clubId: string;
   clubName: string;
 }
@@ -607,12 +614,61 @@ export interface LoginResponse {
 export interface MeResponse {
   staff: AuthStaff;
   expiresAt: number;
+  /** License of this branch; null when the HUB does not enforce licenses (tests, demo). */
+  license: LicenseStatus | null;
+}
+
+/**
+ * 429 LOGIN_LOCKED on POST /api/auth/login: too many wrong keys from this
+ * device (or the whole branch for short keys). `error.retryAfterMs` says how long.
+ */
+export interface LoginLockedError {
+  error: { code: 'LOGIN_LOCKED'; message: string; retryAfterMs: number };
+}
+
+/** One login attempt (GET /api/auth/attempts, staff.view). The key itself is never stored. */
+export interface LoginAttemptView {
+  id: number;
+  at: number;
+  ok: boolean;
+  /** 'long' | 'short' | null when what was typed is neither shape. */
+  kind: KeyKind | null;
+  /** Known key: its prefix ("MGR-7K3Q", "••••42"); null for a wrong key. */
+  prefix: string | null;
+  staffName: string | null;
+  device: string | null;
+  ip: string | null;
+  /** ok | wrong_key | revoked | expired | inactive | locked | branch_locked */
+  result: string;
+}
+
+export interface LoginAttemptsResponse {
+  attempts: LoginAttemptView[];
+}
+
+/** GET /api/license (license.view or any signed-in person: what the banner shows). */
+export interface LicenseResponse {
+  status: LicenseStatus;
+  /** This HUB's id as a license names it (HUB_ID, or `club:<id>` without a cloud). */
+  hubId: string;
+  /** Licenses are checked on this HUB. false in tests and the demo. */
+  enforced: boolean;
+  /** When the license in force was installed and where it came from. */
+  installedAt: number | null;
+  source: 'cloud' | 'manual' | null;
+}
+
+/** POST /api/license (license.install): a signed license text `TS1.…`. 422 LICENSE_INVALID when the signature or the HUB does not match. */
+export interface InstallLicenseRequest {
+  license: string;
 }
 
 export interface AccessKeyView {
   id: string;
   staffId: string;
-  /** "OWNER-7K3Q" — the key itself is never returned after issue. */
+  /** Long key for the platform and managers, short (6 digits) for staff. */
+  kind: KeyKind;
+  /** "MGR-7K3Q" or "••••42" — the key itself is never returned after issue. */
   prefix: string;
   label: string | null;
   createdAt: number;
@@ -623,11 +679,21 @@ export interface AccessKeyView {
   lastUsedAt: number | null;
 }
 
-/** POST /api/staff/:staffId/keys (201). The caller must be allowed to assign the staff member's role. */
+/**
+ * POST /api/staff/:staffId/keys (201). The caller must be allowed to assign the
+ * person's roles. Staff get a short key (6 digits, this branch only), managers
+ * and the platform a long one — the kind follows the roles.
+ */
 export interface IssueKeyRequest {
   label?: string;
   /** Omit for a key that does not expire. */
   expiresInDays?: number;
+  /**
+   * Short keys only: six digits chosen by the manager instead of random ones.
+   * Refused when weak (111111, 123456…) — 422 KEY_WEAK — or already used in
+   * this branch — 409 KEY_TAKEN.
+   */
+  key?: string;
 }
 
 export interface IssueKeyResponse {
@@ -646,7 +712,12 @@ export interface KeyListResponse {
 export interface StaffView {
   id: string;
   name: string;
+  /** primaryRole(roles). */
   role: Role;
+  /** A set: waiter + cashier… Rights are the union. */
+  roles: Role[];
+  /** 'cloud' — created in the manager's cabinet and kept in sync from there (edit it there); 'hub' — created on this HUB. */
+  origin: 'hub' | 'cloud';
   isActive: boolean;
   /** Active (not revoked, not expired) access keys. */
   activeKeys: number;
@@ -663,11 +734,15 @@ export interface StaffListResponse {
   staff: StaffView[];
 }
 
-/** POST /api/staff (201 → StaffView). */
+/**
+ * POST /api/staff (201 → StaffView). `roles` per normalizeRoles; the caller must
+ * be allowed to assign every one (canAssignRoles). 409 LICENSE_STAFF_LIMIT over
+ * the license's maxStaff.
+ */
 export interface CreateStaffRequest {
   name: string;
-  role: Role;
-  /** 4–6 digits; stored hashed. */
+  roles: Role[];
+  /** Tablet unlock PIN, 4–6 digits; stored hashed. Not a login key — see IssueKeyRequest. */
   pin?: string;
   tableIds?: string[];
 }
@@ -675,7 +750,7 @@ export interface CreateStaffRequest {
 /** POST /api/staff/:staffId/update (→ StaffView). `pin: null` removes the PIN. */
 export interface UpdateStaffRequest {
   name?: string;
-  role?: Role;
+  roles?: Role[];
   pin?: string | null;
   isActive?: boolean;
   tableIds?: string[];

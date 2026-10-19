@@ -43,13 +43,18 @@ export function originAllowed(origin: string | undefined, patterns: readonly str
 /**
  * Public demo club (HUB_DEMO=1): fixed, deliberately simple keys shown on the
  * login screen. The demo database is wiped every night, so anything a visitor
- * changes — including these keys — comes back by morning.
+ * changes — including these keys — comes back by morning. Long keys for the
+ * platform and the manager, six-digit keys for staff (they work only in the
+ * demo branch). `name` is the demo person the key belongs to.
  */
-export const DEMO_KEYS: ReadonlyArray<{ role: Role; label: string; key: string }> = [
-  { role: 'owner', label: 'Владелец', key: 'OWNER-2222-2222-2222-2222' },
-  { role: 'manager', label: 'Управляющий', key: 'MGR-3333-3333-3333-3333' },
-  { role: 'cashier', label: 'Кассир', key: 'CASH-4444-4444-4444-4444' },
-  { role: 'waiter', label: 'Официант', key: 'WTR-5555-5555-5555-5555' },
+export const DEMO_KEYS: ReadonlyArray<{ roles: readonly Role[]; label: string; name: string; key: string }> = [
+  { roles: ['owner'], label: 'Владелец платформы', name: 'Владелец TS', key: 'OWNER-2222-2222-2222-2222' },
+  { roles: ['tech'], label: 'Техподдержка', name: 'Поддержка TS', key: 'TECH-7777-7777-7777-7777' },
+  { roles: ['manager'], label: 'Управляющий', name: 'Управляющий', key: 'MGR-3333-3333-3333-3333' },
+  { roles: ['senior'], label: 'Старший смены', name: 'Старший смены', key: '260417' },
+  { roles: ['cashier'], label: 'Кассир', name: 'Кассир', key: '318540' },
+  { roles: ['waiter'], label: 'Официант', name: 'Официант', key: '527193' },
+  { roles: ['waiter', 'cashier'], label: 'Официант + кассир', name: 'Официант-кассир', key: '640285' },
 ];
 
 /** GET /api/demo on a demo HUB (404 on a real club). */

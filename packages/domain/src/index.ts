@@ -10,6 +10,7 @@ export * from './fiscal.ts';
 export * from './permissions.ts';
 export * from './settings.ts';
 export * from './auth.ts';
+export * from './license.ts';
 export * from './orders.ts';
 export * from './hall.ts';
 export * from './public.ts';

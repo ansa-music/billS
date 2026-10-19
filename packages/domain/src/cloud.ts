@@ -1,5 +1,8 @@
 import type { TableKind } from './api.ts';
+import type { KeyKind } from './auth.ts';
 import type { PaymentMethod } from './billing.ts';
+import type { LicensePayload, LicenseStatus, LicenseTerm } from './license.ts';
+import type { LicenseModule, PlatformRole, Role } from './permissions.ts';
 import type { Minor } from './money.ts';
 import type { SessionStatus } from './session.ts';
 import type { TariffConfig } from './tariff.ts';
@@ -48,6 +51,11 @@ export interface SyncEventsResponse {
   /** How many events of this batch were new (the rest were duplicates). */
   inserted: number;
   settingsVersion: number;
+  /**
+   * Version of this HUB's access package (license, people, keys). When it differs
+   * from what the HUB applied, the HUB pulls GET /sync/access. Absent from an older cloud.
+   */
+  accessVersion?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -351,4 +359,226 @@ export interface UpdateTariffsRequest {
 
 export interface UpdateTariffsResponse {
   settings: ClubSnapshot;
+}
+
+// ---------------------------------------------------------------------------
+// DOWN: access package — license, people and keys of ONE branch
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /sync/access (HUB api key) — what this HUB needs to let people in:
+ *  - the signed license of the client (`TS1.…`, see license.ts), null if none;
+ *  - people: the platform team (scope 'platform'), the company's managers
+ *    ('company') and the staff of THIS branch only ('club');
+ *  - their keys as hashes: long keys sha256(key), short keys
+ *    sha256(shortKeyHashInput(clubId, key)) — the cloud never sends a key of
+ *    another branch, so a short key cannot work anywhere else.
+ * The HUB replaces everything it got from the cloud before (origin 'cloud') with
+ * this package in one transaction; people it created itself are kept.
+ */
+export interface SyncAccessResponse {
+  version: number;
+  license: string | null;
+  /** The cloud's club id of this HUB's branch (short-key hashes are taken over it). */
+  clubId: string;
+  people: SyncPerson[];
+  keys: SyncKey[];
+}
+
+export interface SyncPerson {
+  id: string;
+  name: string;
+  roles: Role[];
+  isActive: boolean;
+  scope: 'platform' | 'company' | 'club';
+}
+
+export interface SyncKey {
+  id: string;
+  personId: string;
+  kind: KeyKind;
+  /** sha256 hex, see SyncAccessResponse. */
+  keyHash: string;
+  prefix: string;
+  label: string | null;
+  expiresAt: number | null;
+  revokedAt: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// Platform cabinet (owner and tech of TS): clients and their licenses
+// ---------------------------------------------------------------------------
+//
+// apps/cloud (cookie `ts_platform`) and Supabase Edge Function `platform`
+// (Bearer platform session token, verify_jwt = false):
+//   POST /api/platform/login            PlatformLoginRequest → PlatformLoginResponse (long key OWNER-… / TECH-…)
+//   GET  /api/platform/me               → PlatformMe
+//   POST /api/platform/logout
+//   GET  /api/platform/clients          → { clients: ClientView[] }
+//   POST /api/platform/clients          CreateClientRequest → CreateClientResponse
+//   POST /api/platform/clients/:companyId/license  LicenseTermsRequest → ClientView   (extend / change terms; re-signs)
+//   POST /api/platform/clients/:companyId/block    BlockClientRequest → ClientView
+//   POST /api/platform/clients/:companyId/manager-key → IssuedLongKey   (new MGR-… key for the HUBs; old ones stay until revoked)
+// Supabase paths are the same without `/api` under /functions/v1/platform.
+
+export interface PlatformLoginRequest {
+  key: string;
+}
+
+export interface PlatformMe {
+  id: string;
+  name: string;
+  role: PlatformRole;
+}
+
+export interface PlatformLoginResponse {
+  me: PlatformMe;
+  /** Supabase only: send as `Authorization: Bearer`. apps/cloud sets a cookie instead. */
+  token?: string;
+  expiresAt: number;
+}
+
+/** Terms as the platform owner picks them; the cloud turns them into a signed LicensePayload. */
+export interface LicenseTermsRequest {
+  term: LicenseTerm;
+  plan?: 'trial' | 'paid';
+  maxClubs: number;
+  maxTables?: number | null;
+  maxStaff?: number | null;
+  modules: Record<LicenseModule, boolean>;
+  /**
+   * Extension only: start the new term at the end of the current one (default)
+   * instead of now. Ignored for a client without a license.
+   */
+  fromCurrentEnd?: boolean;
+}
+
+export interface LicenseView {
+  payload: LicensePayload;
+  status: LicenseStatus;
+  /** The signed text, ready to paste into a HUB without a cloud connection. */
+  signed: string;
+}
+
+export interface ClientView {
+  companyId: string;
+  companyName: string;
+  createdAt: number;
+  managers: Array<{ id: string; name: string; email: string }>;
+  branches: Array<{ id: string; name: string; hubIds: string[]; lastSeenAt: number | null }>;
+  license: LicenseView | null;
+  blocked: boolean;
+  blockedReason: string | null;
+}
+
+export interface CreateClientRequest {
+  companyName: string;
+  managerName: string;
+  managerEmail: string;
+  /** apps/cloud: the manager's cabinet password (8+ chars); a random one is made and returned when omitted. Supabase: ignored (the manager signs up with this email). */
+  managerPassword?: string;
+  license: LicenseTermsRequest;
+}
+
+export interface IssuedLongKey {
+  /** Shown once: MGR-… */
+  key: string;
+  prefix: string;
+}
+
+export interface CreateClientResponse {
+  client: ClientView;
+  /** The manager's long key for the HUBs (shown once). */
+  managerKey: IssuedLongKey;
+  /** apps/cloud only, when the password was generated: shown once. */
+  managerPassword?: string;
+}
+
+export interface BlockClientRequest {
+  blocked: boolean;
+  reason?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Manager cabinet (the client): license, branches, staff and short keys
+// ---------------------------------------------------------------------------
+//
+// apps/cloud (owner cookie — the `owners` table holds the client's managers) and
+// Supabase Edge Function `owner` (Supabase Auth JWT), paths under /owner/company/…:
+//   GET  /api/company/license                 → { license: LicenseView | null }
+//   GET  /api/company/branches                → { branches: BranchView[] }
+//   POST /api/company/branches                CreateBranchRequest → CreateBranchResponse
+//                                             409 LICENSE_CLUB_LIMIT past maxClubs, 403 LICENSE_READ_ONLY when expired/blocked
+//   GET  /api/company/staff?clubId=           → { staff: CloudStaffView[] }
+//   POST /api/company/staff                   CreateCloudStaffRequest → CloudStaffView (409 LICENSE_STAFF_LIMIT)
+//   POST /api/company/staff/:id/update        UpdateCloudStaffRequest → CloudStaffView
+//   POST /api/company/staff/:id/keys          IssueCloudKeyRequest → IssueCloudKeyResponse (short key, 6 digits)
+//   POST /api/company/keys/:id/revoke         → CloudKeyView
+
+export interface BranchView {
+  id: string;
+  name: string;
+  timezone: string;
+  currency: string;
+  createdAt: number;
+  hubs: Array<{ id: string; name: string; lastSeenAt: number | null }>;
+}
+
+export interface CreateBranchRequest {
+  name: string;
+  timezone?: string;
+  currency?: string;
+}
+
+export interface CreateBranchResponse {
+  branch: BranchView;
+  /** Connect the branch's HUB with these: HUB_ID and CLOUD_API_KEY (the key is shown once). */
+  hubId: string;
+  hubApiKey: string;
+}
+
+export interface CloudKeyView {
+  id: string;
+  kind: KeyKind;
+  prefix: string;
+  label: string | null;
+  createdAt: number;
+  expiresAt: number | null;
+  revokedAt: number | null;
+}
+
+export interface CloudStaffView {
+  id: string;
+  clubId: string;
+  name: string;
+  roles: Role[];
+  isActive: boolean;
+  keys: CloudKeyView[];
+  createdAt: number;
+}
+
+export interface CreateCloudStaffRequest {
+  clubId: string;
+  name: string;
+  /** Staff roles only (STAFF_ROLES), any combination. */
+  roles: Role[];
+}
+
+export interface UpdateCloudStaffRequest {
+  name?: string;
+  roles?: Role[];
+  isActive?: boolean;
+}
+
+export interface IssueCloudKeyRequest {
+  label?: string;
+  expiresInDays?: number;
+  /** Six digits picked by the manager; random when omitted. 422 KEY_WEAK, 409 KEY_TAKEN (unique within the branch). */
+  key?: string;
+}
+
+export interface IssueCloudKeyResponse {
+  /** Shown once. */
+  key: string;
+  view: CloudKeyView;
 }
