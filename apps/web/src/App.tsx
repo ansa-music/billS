@@ -6,6 +6,7 @@ import { ManualModeBanner } from './Hardware.tsx';
 import { useWakeLock } from './kiosk.ts';
 import { LoginPage } from './Login.tsx';
 import { OfflineBanner } from './OfflineBanner.tsx';
+import { PwaBanners } from './pwa.tsx';
 import { Link, navigate, REDIRECTS, ROUTES, routeFor, sectionOf, useLocation } from './router.tsx';
 import { BottomNav, Sidebar, Toast, Topbar } from './Shell.tsx';
 import type { NavBadges } from './Shell.tsx';
@@ -190,6 +191,7 @@ export function App() {
             busy={commands.anyBusy}
           />
           <OfflineBanner online={hub.online} />
+          <PwaBanners />
           <ManualModeBanner
             mode={state.manualMode}
             timezone={state.club.timezone}

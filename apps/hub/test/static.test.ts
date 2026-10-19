@@ -15,6 +15,8 @@ import { FAST_LAMPS, MONDAY_NOON } from './helpers.ts';
 
 const INDEX_HTML = '<!doctype html><div id="root">hall</div>';
 const APP_JS = 'console.log("hall")';
+const SW_JS = 'self.addEventListener("fetch", () => {})';
+const MANIFEST = '{"name":"Billiard Control","start_url":"/#/","display":"standalone"}';
 
 interface StaticHub {
   db: Db;
@@ -38,12 +40,17 @@ async function startHub(t: { after: (fn: () => Promise<void>) => void }, staticD
   return { db, hub, app };
 }
 
-/** A fake Vite build: index.html plus one hashed asset. */
+/** A fake Vite build: index.html, one hashed asset, and the PWA files vite-plugin-pwa adds. */
 function fakeDist(t: { after: (fn: () => void) => void }): string {
   const dir = mkdtempSync(join(tmpdir(), 'bills-web-dist-'));
   mkdirSync(join(dir, 'assets'));
+  mkdirSync(join(dir, 'icons'));
   writeFileSync(join(dir, 'index.html'), INDEX_HTML);
   writeFileSync(join(dir, 'assets', 'app-abc123.js'), APP_JS);
+  writeFileSync(join(dir, 'sw.js'), SW_JS);
+  writeFileSync(join(dir, 'workbox-1a2b3c4d.js'), SW_JS);
+  writeFileSync(join(dir, 'manifest.webmanifest'), MANIFEST);
+  writeFileSync(join(dir, 'icons', 'icon-192.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
@@ -66,6 +73,37 @@ test('serves hashed assets with a long immutable cache', async (t) => {
   assert.match(String(res.headers['content-type']), /javascript/);
   assert.equal(res.body, APP_JS);
   assert.equal(res.headers['cache-control'], 'public, max-age=31536000, immutable');
+});
+
+test('the web app manifest has its own media type and is never cached for long', async (t) => {
+  const { app } = await startHub(t, fakeDist(t));
+
+  const res = await app.inject({ method: 'GET', url: '/manifest.webmanifest' });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers['content-type'], 'application/manifest+json; charset=utf-8');
+  assert.equal(res.headers['cache-control'], 'no-cache');
+  assert.equal(res.body, MANIFEST);
+});
+
+test('the service worker and its workbox runtime are served as JavaScript with no-cache', async (t) => {
+  const { app } = await startHub(t, fakeDist(t));
+
+  for (const url of ['/sw.js', '/workbox-1a2b3c4d.js']) {
+    const res = await app.inject({ method: 'GET', url });
+    assert.equal(res.statusCode, 200, url);
+    assert.match(String(res.headers['content-type']), /javascript/, url);
+    assert.equal(res.headers['cache-control'], 'no-cache', url);
+    assert.equal(res.body, SW_JS, url);
+  }
+});
+
+test('icons outside assets/ are revalidated, not cached for a year', async (t) => {
+  const { app } = await startHub(t, fakeDist(t));
+
+  const res = await app.inject({ method: 'GET', url: '/icons/icon-192.png' });
+  assert.equal(res.statusCode, 200);
+  assert.match(String(res.headers['content-type']), /image\/png/);
+  assert.equal(res.headers['cache-control'], 'no-cache');
 });
 
 test('unknown non-API routes fall back to index.html (SPA)', async (t) => {

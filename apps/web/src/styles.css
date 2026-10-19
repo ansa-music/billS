@@ -144,11 +144,36 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  /* No rubber-band / pull-to-refresh on the hall tablets: a swipe must not reload the screen. */
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
+  /* Taps fire at once (no 300 ms double-tap-zoom delay); pinch zoom stays available. */
+  touch-action: manipulation;
+}
+
+/* Installed as an app (PWA): a long press on a tablet must not select text or pop the
+   iOS callout; typing fields keep normal selection. */
+@media (display-mode: standalone) {
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  input,
+  textarea,
+  [contenteditable] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
 }
 
 h1,
