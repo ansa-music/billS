@@ -112,7 +112,7 @@ jobs:
         if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && (env.LIVE == 'true' || github.event.pull_request.head.repo.full_name == github.repository)
         run: |
           for p in "$CF_PAGES_CABINET" "$CF_PAGES_DEMO"; do
-            npx --yes wrangler@4 pages project create "$p" --production-branch=main 2>/dev/null && echo "создан проект Pages $p" || echo "проект Pages $p уже есть"
+            if npx --yes wrangler@4 pages project list 2>&1 | grep -qw "$p"; then echo "проект Pages $p уже есть"; else npx --yes wrangler@4 pages project create "$p" --production-branch=main; fi
           done
 
       - name: Deploy cabinet
@@ -120,6 +120,7 @@ jobs:
         if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && (env.LIVE == 'true' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: cloudflare/wrangler-action@v3
         with:
+          wranglerVersion: "4"
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy apps/cloud-web/dist --project-name=${{ env.CF_PAGES_CABINET }} --branch=${{ env.LIVE == 'true' && 'main' || github.head_ref }} --commit-dirty=true
@@ -129,6 +130,7 @@ jobs:
         if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && (env.LIVE == 'true' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: cloudflare/wrangler-action@v3
         with:
+          wranglerVersion: "4"
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy apps/web/dist --project-name=${{ env.CF_PAGES_DEMO }} --branch=${{ env.LIVE == 'true' && 'main' || github.head_ref }} --commit-dirty=true
