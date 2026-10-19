@@ -7,6 +7,12 @@
   gap: 4px 10px;
 }
 
+.apps-release-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .apps-release .link {
   padding-left: 0;
 }

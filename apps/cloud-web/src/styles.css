@@ -1623,6 +1623,12 @@ html:has(.apps-page) body {
   font-size: 14px;
 }
 
+.apps-release-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .apps-note {
   display: grid;
   justify-items: start;

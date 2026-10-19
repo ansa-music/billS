@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { ClassifiedRelease, VisitorPlatform, ReleaseAsset } from '@bills/domain';
+import type { ClassifiedRelease, ReleaseAsset, ReleaseCatalog, ReleaseKind, VisitorPlatform } from '@bills/domain';
 import { detectPlatform, formatSize, releasesPageUrl } from '@bills/domain';
 import { Icon } from '../icons.tsx';
 import { useInstallPrompt, useStandalone } from '../pwa.tsx';
@@ -33,16 +33,37 @@ function devicePlatform(): VisitorPlatform {
 
 const dateFormat = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
 
+const KIND_LABEL: Record<ReleaseKind, string> = { desktop: 'ПК', mobile: 'Android', general: 'Версия' };
+
+/** Which release a section's files come from: each app is released on its own. */
+function SourceLine({ release }: { release: ClassifiedRelease | null }) {
+  if (!release) return null;
+  return (
+    <p className="muted">
+      Версия {release.version}
+      {release.publishedAt !== null && ` от ${dateFormat.format(release.publishedAt)}`} ·{' '}
+      <a className="link" href={release.pageUrl} target="_blank" rel="noreferrer">
+        релиз на GitHub
+      </a>
+    </p>
+  );
+}
+
 function ReleaseLine({ state }: { state: ReleaseState }) {
   if (state.status === 'loading') return <>Проверяем последнюю версию…</>;
   if (state.status === 'ok') {
-    const r = state.release;
     return (
       <span className="apps-release">
-        <span className="tag tag-ok">Версия {r.version}</span>
-        {r.publishedAt !== null && <span>от {dateFormat.format(r.publishedAt)}</span>}
-        <a className="link" href={r.pageUrl} target="_blank" rel="noreferrer">
-          Все файлы на GitHub
+        {state.release.releases.map((r) => (
+          <span key={r.pageUrl} className="apps-release-item">
+            <span className="tag tag-ok">
+              {KIND_LABEL[r.kind]} {r.version}
+            </span>
+            {r.publishedAt !== null && <span className="muted">от {dateFormat.format(r.publishedAt)}</span>}
+          </span>
+        ))}
+        <a className="link" href={releasesPageUrl()} target="_blank" rel="noreferrer">
+          Все релизы на GitHub
         </a>
       </span>
     );
@@ -80,7 +101,7 @@ function Missing({ state, what }: { state: ReleaseState; what: string }) {
   if (state.status === 'loading') return <p className="empty">Загрузка…</p>;
   return (
     <p className="empty">
-      {state.status === 'ok' ? `В последнем релизе нет ${what}. ` : ''}
+      {state.status === 'ok' ? `В релизах пока нет ${what}. ` : ''}
       <a className="link" href={releasesPageUrl()} target="_blank" rel="noreferrer">
         Страница релизов на GitHub
       </a>
@@ -98,7 +119,7 @@ function AppSection({ title, current, children }: { title: string; current: bool
   );
 }
 
-function AndroidSection({ state, release, current }: { state: ReleaseState; release: ClassifiedRelease | null; current: boolean }) {
+function AndroidSection({ state, release, current }: { state: ReleaseState; release: ReleaseCatalog | null; current: boolean }) {
   const [apk, ...rest] = release?.android ?? [];
   return (
     <AppSection title="Android (телефон владельца)" current={current}>
@@ -113,6 +134,7 @@ function AndroidSection({ state, release, current }: { state: ReleaseState; rele
       ) : (
         <Missing state={state} what="APK для Android" />
       )}
+      <SourceLine release={release?.androidRelease ?? null} />
       <ol className="apps-steps">
         <li>Нажмите «Скачать APK» на телефоне и дождитесь загрузки.</li>
         <li>Откройте скачанный файл — из уведомления или из папки «Загрузки».</li>
@@ -153,7 +175,7 @@ function IosSection({ current }: { current: boolean }) {
   );
 }
 
-function DesktopSection({ state, release, current }: { state: ReleaseState; release: ClassifiedRelease | null; current: boolean }) {
+function DesktopSection({ state, release, current }: { state: ReleaseState; release: ReleaseCatalog | null; current: boolean }) {
   const groups: Array<{ label: string; assets: ReleaseAsset[] }> = [
     { label: 'Windows', assets: release?.windows ?? [] },
     { label: 'Linux', assets: release?.linux ?? [] },
@@ -176,6 +198,7 @@ function DesktopSection({ state, release, current }: { state: ReleaseState; rele
       ) : (
         <Missing state={state} what="установщиков для компьютера" />
       )}
+      <SourceLine release={release?.desktopRelease ?? null} />
       <p className="hint">
         Установщик без платной подписи, поэтому Windows может показать окно SmartScreen «Система Windows защитила ваш
         компьютер» — нажмите «Подробнее» → <b>«Выполнить в любом случае»</b>. Для Windows берите .msi или .exe, для

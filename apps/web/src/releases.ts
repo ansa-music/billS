@@ -1,29 +1,28 @@
 import { useEffect, useState } from 'react';
-import type { ClassifiedRelease, GithubRelease } from '@bills/domain';
-import { classifyReleaseAssets, releasesApiUrl } from '@bills/domain';
+import type { GithubRelease, ReleaseCatalog } from '@bills/domain';
+import { buildReleaseCatalog, releasesApiUrl } from '@bills/domain';
 
 /**
- * The latest GitHub release with the app installers, for the «Приложения»
+ * The latest GitHub release of each app (tags desktop-v…, mobile-v…, general) with the installers, for the «Приложения»
  * page (#/apps). The same hook as in apps/cloud-web. Straight from the browser to api.github.com (public repo,
  * no token); the answer is kept in sessionStorage for 10 minutes so flipping
  * between pages does not eat the 60-requests-per-hour anonymous limit.
  */
 
-const CACHE_KEY = 'ts.releases.latest';
+const CACHE_KEY = 'ts.releases.list';
 const CACHE_MS = 10 * 60 * 1000;
 const TIMEOUT_MS = 8000;
 
 export type ReleaseState =
   | { status: 'loading' }
-  | { status: 'ok'; release: ClassifiedRelease }
-  /** The repository has no published release yet (GitHub answers 404). */
+  | { status: 'ok'; release: ReleaseCatalog }
+  /** The repository has no published release yet. */
   | { status: 'none' }
   | { status: 'error'; message: string };
 
 interface CacheEntry {
   at: number;
-  /** null — GitHub said there is no release. */
-  release: GithubRelease | null;
+  releases: GithubRelease[];
 }
 
 function readCache(): CacheEntry | null {
@@ -38,24 +37,35 @@ function readCache(): CacheEntry | null {
   }
 }
 
-function writeCache(release: GithubRelease | null): void {
+function writeCache(releases: GithubRelease[]): void {
   try {
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), release } satisfies CacheEntry));
+    sessionStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), releases } satisfies CacheEntry));
   } catch {
     // Private mode or full storage: the next visit simply asks GitHub again.
   }
 }
 
 function fromEntry(entry: CacheEntry): ReleaseState {
-  return entry.release ? { status: 'ok', release: classifyReleaseAssets(entry.release) } : { status: 'none' };
+  const catalog = Array.isArray(entry.releases) ? buildReleaseCatalog(entry.releases) : null;
+  return catalog ? { status: 'ok', release: catalog } : { status: 'none' };
 }
 
-async function loadLatest(signal: AbortSignal): Promise<GithubRelease | null> {
+async function loadReleases(signal: AbortSignal): Promise<GithubRelease[]> {
   const res = await fetch(releasesApiUrl(), { headers: { Accept: 'application/vnd.github+json' }, signal });
-  if (res.status === 404) return null;
+  if (res.status === 404) return [];
   if (res.status === 403 || res.status === 429) throw new Error('GitHub временно ограничил запросы');
   if (!res.ok) throw new Error(`GitHub ответил ${res.status}`);
-  return (await res.json()) as GithubRelease;
+  const list = (await res.json()) as GithubRelease[];
+  // Only what the pages read: the cache stays small.
+  return list.map(({ tag_name, name, published_at, html_url, draft, prerelease, assets }) => ({
+    tag_name,
+    name,
+    published_at,
+    html_url,
+    draft,
+    prerelease,
+    assets: assets.map(({ name: file, size, browser_download_url }) => ({ name: file, size, browser_download_url })),
+  }));
 }
 
 export function useLatestRelease(): ReleaseState {
@@ -72,10 +82,10 @@ export function useLatestRelease(): ReleaseState {
       timedOut = true;
       ctrl.abort();
     }, TIMEOUT_MS);
-    loadLatest(ctrl.signal)
-      .then((release) => {
-        writeCache(release);
-        setState(fromEntry({ at: Date.now(), release }));
+    loadReleases(ctrl.signal)
+      .then((releases) => {
+        writeCache(releases);
+        setState(fromEntry({ at: Date.now(), releases }));
       })
       .catch((e: unknown) => {
         if (ctrl.signal.aborted && !timedOut) return; // unmounted
