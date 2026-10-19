@@ -292,8 +292,9 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   });
 
   const ups = options.upsSimulator;
+  // Always answers, so the equipment page can tell "no simulated UPS" from an error (no 404 in the console).
+  app.get('/api/dev/ups', async () => (ups ? { configured: true, ...ups.state } : { configured: false }));
   if (ups) {
-    app.get('/api/dev/ups', async () => ({ ...ups.state }));
     app.post<{ Body: { onBattery?: boolean; chargePercent?: number; runtimeSeconds?: number; unreachable?: boolean; poll?: boolean } }>(
       '/api/dev/ups',
       {
@@ -315,7 +316,7 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
         const { poll, ...patch } = req.body;
         ups.set(patch);
         if (poll !== false) await hub.power.poll();
-        return { ...ups.state };
+        return { configured: true, ...ups.state };
       },
     );
   }

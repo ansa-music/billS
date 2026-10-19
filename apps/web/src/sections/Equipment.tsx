@@ -201,7 +201,8 @@ function SimulatorCard() {
 function UpsSimulatorCard() {
   const { notify, version } = useHub();
   const [ups, setUps] = useDevStatus<UpsSimulatorStatus>(fetchUpsSimulator, version, 5000);
-  if (!ups) return null;
+  // The HUB answers { configured: false } without a simulated UPS; a patch reply may omit the flag.
+  if (!ups || ups.configured === false) return null;
 
   const patch = (p: Parameters<typeof updateUpsSimulator>[0]) =>
     updateUpsSimulator(p)

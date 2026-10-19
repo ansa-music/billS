@@ -70,7 +70,8 @@ export function registerMoneyRoutes(app: FastifyInstance, hub: Hub): void {
           additionalProperties: false,
           required: ['sessionIds'],
           properties: {
-            sessionIds: { type: 'array', minItems: 1, maxItems: 20, uniqueItems: true, items: { type: 'string' } },
+            sessionIds: { type: 'array', maxItems: 20, uniqueItems: true, items: { type: 'string' } },
+            orderIds: { type: 'array', maxItems: 50, uniqueItems: true, items: { type: 'string' } },
           },
         },
       },
@@ -82,7 +83,7 @@ export function registerMoneyRoutes(app: FastifyInstance, hub: Hub): void {
         hub,
         (actor) => ({
           status: 201,
-          body: hub.checks.create({ sessionIds: req.body.sessionIds, actor }),
+          body: hub.checks.create({ sessionIds: req.body.sessionIds, orderIds: req.body.orderIds, actor }),
         }),
         'check.edit',
       ),

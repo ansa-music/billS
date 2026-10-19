@@ -224,7 +224,7 @@ test('tracked stock goes down with orders, refuses what is not there and comes b
   assert.equal(again.body.error?.code, 'ORDER_NOT_OPEN');
 });
 
-test('cancelling needs a reason and is impossible once the game is closed', async (t) => {
+test('cancelling needs a reason and is impossible once the order is paid', async (t) => {
   const h = harness(t);
   const hub = await h.start();
   const sessionId = await openActive(hub);
@@ -239,12 +239,15 @@ test('cancelling needs a reason and is impossible once the game is closed', asyn
 
   assert.equal((await post(hub, `/api/orders/${randomUUID()}/cancel`, { reason: 'Нет такого' })).status, 404);
 
+  // The game's check takes the order; once the check is paid the order is CLOSED for good.
   await post(hub, `/api/sessions/${sessionId}/stop`);
-  run(hub.db, "UPDATE table_sessions SET status = 'CLOSED' WHERE id = ?", sessionId);
+  await post(hub, '/api/shifts/open', { openingFloat: 0 });
+  const check = (await post(hub, '/api/checks', { sessionIds: [sessionId] })).body as unknown as { id: string; due: number };
+  assert.equal((await post(hub, `/api/checks/${check.id}/pay`, { parts: [{ method: 'CARD', amount: check.due }] })).status, 200);
   const late = await post(hub, `/api/orders/${placed.body.id}/cancel`, { reason: 'Поздно' });
   assert.equal(late.status, 409);
-  assert.equal(late.body.error?.code, 'SESSION_CLOSED');
-  assert.equal(all(hub.db, "SELECT id FROM bar_orders WHERE status = 'OPEN'").length, 1);
+  assert.equal(late.body.error?.code, 'ORDER_NOT_OPEN');
+  assert.equal(all(hub.db, "SELECT id FROM bar_orders WHERE status = 'CLOSED'").length, 1);
 });
 
 test('a replayed order request does not create a second order', async (t) => {

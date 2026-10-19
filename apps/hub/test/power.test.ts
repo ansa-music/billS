@@ -373,7 +373,11 @@ test('the dev endpoint drives the simulated UPS for demos', async (t) => {
   const plain = new Harness();
   t.after(() => plain.dispose());
   const noUps = await plain.start();
-  assert.equal((await noUps.app.inject({ method: 'GET', url: '/api/dev/ups' })).statusCode, 404);
+  // Without a simulated UPS the route still answers, so the equipment page logs no 404.
+  const none = await noUps.app.inject({ method: 'GET', url: '/api/dev/ups' });
+  assert.equal(none.statusCode, 200);
+  assert.deepEqual(none.json(), { configured: false });
+  assert.equal((await noUps.app.inject({ method: 'POST', url: '/api/dev/ups', payload: {} })).statusCode, 404);
 });
 
 test('without a fake, an outage pauses running games through the pause service and the lamp resumes them', async (t) => {

@@ -52,6 +52,18 @@ export function ShiftReportForm({ report, club }: { report: ShiftReport; club: C
       <MethodTotals title="Возвраты" totals={report.refunds} money={money} />
       <MethodTotals title="За вычетом возвратов" totals={report.net} money={money} />
 
+      {/* Absent in Z reports saved before the bar was billed on checks. */}
+      {report.revenue && (
+        <>
+          <Sep />
+          <p className="pf-h">Выручка</p>
+          <p>по счетам, оплаченным в смену</p>
+          <Row label="Время" value={money(report.revenue.time)} />
+          <Row label="Бар" value={money(report.revenue.bar)} />
+          <Row label="Итого" value={money(report.revenue.time + report.revenue.bar)} strong />
+        </>
+      )}
+
       <Sep />
       <p className="pf-h">Касса</p>
       <Row label="Размен" value={money(report.openingFloat)} />

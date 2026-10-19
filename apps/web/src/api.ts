@@ -222,15 +222,20 @@ export interface SimulatorPatch {
   poll?: boolean;
 }
 
-/** The simulated UPS (HUB_UPS=simulator). */
+/**
+ * The simulated UPS (HUB_UPS=simulator). GET /api/dev/ups answers 200 either way:
+ * `{ configured: false }` without a simulated UPS (the state fields are then absent),
+ * `{ configured: true, ...state }` with one. Older HUBs omit `configured`.
+ */
 export interface UpsSimulatorStatus {
+  configured?: boolean;
   onBattery: boolean;
   chargePercent: number;
   runtimeSeconds: number;
   unreachable: boolean;
 }
 
-export interface UpsSimulatorPatch extends Partial<UpsSimulatorStatus> {
+export interface UpsSimulatorPatch extends Partial<Omit<UpsSimulatorStatus, 'configured'>> {
   /** false — do not re-read the UPS right away. */
   poll?: boolean;
 }
@@ -266,6 +271,6 @@ async function devPost<T>(path: string, patch: object): Promise<T> {
 export const fetchSimulator = () => devGet<SimulatorStatus>('/api/dev/lamps');
 export const updateSimulator = (patch: SimulatorPatch) => devPost<SimulatorStatus>('/api/dev/lamps', patch);
 
-/** Null when the HUB has no simulated UPS. */
+/** `configured: false` (or null from an older HUB's 404) when the HUB has no simulated UPS. */
 export const fetchUpsSimulator = () => devGet<UpsSimulatorStatus>('/api/dev/ups');
 export const updateUpsSimulator = (patch: UpsSimulatorPatch) => devPost<UpsSimulatorStatus>('/api/dev/ups', patch);

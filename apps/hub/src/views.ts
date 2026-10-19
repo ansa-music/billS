@@ -272,6 +272,8 @@ export interface OrderRow {
   cancelled_at: number | null;
   cancelled_by: string | null;
   cancel_reason: string | null;
+  check_id: string | null;
+  closed_at: number | null;
 }
 
 interface OrderItemRow {
@@ -311,6 +313,8 @@ export function toOrderViews(db: Db, rows: OrderRow[]): OrderView[] {
     cancelledAt: r.cancelled_at,
     cancelledBy: r.cancelled_by,
     cancelReason: r.cancel_reason,
+    checkId: r.check_id ?? null,
+    closedAt: r.closed_at ?? null,
   }));
 }
 
@@ -320,14 +324,18 @@ export function loadOrder(db: Db, id: string): OrderView {
   return toOrderViews(db, [row])[0]!;
 }
 
-/** Open bar orders on games that are live or waiting for payment, plus their totals per game. */
+/**
+ * Open bar orders on games that are live or waiting for payment, plus open orders on
+ * no check whose game is over (paid on a check of their own); totals per game.
+ */
 function openOrders(db: Db, club: string): { orders: OrderView[]; bySession: Map<string, number> } {
   const orders = toOrderViews(
     db,
     all<OrderRow>(
       db,
       `SELECT o.* FROM bar_orders o JOIN table_sessions s ON s.id = o.session_id
-       WHERE o.club_id = ? AND o.status = 'OPEN' AND s.status IN ('OPENING', 'ACTIVE', 'AWAITING_PAYMENT')
+       WHERE o.club_id = ? AND o.status = 'OPEN'
+         AND (s.status IN ('OPENING', 'ACTIVE', 'AWAITING_PAYMENT') OR o.check_id IS NULL)
        ORDER BY o.created_at`,
       club,
     ),
@@ -451,6 +459,11 @@ interface CheckItemRow {
   session_id: string | null;
   title: string;
   amount: number;
+  order_id: string | null;
+  qty: number | null;
+  unit_price: number | null;
+  /** The game of the line: its own for GAME, the order's game for ORDER. */
+  line_session_id: string | null;
   table_id: string | null;
   started_at: number | null;
   stopped_at: number | null;
@@ -495,6 +508,18 @@ export function discountStep(currency: string): number {
   return minorPerMajor(currency);
 }
 
+/** Each game followed by the bar lines ordered at it; bar lines of games not on the check last. */
+function groupLines(items: CheckItemRow[]): CheckItemRow[] {
+  const games = items.filter((i) => i.kind === 'GAME');
+  const onGame = new Set(games.map((g) => g.line_session_id));
+  const out: CheckItemRow[] = [];
+  for (const g of games) {
+    out.push(g, ...items.filter((i) => i.kind === 'ORDER' && i.line_session_id === g.line_session_id));
+  }
+  out.push(...items.filter((i) => i.kind === 'ORDER' && !onGame.has(i.line_session_id)));
+  return out;
+}
+
 function toCheckView(row: CheckRow, items: CheckItemRow[], payments: PaymentRow[]): CheckView {
   const discount =
     row.discount_kind !== null && row.discount_value !== null
@@ -510,13 +535,16 @@ function toCheckView(row: CheckRow, items: CheckItemRow[], payments: PaymentRow[
     id: row.id,
     number: row.number,
     status: row.status,
-    items: items.map(
+    items: groupLines(items).map(
       (i): CheckItemView => ({
         id: i.id,
         kind: i.kind,
         title: i.title,
         amount: i.amount,
-        sessionId: i.session_id,
+        orderId: i.order_id ?? null,
+        qty: i.qty ?? null,
+        unitPrice: i.unit_price ?? null,
+        sessionId: i.line_session_id,
         tableId: i.table_id,
         startedAt: i.started_at,
         stoppedAt: i.stopped_at,
@@ -549,8 +577,11 @@ export function loadChecksWhere(db: Db, where: string, ...params: Param[]): Chec
   const ids = JSON.stringify(rows.map((r) => r.id));
   const items = all<CheckItemRow>(
     db,
-    `SELECT ci.*, s.table_id, s.started_at, s.stopped_at, s.played_seconds
-     FROM check_items ci LEFT JOIN table_sessions s ON s.id = ci.session_id
+    `SELECT ci.*, COALESCE(ci.session_id, o.session_id) AS line_session_id,
+            COALESCE(s.table_id, o.table_id) AS table_id, s.started_at, s.stopped_at, s.played_seconds
+     FROM check_items ci
+     LEFT JOIN table_sessions s ON s.id = ci.session_id
+     LEFT JOIN bar_orders o ON o.id = ci.order_id
      WHERE ci.check_id IN (SELECT value FROM json_each(?)) ORDER BY ci.created_at, ci.rowid`,
     ids,
   );

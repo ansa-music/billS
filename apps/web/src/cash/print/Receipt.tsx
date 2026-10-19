@@ -1,15 +1,25 @@
+import { Fragment } from 'react';
 import type { CheckView, HubState, Minor } from '@bills/domain';
 import { formatMoney } from '@bills/domain';
 import { formatClock, formatMinutes } from '../../format.ts';
 import { METHOD_LABEL } from '../format.ts';
+import { groupLines } from '../lines.ts';
 import { formatStamp, Info, Row, Sep } from './blocks.tsx';
 import { printForm } from './printForm.tsx';
 
 type Club = HubState['club'];
 
-/** Prints the guest check; an OPEN check comes out as «Предчек» with what is still due. */
-export function printReceipt(check: CheckView, club: Club, now: number = Date.now()): void {
-  printForm(<Receipt check={check} club={club} now={now} />);
+/**
+ * Prints the guest check; an OPEN check comes out as «Предчек» with what is still due.
+ * `names` (table id → name) titles bar lines whose game is not on the check.
+ */
+export function printReceipt(
+  check: CheckView,
+  club: Club,
+  names?: ReadonlyMap<string, string>,
+  now: number = Date.now(),
+): void {
+  printForm(<Receipt check={check} club={club} names={names} now={now} />);
 }
 
 /** A settled check is dated by its last payment; anything else by the moment it is printed. */
@@ -25,7 +35,17 @@ function cashiers(check: CheckView): string {
   return names.size > 0 ? [...names].join(', ') : check.createdBy;
 }
 
-export function Receipt({ check, club, now }: { check: CheckView; club: Club; now: number }) {
+export function Receipt({
+  check,
+  club,
+  names,
+  now,
+}: {
+  check: CheckView;
+  club: Club;
+  names?: ReadonlyMap<string, string> | undefined;
+  now: number;
+}) {
   const money = (a: Minor) => formatMoney(a, club.currency);
   const tz = club.timezone;
   const pre = check.status === 'OPEN';
@@ -47,15 +67,32 @@ export function Receipt({ check, club, now }: { check: CheckView; club: Club; no
       <Info label="Кассир">{cashiers(check)}</Info>
 
       <Sep />
-      {check.items.map((item) => (
-        <div key={item.id} className="pf-item">
-          <Row label={item.title} value={money(item.amount)} />
-          {item.startedAt != null && item.stoppedAt != null && (
-            <p className="pf-sub">
-              {formatClock(item.startedAt, tz)}–{formatClock(item.stoppedAt, tz)} · {formatMinutes(item.playedSeconds ?? 0)}
-            </p>
+      {groupLines(check.items).map(({ key, game, orders, tableId }) => (
+        <Fragment key={key}>
+          {game ? (
+            <div className="pf-item">
+              <Row label={game.title} value={money(game.amount)} />
+              {game.startedAt != null && game.stoppedAt != null && (
+                <p className="pf-sub">
+                  {formatClock(game.startedAt, tz)}–{formatClock(game.stoppedAt, tz)} · {formatMinutes(game.playedSeconds ?? 0)}
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="pf-item pf-strong">Бар{tableId != null && names?.get(tableId) ? ` · ${names.get(tableId)}` : ''}</p>
           )}
-        </div>
+          {/* Bar line: the product on its own line, «2 × 600 ₸ … 1 200 ₸» under it. */}
+          {orders.map((item) => (
+            <div key={item.id} className="pf-item">
+              <p>{item.title}</p>
+              <Row
+                sub
+                label={item.qty != null && item.unitPrice != null ? `${item.qty} × ${money(item.unitPrice)}` : ''}
+                value={money(item.amount)}
+              />
+            </div>
+          ))}
+        </Fragment>
       ))}
 
       <Sep />

@@ -10,6 +10,13 @@ import {
   planPayment,
   shiftTotals,
 } from '@bills/domain';
+import {
+  attachOrder,
+  attachOrdersOfGame,
+  closeOrdersOfCheck,
+  detachOrdersOfGame,
+  voidCheckIfEmpty,
+} from './check-orders.ts';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
 import { afterCommit, all, one, run, transaction } from './db.ts';
@@ -61,12 +68,19 @@ export class CheckService {
     return loadCheck(this.#db, checkId);
   }
 
-  /** Puts stopped games on a new check. No shift is needed until money moves. */
-  create(input: { sessionIds: string[]; actor: string }): CheckView {
+  /**
+   * Puts stopped games on a new check, each with its open bar orders; `orderIds` bills
+   * orders without their game (left after a prepaid or voided game). No shift is needed
+   * until money moves.
+   */
+  create(input: { sessionIds: string[]; orderIds?: string[] | undefined; actor: string }): CheckView {
     const db = this.#db;
     const now = this.#clock.now();
+    const orderIds = input.orderIds ?? [];
     return transaction(db, () => {
-      if (input.sessionIds.length === 0) throw new HubError(422, 'NO_GAMES', 'Выберите хотя бы одну игру');
+      if (input.sessionIds.length === 0 && orderIds.length === 0) {
+        throw new HubError(422, 'NO_GAMES', 'Выберите игру или заказ бара');
+      }
       const club = clubId(db);
       const number =
         (one<{ n: number | null }>(db, 'SELECT MAX(number) AS n FROM checks WHERE club_id = ?', club)?.n ?? 0) + 1;
@@ -90,6 +104,12 @@ export class CheckService {
         entityId: id,
         data: { number, items },
       });
+      // After check.created: the cloud adds each order's amount to the check it already has.
+      for (const sessionId of input.sessionIds) attachOrdersOfGame(db, id, sessionId, input.actor, now);
+      for (const orderId of new Set(orderIds)) {
+        const onThis = one<{ id: string }>(db, 'SELECT id FROM bar_orders WHERE id = ? AND check_id = ?', orderId, id);
+        if (!onThis) attachOrder(db, id, orderId, input.actor, now);
+      }
       afterCommit(db, () => this.#events.changed({ kind: 'check' }));
       return loadCheck(db, id);
     });
@@ -151,7 +171,6 @@ export class CheckService {
     return transaction(db, () => {
       const check = this.#openCheck(input.checkId);
       const item = this.#addGame(check.id, check.club_id, input.sessionId, now);
-      this.#assertTotals(check.id);
       this.#touch(check.id, now);
       record(db, now, {
         actor: input.actor,
@@ -160,24 +179,32 @@ export class CheckService {
         entityId: check.id,
         data: item,
       });
+      attachOrdersOfGame(db, check.id, input.sessionId, input.actor, now);
+      this.#assertTotals(check.id);
       afterCommit(db, () => this.#events.changed({ kind: 'check' }));
       return loadCheck(db, check.id);
     });
   }
 
-  /** Takes a game off a check that has no money on it yet. An emptied check becomes VOID. */
+  /**
+   * Takes a game off a check that has no money on it yet, together with its bar orders.
+   * A bar line cannot be taken off alone: the order is cancelled instead. An emptied check becomes VOID.
+   */
   removeItem(input: { checkId: string; itemId: string; actor: string }): CheckView {
     const db = this.#db;
     const now = this.#clock.now();
     return transaction(db, () => {
       const check = this.#openCheck(input.checkId);
-      const item = one<{ id: string; session_id: string | null; amount: number }>(
+      const item = one<{ id: string; kind: string; session_id: string | null; amount: number }>(
         db,
-        'SELECT id, session_id, amount FROM check_items WHERE id = ? AND check_id = ?',
+        'SELECT id, kind, session_id, amount FROM check_items WHERE id = ? AND check_id = ?',
         input.itemId,
         check.id,
       );
       if (!item) throw new HubError(404, 'ITEM_NOT_FOUND', 'Строки нет в этом счёте');
+      if (item.kind === 'ORDER') {
+        throw new HubError(409, 'ORDER_LINE_LOCKED', 'Строку бара нельзя убрать из счёта — отмените заказ на странице «Заказы»');
+      }
       this.#assertNoMoney(check.id);
       run(db, 'DELETE FROM check_items WHERE id = ?', item.id);
       this.#touch(check.id, now);
@@ -188,7 +215,8 @@ export class CheckService {
         entityId: check.id,
         data: { itemId: item.id, sessionId: item.session_id, amount: item.amount },
       });
-      this.#voidIfEmpty(check.id, input.actor, now);
+      if (item.session_id) detachOrdersOfGame(db, check.id, item.session_id, input.actor, now);
+      if (!this.#voidIfEmpty(check.id, input.actor, now)) this.#assertTotals(check.id);
       afterCommit(db, () => this.#events.changed({ kind: 'check' }));
       return loadCheck(db, check.id);
     });
@@ -378,6 +406,8 @@ export class CheckService {
           entityId: s.check_id,
           data: { sessionId: s.id, amount: s.amount, reason: 'GAME_CANCELLED' },
         });
+        // The bar orders were consumed all the same: they stay open and are paid on their own.
+        detachOrdersOfGame(db, s.check_id, s.id, input.actor, now);
         if (!this.#voidIfEmpty(s.check_id, input.actor, now)) this.#assertTotals(s.check_id);
       }
 
@@ -475,11 +505,7 @@ export class CheckService {
   }
 
   #voidIfEmpty(checkId: string, actor: string, now: number): boolean {
-    const left = one<{ n: number }>(this.#db, 'SELECT COUNT(*) AS n FROM check_items WHERE check_id = ?', checkId)?.n ?? 0;
-    if (left > 0) return false;
-    run(this.#db, "UPDATE checks SET status = 'VOID', closed_at = ?, updated_at = ? WHERE id = ?", now, now, checkId);
-    record(this.#db, now, { actor, action: 'check.voided', entityType: 'check', entityId: checkId, data: {} });
-    return true;
+    return voidCheckIfEmpty(this.#db, checkId, actor, now);
   }
 
   #settle(checkId: string, number: number, shiftId: string, actor: string, now: number): void {
@@ -508,6 +534,7 @@ export class CheckService {
         data: { tableId: g.table_id, checkId },
       });
     }
+    closeOrdersOfCheck(db, checkId, actor, now);
     const check = loadCheck(db, checkId);
     record(db, now, {
       actor,

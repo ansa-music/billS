@@ -11,6 +11,7 @@ import type {
   UpdateProductRequest,
 } from '@bills/domain';
 import { CANCEL_REASON_MIN, ORDER_NOTE_MAX, orderItemAmount, orderTotal, validateOrderItems } from '@bills/domain';
+import { attachOrder, detachOrder, netPaidOn, openCheckOfGame, voidCheckIfEmpty } from './check-orders.ts';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
 import { afterCommit, all, one, run, transaction } from './db.ts';
@@ -18,7 +19,7 @@ import { HubError } from './errors.ts';
 import type { HubEvents } from './events.ts';
 import { record } from './journal.ts';
 import type { OrderRow, SessionRow } from './views.ts';
-import { clubId, loadOrder, toOrderViews } from './views.ts';
+import { clubId, loadCheck, loadOrder, toOrderViews } from './views.ts';
 
 export interface BarServiceDeps {
   db: Db;
@@ -273,7 +274,8 @@ export class BarService {
 
   /**
    * Adds an order to a running or stopped-but-unpaid game. Title and price of
-   * every line are snapshots; tracked stock goes down right away.
+   * every line are snapshots; tracked stock goes down right away. When the game is
+   * already on an open check, the order joins that check at once.
    */
   createOrder(input: CreateOrderRequest & { sessionId: string; actor: string }): OrderView {
     const db = this.deps.db;
@@ -372,12 +374,21 @@ export class BarService {
           items: lines.map((l) => ({ productId: l.product.id, title: l.product.name, price: l.price, qty: l.qty, amount: l.amount })),
         },
       });
+      const checkId = openCheckOfGame(db, session.id);
+      if (checkId) {
+        attachOrder(db, checkId, id, input.actor, now);
+        loadCheck(db, checkId); // the stored discount must still fit
+        afterCommit(db, () => this.deps.events.changed({ kind: 'check' }));
+      }
       afterCommit(db, () => this.deps.events.changed({ kind: 'order', tableId: session.table_id }));
       return loadOrder(db, id);
     });
   }
 
-  /** Cancels an open order with a reason while the game is not closed yet; tracked stock comes back. */
+  /**
+   * Cancels an open order with a reason, only before it is paid: an order on a check
+   * with money on it stays. Its lines leave the check; tracked stock comes back.
+   */
   cancelOrder(input: { orderId: string; reason: string; actor: string }): OrderView {
     const db = this.deps.db;
     const now = this.deps.clock.now();
@@ -387,10 +398,15 @@ export class BarService {
       if (!order) throw new HubError(404, 'ORDER_NOT_FOUND', 'Заказ не найден');
       const reason = (input.reason ?? '').trim();
       if (reason.length < CANCEL_REASON_MIN) throw new HubError(422, 'REASON_REQUIRED', 'Укажите причину');
-      if (order.status !== 'OPEN') throw new HubError(409, 'ORDER_NOT_OPEN', 'Заказ уже отменён');
-      const session = one<{ status: string }>(db, 'SELECT status FROM table_sessions WHERE id = ?', order.session_id);
-      if (!session || session.status === 'CLOSED') {
-        throw new HubError(409, 'SESSION_CLOSED', 'Игра уже закрыта — заказ нельзя отменить');
+      if (order.status !== 'OPEN') {
+        throw new HubError(
+          409,
+          'ORDER_NOT_OPEN',
+          order.status === 'CLOSED' ? 'Заказ уже оплачен — оформите возврат по счёту' : 'Заказ уже отменён',
+        );
+      }
+      if (order.check_id && netPaidOn(db, order.check_id) > 0) {
+        throw new HubError(409, 'CHECK_HAS_PAYMENTS', 'По счёту с этим заказом уже есть оплата — заказ нельзя отменить');
       }
 
       const items = all<{ product_id: string; qty: number }>(
@@ -422,8 +438,13 @@ export class BarService {
         action: 'order.cancelled',
         entityType: 'order',
         entityId: order.id,
-        data: { sessionId: order.session_id, tableId: order.table_id, total: order.total, reason },
+        data: { sessionId: order.session_id, tableId: order.table_id, total: order.total, reason, checkId: order.check_id },
       });
+      if (order.check_id) {
+        detachOrder(db, order.id, input.actor, now);
+        if (!voidCheckIfEmpty(db, order.check_id, input.actor, now)) loadCheck(db, order.check_id);
+        afterCommit(db, () => this.deps.events.changed({ kind: 'check' }));
+      }
       afterCommit(db, () => this.deps.events.changed({ kind: 'order', tableId: order.table_id }));
       return loadOrder(db, order.id);
     });

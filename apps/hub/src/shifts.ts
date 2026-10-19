@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { CashMovementKind, CheckView, CloseShiftResponse, ShiftReport, ShiftView } from '@bills/domain';
-import { assertCashAmount, assertCashAvailable, assertReason, cashDifference, shiftTotals } from '@bills/domain';
+import {
+  assertCashAmount,
+  assertCashAvailable,
+  assertReason,
+  cashDifference,
+  shiftTotals,
+  splitRevenue,
+} from '@bills/domain';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
 import { afterCommit, one, run, transaction } from './db.ts';
@@ -140,7 +147,11 @@ export class ShiftService {
   /** X report while the shift is open; the Z report fixed at close afterwards. */
   report(shiftId: string): ShiftReport {
     const row = loadShiftRow(this.#db, shiftId);
-    if (row.status === 'CLOSED' && row.z_report) return JSON.parse(row.z_report) as ShiftReport;
+    if (row.status === 'CLOSED' && row.z_report) {
+      const z = JSON.parse(row.z_report) as ShiftReport;
+      // Z reports fixed before the time/bar split (migration 012) get it from the checks of that shift.
+      return z.revenue ? z : { ...z, revenue: revenueOf(loadChecksWhere(this.#db, 'c.closed_shift_id = ?', row.id)) };
+    }
     return buildReport(this.#db, row, 'X', this.#clock.now(), null);
   }
 
@@ -174,11 +185,19 @@ export class ShiftService {
       const openChecks =
         one<{ n: number }>(db, "SELECT COUNT(*) AS n FROM checks WHERE club_id = ? AND status = 'OPEN'", shift.club_id)
           ?.n ?? 0;
-      if (unpaidGames + openChecks > 0) {
+      // Bar orders on no check whose game is over (a running game's orders are paid with it later).
+      const unbilledOrders =
+        one<{ n: number }>(
+          db,
+          `SELECT COUNT(*) AS n FROM bar_orders o JOIN table_sessions s ON s.id = o.session_id
+           WHERE o.club_id = ? AND o.status = 'OPEN' AND o.check_id IS NULL AND s.status NOT IN ('OPENING', 'ACTIVE')`,
+          shift.club_id,
+        )?.n ?? 0;
+      if (unpaidGames + openChecks + unbilledOrders > 0) {
         throw new HubError(
           409,
           'UNPAID_CHECKS',
-          `Нельзя закрыть смену: не оплачено счетов — ${unpaidGames + openChecks}. Примите оплату или отмените игры.`,
+          `Нельзя закрыть смену: не оплачено — ${unpaidGames + openChecks + unbilledOrders} (игры, счета, заказы бара). Примите оплату или отмените.`,
         );
       }
 
@@ -256,7 +275,19 @@ function buildReport(db: Db, row: ShiftRow, kind: 'X' | 'Z', now: number, counte
     paymentsCount: counts?.payments ?? 0,
     refundsCount: counts?.refunds ?? 0,
     discounts: paidChecks.reduce((s, c) => s + c.discountAmount, 0),
+    revenue: revenueOf(paidChecks),
     cancelledGames,
     movements: cashMovements(db, row.id),
   };
+}
+
+/** Paid checks split into time and bar, each check's discount spread over both. */
+function revenueOf(checks: CheckView[]): ShiftReport['revenue'] {
+  return checks.reduce(
+    (sum, c) => {
+      const r = splitRevenue(c.items, c.discountAmount);
+      return { time: sum.time + r.time, bar: sum.bar + r.bar };
+    },
+    { time: 0, bar: 0 },
+  );
 }

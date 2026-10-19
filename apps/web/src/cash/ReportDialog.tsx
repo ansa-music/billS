@@ -91,29 +91,55 @@ function ReportBody({ report, club }: { report: ShiftReport; club: HubState['clu
         </dl>
       </div>
 
-      <div className="table-scroll">
-        <table className="report-table">
-          <thead>
-            <tr>
-              <th scope="col">
-                <span className="sr-only">Способ оплаты</span>
-              </th>
-              <th scope="col">Продажи</th>
-              <th scope="col">Возвраты</th>
-              <th scope="col">Итого</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ROWS.map(([label, key]) => (
-              <tr key={key} className={key === 'total' ? 'report-total' : undefined}>
-                <th scope="row">{label}</th>
-                <td>{money(report.sales[key])}</td>
-                <td>{money(report.refunds[key])}</td>
-                <td>{money(report.net[key])}</td>
+      <div className="report-split">
+        <div className="table-scroll">
+          <table className="report-table">
+            <thead>
+              <tr>
+                <th scope="col">
+                  <span className="sr-only">Способ оплаты</span>
+                </th>
+                <th scope="col">Продажи</th>
+                <th scope="col">Возвраты</th>
+                <th scope="col">Итого</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {ROWS.map(([label, key]) => (
+                <tr key={key} className={key === 'total' ? 'report-total' : undefined}>
+                  <th scope="row">{label}</th>
+                  <td>{money(report.sales[key])}</td>
+                  <td>{money(report.refunds[key])}</td>
+                  <td>{money(report.net[key])}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Absent in Z reports saved before the bar was billed on checks. */}
+        {report.revenue && (
+          <section className="report-revenue" aria-labelledby="report-revenue-title">
+            <h3 className="cash-sub" id="report-revenue-title">
+              Выручка
+            </h3>
+            <dl className="kv">
+              <div>
+                <dt>Время</dt>
+                <dd>{money(report.revenue.time)}</dd>
+              </div>
+              <div>
+                <dt>Бар</dt>
+                <dd>{money(report.revenue.bar)}</dd>
+              </div>
+              <div className="kv-strong">
+                <dt>Итого</dt>
+                <dd>{money(report.revenue.time + report.revenue.bar)}</dd>
+              </div>
+            </dl>
+            <p className="hint">По счетам, оплаченным в смену; скидка распределена между временем и баром.</p>
+          </section>
+        )}
       </div>
 
       <dl className="kv">

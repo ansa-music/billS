@@ -228,7 +228,7 @@ export class ReportService {
     };
   }
 
-  /** Time revenue of stopped games plus open bar orders created in the period. */
+  /** Time revenue of stopped games plus bar orders (not cancelled) created in the period. */
   #periodRevenue(club: string, p: Period): { amount: number; games: number } {
     const { db } = this.deps;
     const games = one<{ n: number; amount: number | null }>(
@@ -242,7 +242,7 @@ export class ReportService {
     const orders = one<{ total: number | null }>(
       db,
       `SELECT SUM(total) AS total FROM bar_orders
-       WHERE club_id = ? AND status = 'OPEN' AND created_at >= ? AND created_at < ?`,
+       WHERE club_id = ? AND status IN ('OPEN', 'CLOSED') AND created_at >= ? AND created_at < ?`,
       club,
       p.start,
       p.end,
@@ -316,7 +316,7 @@ export class ReportService {
     for (const o of all<{ created_at: number; total: number }>(
       db,
       `SELECT created_at, total FROM bar_orders
-       WHERE club_id = ? AND status = 'OPEN' AND created_at >= ? AND created_at < ?`,
+       WHERE club_id = ? AND status IN ('OPEN', 'CLOSED') AND created_at >= ? AND created_at < ?`,
       club,
       rangeStart,
       rangeEnd,

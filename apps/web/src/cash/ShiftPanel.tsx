@@ -26,6 +26,7 @@ import { getJson } from '../api.ts';
 import type { Desk, DeskProps } from './desk.ts';
 import { useAction, useDesk, useLoad } from './desk.ts';
 import { currencySymbol, describeDifference, formatWhen, METHOD_LABEL } from './format.ts';
+import { checkSummary, unbilledOrders } from './lines.ts';
 import { FormError, Modal, MoneyField, TextField } from './Modal.tsx';
 import { PaperSwitch } from './print/PaperSwitch.tsx';
 import { printReceipt } from './print/Receipt.tsx';
@@ -249,7 +250,8 @@ function CloseShiftDialog({
 
   const countedCash = counted.trim() === '' ? null : parseMoney(counted, currency);
   const diff = countedCash === null ? null : describeDifference(cashDifference(countedCash, shift.expectedCash), currency);
-  const unpaidLeft = desk.state.unpaid.length > 0 || desk.state.checks.length > 0;
+  const unpaidLeft =
+    desk.state.unpaid.length > 0 || desk.state.checks.length > 0 || unbilledOrders(desk.state).length > 0;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -300,7 +302,7 @@ function CloseShiftDialog({
           <textarea rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
         </label>
         {unpaidLeft && action.error?.code !== 'UNPAID_CHECKS' && (
-          <p className="hint hint-warn">Есть неоплаченные игры или счета — смену закрыть не получится.</p>
+          <p className="hint hint-warn">Есть неоплаченные игры, счета или заказы бара — смену закрыть не получится.</p>
         )}
       </form>
     </Modal>
@@ -318,10 +320,11 @@ function lastActivity(check: CheckView): number {
 }
 
 function ShiftChecksDialog({ desk, shiftId, onClose }: { desk: Desk; shiftId: string; onClose: () => void }) {
-  const { club, serverNow } = desk.state;
+  const { club, serverNow, tables } = desk.state;
   const { data, error, reload } = useLoad<CheckView[]>(`/api/shifts/${shiftId}/checks`);
   const [refundFor, setRefundFor] = useState<CheckView | null>(null);
   const money = (a: Minor) => formatMoney(a, club.currency);
+  const names = new Map(tables.map((t) => [t.id, t.name]));
   const checks = data ? [...data].sort((a, b) => lastActivity(b) - lastActivity(a)) : null;
 
   return (
@@ -348,7 +351,7 @@ function ShiftChecksDialog({ desk, shiftId, onClose }: { desk: Desk; shiftId: st
                     {c.status === 'OPEN' && <span className="tag tag-warn">частично</span>}
                     <strong className="money sc-total">{money(c.total)}</strong>
                   </div>
-                  <span className="muted">{c.items.map((i) => i.title).join(', ')}</span>
+                  <span className="muted">{checkSummary(c, names, money)}</span>
                   {methods.length > 0 && (
                     <span className="money-line">
                       {methods.map((m) => `${METHOD_LABEL[m]} ${money(paid[m])}`).join(' · ')}
@@ -360,7 +363,7 @@ function ShiftChecksDialog({ desk, shiftId, onClose }: { desk: Desk; shiftId: st
                       type="button"
                       className="btn btn-small"
                       aria-label={`Печать счёта №${c.number}`}
-                      onClick={() => printReceipt(c, club)}
+                      onClick={() => printReceipt(c, club, names)}
                     >
                       Печать
                     </button>

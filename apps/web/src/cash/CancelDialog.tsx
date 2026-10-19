@@ -57,6 +57,12 @@ export function CancelDialog({ desk, session, onClose }: { desk: Desk; session: 
           <strong className="money">{formatMoney(session.amount ?? 0, club.currency)}</strong>
         </div>
         <p className="hint">Игра будет снята без оплаты. Отмена попадёт в журнал с причиной и именем управляющего.</p>
+        {session.ordersTotal > 0 && (
+          <p className="hint hint-warn">
+            Заказы бара этой игры ({formatMoney(session.ordersTotal, club.currency)}) не отменяются — они останутся к
+            оплате в списке «Заказы без счёта».
+          </p>
+        )}
         <TextField label="Причина" value={reason} onChange={setReason} autoFocus placeholder="Например: тестовое включение" />
         <TextField label="Подтвердил (управляющий)" value={approver} onChange={setApprover} maxLength={100} />
       </form>

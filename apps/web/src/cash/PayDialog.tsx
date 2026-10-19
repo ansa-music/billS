@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type {
   AddCheckItemRequest,
@@ -17,6 +17,7 @@ import { formatClock, formatMinutes } from '../format.ts';
 import type { Desk } from './desk.ts';
 import { toActionError, useAction } from './desk.ts';
 import { currencySymbol, METHOD_LABEL, toMoneyInput } from './format.ts';
+import { groupLines } from './lines.ts';
 import { FormError, Modal } from './Modal.tsx';
 import { printReceipt } from './print/Receipt.tsx';
 
@@ -126,7 +127,7 @@ export function PayDialog({ desk, initial, onClose }: { desk: Desk; initial: Che
         onClose={onClose}
         footer={
           <div className="modal-actions">
-            <button type="button" className="btn" onClick={() => printReceipt(done.check, state.club)}>
+            <button type="button" className="btn" onClick={() => printReceipt(done.check, state.club, names)}>
               Печать чека
             </button>
             <button ref={doneRef} type="button" className="btn btn-primary" onClick={onClose}>
@@ -156,7 +157,7 @@ export function PayDialog({ desk, initial, onClose }: { desk: Desk; initial: Che
           </button>
         }
       >
-        <p>В счёте не осталось игр — он аннулирован. Игры снова в списке «Ожидают оплаты».</p>
+        <p>В счёте не осталось позиций — он аннулирован. Игры и заказы бара снова в списке «Ожидают оплаты».</p>
       </Modal>
     );
   }
@@ -197,7 +198,7 @@ export function PayDialog({ desk, initial, onClose }: { desk: Desk; initial: Che
               type="button"
               className="btn btn-narrow"
               title={open ? 'Напечатать счёт как есть, до оплаты' : undefined}
-              onClick={() => printReceipt(check, state.club)}
+              onClick={() => printReceipt(check, state.club, names)}
             >
               {open ? 'Предчек' : 'Печать чека'}
             </button>
@@ -214,31 +215,59 @@ export function PayDialog({ desk, initial, onClose }: { desk: Desk; initial: Che
       }
     >
       <ul className="pay-items" aria-label="Позиции счёта">
-        {check.items.map((item) => (
-          <li key={item.id}>
-            <div className="pay-item-info">
-              <strong>{item.title}</strong>
-              {item.startedAt != null && item.stoppedAt != null && (
-                <span className="muted money">
-                  {formatClock(item.startedAt, timezone)}–{formatClock(item.stoppedAt, timezone)} ·{' '}
-                  {formatMinutes(item.playedSeconds ?? 0)}
-                </span>
-              )}
-            </div>
-            <span className="money">{money(item.amount)}</span>
-            {editable && (
-              <button
-                type="button"
-                className="icon-btn"
-                aria-label={`Убрать «${item.title}» из счёта`}
-                title="Убрать из счёта"
-                disabled={action.pending}
-                onClick={() => void send(`/api/checks/${check.id}/items/${item.id}/remove`)}
-              >
-                ×
-              </button>
+        {groupLines(check.items).map(({ key, game, orders, tableId }) => (
+          <Fragment key={key}>
+            {game && (
+              <li>
+                <div className="pay-item-info">
+                  <strong>{game.title}</strong>
+                  {game.startedAt != null && game.stoppedAt != null && (
+                    <span className="muted money">
+                      {formatClock(game.startedAt, timezone)}–{formatClock(game.stoppedAt, timezone)} ·{' '}
+                      {formatMinutes(game.playedSeconds ?? 0)}
+                    </span>
+                  )}
+                </div>
+                <span className="money">{money(game.amount)}</span>
+                {/* Bar lines are not removed here: the order is cancelled on the orders page. */}
+                {editable && (
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    aria-label={`Убрать «${game.title}» из счёта${orders.length ? ' вместе с заказами бара' : ''}`}
+                    title={orders.length ? 'Убрать из счёта вместе с заказами бара' : 'Убрать из счёта'}
+                    disabled={action.pending}
+                    onClick={() => void send(`/api/checks/${check.id}/items/${game.id}/remove`)}
+                  >
+                    ×
+                  </button>
+                )}
+              </li>
             )}
-          </li>
+            {orders.length > 0 && (
+              <li className="pay-bar">
+                <span className="pay-bar-head">
+                  {game ? 'Бар' : `Бар · ${(tableId != null && names.get(tableId)) || 'без игры'}`}
+                </span>
+                <ul className="pay-bar-lines">
+                  {orders.map((item) => (
+                    <li key={item.id}>
+                      <span className="pay-bar-title">
+                        {item.title}
+                        {item.qty != null && item.unitPrice != null && (
+                          <span className="muted money">
+                            {' '}
+                            · {item.qty} × {money(item.unitPrice)}
+                          </span>
+                        )}
+                      </span>
+                      <span className="money">{money(item.amount)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            )}
+          </Fragment>
         ))}
       </ul>
 
@@ -258,6 +287,7 @@ export function PayDialog({ desk, initial, onClose }: { desk: Desk; initial: Che
                 }}
               >
                 + {names.get(s.tableId) ?? 'Стол'} · {money(s.amount ?? 0)}
+                {s.ordersTotal > 0 && ` + бар ${money(s.ordersTotal)}`}
               </button>
             ))}
           </div>
