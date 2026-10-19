@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ClubSummary, CloudSessionView, DayStats, HourLoad, TableStats } from '@bills/domain';
+import type { ClubSummary, CloudSessionView, DayStats, HourLoad, PowerOutageView, TableStats } from '@bills/domain';
 import { isLive } from '@bills/domain';
 import { fetchClub, fetchSessions } from './api.ts';
 import {
   KIND_LABEL,
   STATUS_LABEL,
+  formatClock,
   formatDateTime,
   formatDayLabel,
   formatDuration,
@@ -12,12 +13,14 @@ import {
   formatMinutes,
   localDay,
   money,
+  pauseLabel,
 } from './format.ts';
+import type { ClubTab } from './hooks.ts';
 import { clubHref, usePoll } from './hooks.ts';
-import { AlertList, HubBadge, Section, StatTile, loadingText } from './shared.tsx';
+import { AlertList, HubBadge, Section, StatTile, gamesLabel, loadingText } from './shared.tsx';
 
-/** Club name, HUB status and the tabs — shared by the club page and the tariff editor. */
-export function ClubHeader({ club, now, tab }: { club: ClubSummary; now: number; tab: 'overview' | 'tariffs' }) {
+/** Club name, HUB status and the tabs — shared by the club page, the shifts page and the tariff editor. */
+export function ClubHeader({ club, now, tab }: { club: ClubSummary; now: number; tab: ClubTab }) {
   return (
     <header className="club-page-head">
       <div>
@@ -35,6 +38,9 @@ export function ClubHeader({ club, now, tab }: { club: ClubSummary; now: number;
           <a href={clubHref(club.id)} aria-current={tab === 'overview' ? 'page' : undefined}>
             Обзор
           </a>
+          <a href={clubHref(club.id, 'shifts')} aria-current={tab === 'shifts' ? 'page' : undefined}>
+            Смены
+          </a>
           <a href={clubHref(club.id, 'tariffs')} aria-current={tab === 'tariffs' ? 'page' : undefined}>
             Тарифы
           </a>
@@ -49,35 +55,47 @@ const CHART_H = 200;
 const PAD_TOP = 28;
 const PAD_BOTTOM = 24;
 
-/** Revenue per local day, 30 bars; the last bar is today. */
+/**
+ * Revenue per local day, 30 bars (paid minus refunded); the last bar is today.
+ * A thin line with markers shows what was billed on «Стоп» the same day — the two differ
+ * when a game is paid the next day or refunded.
+ */
 function RevenueChart({ days, currency }: { days: DayStats[]; currency: string }) {
   if (days.length === 0) return <p className="empty">Пока нет данных по дням</p>;
-  const max = Math.max(1, ...days.map((d) => d.revenue));
+  const max = Math.max(1, ...days.map((d) => Math.max(d.revenue, d.billed)));
   const slot = CHART_W / days.length;
   const barW = Math.max(4, slot * 0.68);
   const plotH = CHART_H - PAD_TOP - PAD_BOTTOM;
+  const baseY = CHART_H - PAD_BOTTOM;
   const total = days.reduce((s, d) => s + d.revenue, 0);
+  const billedTotal = days.reduce((s, d) => s + d.billed, 0);
+  const yOf = (v: number) => baseY - (v / max) * plotH;
+  const cxOf = (i: number) => i * slot + slot / 2;
+  const linePoints = days.map((d, i) => `${cxOf(i).toFixed(1)},${yOf(d.billed).toFixed(1)}`).join(' ');
   return (
     <figure className="chart">
-      <svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} role="img" aria-label="Выручка по дням за 30 дней">
-        <line className="chart-axis" x1={0} x2={CHART_W} y1={CHART_H - PAD_BOTTOM} y2={CHART_H - PAD_BOTTOM} />
+      <svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} role="img" aria-label="Выручка по дням за 30 дней: столбики — оплачено, линия — начислено">
+        <line className="chart-axis" x1={0} x2={CHART_W} y1={baseY} y2={baseY} />
         <text className="chart-max" x={0} y={PAD_TOP - 10}>
           макс. {money(max, currency)}
         </text>
         {days.map((d, i) => {
           const h = (d.revenue / max) * plotH;
           const x = i * slot + (slot - barW) / 2;
-          const y = CHART_H - PAD_BOTTOM - h;
+          const y = baseY - h;
           const last = i === days.length - 1;
           const showLabel = last || i % 5 === 0;
           return (
             <g key={d.day} className="chart-bar" data-today={last || undefined}>
               <title>
-                {formatDayLabel(d.day)}: {money(d.revenue, currency)}, {d.games} игр, {formatMinutes(d.playedSeconds)}
+                {formatDayLabel(d.day)}: оплачено {money(d.revenue, currency)}, начислено {money(d.billed, currency)}
+                {d.refunded > 0 ? `, возвраты ${money(d.refunded, currency)}` : ''}, {d.checksPaid} чеков, {d.games} игр,{' '}
+                {formatMinutes(d.playedSeconds)}
+                {d.cancelledGames > 0 ? `, отменено: ${d.cancelledGames}` : ''}
                 {d.alerts > 0 ? `, тревог: ${d.alerts}` : ''}
               </title>
               <rect x={x} y={y} width={barW} height={Math.max(h, d.revenue > 0 ? 2 : 0)} rx={2} />
-              {d.alerts > 0 && <circle className="chart-dot" cx={x + barW / 2} cy={y - 6} r={2.5} />}
+              {d.alerts > 0 && <circle className="chart-dot" cx={x + barW / 2} cy={Math.min(y, yOf(d.billed)) - 6} r={2.5} />}
               {showLabel && (
                 <text className="chart-label" x={x + barW / 2} y={CHART_H - 8} textAnchor="middle">
                   {formatDayLabel(d.day, !last && i % 10 !== 0)}
@@ -86,10 +104,25 @@ function RevenueChart({ days, currency }: { days: DayStats[]; currency: string }
             </g>
           );
         })}
+        <polyline className="chart-line" points={linePoints} fill="none" />
+        {days.map((d, i) => (
+          <circle key={d.day} className="chart-mark" cx={cxOf(i)} cy={yOf(d.billed)} r={2} />
+        ))}
       </svg>
       <figcaption className="muted">
-        За 30 дней: {money(total, currency)} · {days.reduce((s, d) => s + d.games, 0)} игр · точка над столбиком —
-        были тревоги
+        <span className="legend">
+          <span className="legend-item" data-kind="bar">
+            оплачено {money(total, currency)}
+          </span>
+          <span className="legend-item" data-kind="line">
+            начислено {money(billedTotal, currency)}
+          </span>
+          <span className="legend-item" data-kind="dot">
+            были тревоги
+          </span>
+        </span>
+        {' · '}
+        {gamesLabel(days.reduce((s, d) => s + d.games, 0))} за 30 дней
       </figcaption>
     </figure>
   );
@@ -136,7 +169,9 @@ function TablesTable({ tables, currency }: { tables: TableStats[]; currency: str
           <th>Стол</th>
           <th>Вид</th>
           <th className="num">Игры</th>
-          <th className="num">Выручка</th>
+          <th className="num" title="Начислено на «Стоп» по играм стола">
+            Начислено
+          </th>
           <th className="num">Наиграно</th>
           <th className="num">Занятость</th>
         </tr>
@@ -174,6 +209,34 @@ function sessionDuration(s: CloudSessionView, now: number): string {
   return isLive(s.status) ? formatDuration((now - s.startedAt) / 1000) : '—';
 }
 
+const PAUSE_REASON: Record<string, string> = {
+  pause: 'пауза',
+  transfer: 'перенос на другой стол',
+  power: 'отключение света',
+};
+
+/** Why the game is cancelled / failed, or who approved the void — for the status chip's tooltip. */
+function statusTitle(s: CloudSessionView): string | undefined {
+  const parts: string[] = [];
+  if (s.cancelReason) parts.push(`Причина: ${s.cancelReason}`);
+  if (s.cancelApprovedBy) parts.push(`Подтвердил: ${s.cancelApprovedBy}`);
+  if (s.status === 'PAUSED' && s.pauseReason) parts.push(PAUSE_REASON[s.pauseReason] ?? s.pauseReason);
+  return parts.length > 0 ? parts.join(' · ') : undefined;
+}
+
+/** «на 60 мин» / «пауза 12 мин» / «на паузе с 18:05 (перенос)» — small notes next to the status. */
+function SessionNotes({ s, timezone }: { s: CloudSessionView; timezone: string }) {
+  const notes: string[] = [];
+  if (s.prepaidMinutes !== null && s.prepaidMinutes > 0) notes.push(`на ${s.prepaidMinutes} мин`);
+  if (s.pausedSeconds !== null && s.pausedSeconds > 0) notes.push(pauseLabel(s.pausedSeconds));
+  if (s.status === 'PAUSED' && s.pausedAt !== null) {
+    const why = s.pauseReason && s.pauseReason !== 'pause' ? ` (${PAUSE_REASON[s.pauseReason] ?? s.pauseReason})` : '';
+    notes.push(`с ${formatClock(s.pausedAt, timezone)}${why}`);
+  }
+  if (notes.length === 0) return null;
+  return <span className="cell-sub">{notes.join(' · ')}</span>;
+}
+
 function SessionsTable({
   sessions,
   timezone,
@@ -187,36 +250,61 @@ function SessionsTable({
 }) {
   if (sessions.length === 0) return <p className="empty">Игр нет</p>;
   return (
-    <table className="grid">
-      <thead>
-        <tr>
-          <th>Стол</th>
-          <th>Начало</th>
-          <th className="num">Длительность</th>
-          <th className="num">Сумма</th>
-          <th>Тариф</th>
-          <th>Открыл</th>
-          <th>Статус</th>
-        </tr>
-      </thead>
-      <tbody>
-        {sessions.map((s) => (
-          <tr key={s.id} data-status={s.status}>
-            <td>{s.tableName ?? s.tableId}</td>
-            <td className="num">{formatDateTime(s.startedAt ?? s.requestedAt, timezone)}</td>
-            <td className="num">{sessionDuration(s, now)}</td>
-            <td className="num">{s.amount !== null ? money(s.amount, currency) : '—'}</td>
-            <td className="muted">{s.tariffName ?? '—'}</td>
-            <td>{s.openedBy}</td>
-            <td>
-              <span className="status-chip" data-status={s.status}>
-                {STATUS_LABEL[s.status] ?? s.status}
-              </span>
-            </td>
+    <div className="grid-wrap">
+      <table className="grid">
+        <thead>
+          <tr>
+            <th>Стол</th>
+            <th>Начало</th>
+            <th className="num">Длительность</th>
+            <th className="num">Сумма</th>
+            <th>Тариф</th>
+            <th>Открыл / остановил</th>
+            <th className="num">Счёт №</th>
+            <th>Статус</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {sessions.map((s) => (
+            <tr key={s.id} data-status={s.status}>
+              <td>{s.tableName ?? s.tableId}</td>
+              <td className="num">{formatDateTime(s.startedAt ?? s.requestedAt, timezone)}</td>
+              <td className="num">{sessionDuration(s, now)}</td>
+              <td className="num">{s.amount !== null ? money(s.amount, currency) : '—'}</td>
+              <td className="muted">{s.tariffName ?? '—'}</td>
+              <td>
+                {s.stoppedBy && s.stoppedBy !== s.openedBy ? (
+                  <span className="cell-stack">
+                    <span>{s.openedBy}</span>
+                    <span className="cell-sub">остановил {s.stoppedBy}</span>
+                  </span>
+                ) : (
+                  s.openedBy
+                )}
+              </td>
+              <td className="num">
+                {s.checkNumber !== null ? (
+                  <span className="cell-stack">
+                    <span>№ {s.checkNumber}</span>
+                    {s.paidAt !== null && <span className="cell-sub">оплачен {formatClock(s.paidAt, timezone)}</span>}
+                  </span>
+                ) : (
+                  <span className="muted">—</span>
+                )}
+              </td>
+              <td>
+                <span className="cell-stack">
+                  <span className="status-chip" data-status={s.status} title={statusTitle(s)}>
+                    {STATUS_LABEL[s.status] ?? s.status}
+                  </span>
+                  <SessionNotes s={s} timezone={timezone} />
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -283,6 +371,47 @@ function SessionsPanel({
   );
 }
 
+/** Power outages of the last 30 days: when, how long (or still going), battery critical, games auto-paused. */
+function OutagesTable({ outages, timezone, now }: { outages: PowerOutageView[]; timezone: string; now: number }) {
+  if (outages.length === 0) return <p className="empty">За 30 дней свет не отключали</p>;
+  return (
+    <table className="grid">
+      <thead>
+        <tr>
+          <th>Начало</th>
+          <th className="num">Длительность</th>
+          <th>Батарея</th>
+          <th className="num">Автопауза</th>
+        </tr>
+      </thead>
+      <tbody>
+        {outages.map((o) => (
+          <tr key={o.id} data-ongoing={o.endedAt === null || undefined} data-critical={o.critical || undefined}>
+            <td className="num">{formatDateTime(o.startedAt, timezone)}</td>
+            <td className="num">
+              {o.endedAt === null ? (
+                <span className="tag tag-danger">идёт {formatMinutes((now - o.startedAt) / 1000)}</span>
+              ) : (
+                formatMinutes((o.endedAt - o.startedAt) / 1000)
+              )}
+            </td>
+            <td>
+              {o.critical ? (
+                <span className="tag tag-danger" title="Заряд ИБП доходил до критического">
+                  критично
+                </span>
+              ) : (
+                <span className="muted">в норме</span>
+              )}
+            </td>
+            <td className="num">{o.pausedGames > 0 ? `${gamesLabel(o.pausedGames)}` : <span className="muted">—</span>}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 export function ClubPage({ id }: { id: string }) {
   const load = useCallback(() => fetchClub(id), [id]);
   const { data, error } = usePoll(load, 30_000);
@@ -296,6 +425,7 @@ export function ClubPage({ id }: { id: string }) {
   const now = Date.now();
   const openAlerts = data.alerts.filter((a) => a.resolvedAt === null);
   const resolved = data.alerts.filter((a) => a.resolvedAt !== null);
+  const ongoingOutages = data.outages.filter((o) => o.endedAt === null).length;
 
   return (
     <>
@@ -326,6 +456,13 @@ export function ClubPage({ id }: { id: string }) {
       </div>
 
       <SessionsPanel clubId={id} recent={data.recentSessions} timezone={club.timezone} currency={club.currency} now={now} />
+
+      <Section
+        title="Отключения света · 30 дней"
+        aside={ongoingOutages > 0 ? <span className="tag tag-danger">сейчас нет света</span> : undefined}
+      >
+        <OutagesTable outages={data.outages} timezone={club.timezone} now={now} />
+      </Section>
     </>
   );
 }

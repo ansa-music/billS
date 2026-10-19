@@ -6,6 +6,7 @@ import { useHashRoute } from './hooks.ts';
 import { Login } from './Login.tsx';
 import { Overview } from './Overview.tsx';
 import { OfflineBanner } from './shared.tsx';
+import { Shifts } from './Shifts.tsx';
 import { Tariffs } from './Tariffs.tsx';
 
 type Auth = { status: 'loading' } | { status: 'anonymous' } | { status: 'ok'; owner: OwnerView };
@@ -109,6 +110,7 @@ export function App() {
       {route.kind === 'overview' && <Overview />}
       {route.kind === 'club' && <ClubPage key={route.id} id={route.id} />}
       {route.kind === 'tariffs' && <Tariffs key={route.id} id={route.id} />}
+      {route.kind === 'shifts' && <Shifts key={route.id} id={route.id} />}
     </div>
   );
 }

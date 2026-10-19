@@ -52,7 +52,7 @@ test('a redelivered batch and a duplicate inside a batch are stored once', async
   assert.equal(sessions[0]?.status, 'AWAITING_PAYMENT');
   assert.equal(sessions[0]?.amount, 2000_00);
 
-  // The projection ran once: one game, one revenue entry.
+  // The projection ran once: one game, one billed entry (the `revenue` column is what was billed on stop).
   const day = await c.db.all<{ revenue: number; games: number }>('SELECT revenue, games FROM daily_stats');
   assert.deepEqual(day, [{ revenue: 2000_00, games: 1 }]);
 
@@ -159,7 +159,7 @@ test('an unknown topic does not break the batch', async (t) => {
     { id: 2, at: MONDAY_NOON, topic: 'check.paid', payload: { actor: 'Кассир', action: 'check.paid', entityType: 'check', entityId: 'chk-1', data: { amount: 5 } } },
     event(3, MONDAY_NOON, 'hub.recovered', 'hub', { tables: 6, resent: 0 }, { actor: 'system' }),
     event(4, MONDAY_NOON + 1000, 'session.started', 'g1', { tableId, startedAt: MONDAY_NOON + 1000 }, { actor: 'system' }),
-    // Topics the HUB learned after the cloud was written (pauses, transfers, shifts, blink, UPS): journal only.
+    // Known topics with thin or odd payloads, and topics the cloud does not project (blink, resume_requested): nothing breaks.
     event(5, MONDAY_NOON + 2000, 'session.paused', 'g1', { reason: 'staff' }),
     event(6, MONDAY_NOON + 3000, 'session.resumed', 'g1', {}),
     event(7, MONDAY_NOON + 4000, 'session.transferred', 'g1', { fromTableId: tableId, toTableId: tableId }),
@@ -167,9 +167,11 @@ test('an unknown topic does not break the batch', async (t) => {
     event(9, MONDAY_NOON + 6000, 'lamp.blink_requested', tableId, { times: 3, sessionId: 'g1' }),
     event(10, MONDAY_NOON + 7000, 'power.on_battery', 'ups', { chargePercent: 90 }, { actor: 'system', entityType: 'power' }),
     event(11, MONDAY_NOON + 8000, 'power.auto_paused', 'ups', { sessions: 1 }, { actor: 'system', entityType: 'power' }),
+    event(12, MONDAY_NOON + 9000, 'session.resume_requested', 'g1', { pauseId: 'p1' }),
+    event(13, MONDAY_NOON + 9500, 'something.new', 'x', { whatever: true }),
   ]);
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body, { lastAcceptedId: 11, inserted: 11, settingsVersion: 0 });
+  assert.deepEqual(res.body, { lastAcceptedId: 13, inserted: 13, settingsVersion: 0 });
   const topics = await c.db.all<{ topic: string }>('SELECT topic FROM events ORDER BY outbox_id');
   assert.deepEqual(topics.map((r) => r.topic), [
     'session.open_requested',
@@ -183,9 +185,15 @@ test('an unknown topic does not break the batch', async (t) => {
     'lamp.blink_requested',
     'power.on_battery',
     'power.auto_paused',
+    'session.resume_requested',
+    'something.new',
   ]);
   const s = await c.db.all<{ status: string }>('SELECT status FROM sessions');
   assert.deepEqual(s, [{ status: 'ACTIVE' }]);
+  const shifts = await c.db.all<{ id: string; number: number; status: string }>('SELECT id, number, status FROM shifts');
+  assert.deepEqual(shifts, [{ id: 'shift-1', number: 0, status: 'OPEN' }]);
+  const outages = await c.db.all<{ paused_games: number; ended_at: number | null }>('SELECT paused_games, ended_at FROM power_outages');
+  assert.deepEqual(outages, [{ paused_games: 0, ended_at: null }]);
 });
 
 test('a failing event rolls back the whole batch', async (t) => {

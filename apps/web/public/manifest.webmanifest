@@ -1,6 +1,6 @@
 {
-  "name": "Billiard Control",
-  "short_name": "Billiard Control",
+  "name": "TS",
+  "short_name": "TS",
   "description": "Экран зала, счета и оборудование бильярдного клуба",
   "id": "/",
   "start_url": "/#/",

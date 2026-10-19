@@ -1,10 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { ClubDetails, CloudSessionView, OwnerOverview } from '@bills/domain';
+import type { ClubDetails, CloudSessionView, OwnerOverview, PeriodStats } from '@bills/domain';
 import { addDays, dayStart, localDay, nextHourStart } from '../src/localtime.ts';
 import { clubIdOf, cloud, gameEvents, HOUR, HUB1, HUB2, login, MONDAY_NOON, ownerGet, sendEvents, tableIdOf } from './helpers.ts';
 
 const DAY = 24 * HOUR;
+
+/** Stats of games stopped but not paid yet: only `billed` moves, revenue (payments) stays 0. */
+function billedOnly(billed: number, games: number, playedSeconds: number): PeriodStats {
+  return {
+    revenue: 0,
+    billed,
+    games,
+    playedSeconds,
+    paid: { cash: 0, card: 0, qr: 0, total: 0 },
+    refunded: 0,
+    checksPaid: 0,
+    discounts: 0,
+    averageCheck: 0,
+    cancelledGames: 0,
+  };
+}
 
 test('local time helpers (Asia/Almaty, UTC+5)', () => {
   assert.equal(localDay(MONDAY_NOON, 'Asia/Almaty'), '2026-10-12');
@@ -16,7 +32,7 @@ test('local time helpers (Asia/Almaty, UTC+5)', () => {
   assert.equal(nextHourStart(MONDAY_NOON, 'Asia/Almaty'), MONDAY_NOON + HOUR);
 });
 
-test('a full game puts revenue into daily_stats and the overview for today', async (t) => {
+test('a stopped game puts its billed amount into daily_stats and the overview for today', async (t) => {
   const c = await cloud(t);
   const tableId = await tableIdOf(c, HUB1.id, 'Стол 1');
   const clubId = await clubIdOf(c, HUB1.id);
@@ -43,9 +59,9 @@ test('a full game puts revenue into daily_stats and the overview for today', asy
   assert.equal(ov.status, 200);
   assert.equal(ov.body.serverNow, MONDAY_NOON);
   const club = ov.body.clubs.find((x) => x.id === clubId)!;
-  assert.deepEqual(club.today, { revenue: 2000_00, games: 1, playedSeconds: 3600 });
-  assert.deepEqual(club.week, { revenue: 3500_00, games: 2, playedSeconds: 7200 });
-  assert.deepEqual(club.month, { revenue: 3500_00, games: 2, playedSeconds: 7200 });
+  assert.deepEqual(club.today, billedOnly(2000_00, 1, 3600));
+  assert.deepEqual(club.week, billedOnly(3500_00, 2, 7200));
+  assert.deepEqual(club.month, billedOnly(3500_00, 2, 7200));
   assert.equal(club.liveGames, 0);
   assert.equal(club.tablesCount, 6);
   assert.equal(club.hub?.id, HUB1.id);
@@ -55,7 +71,7 @@ test('a full game puts revenue into daily_stats and the overview for today', asy
 
   // The other club saw nothing: offline HUB, zeros.
   const other = ov.body.clubs.find((x) => x.id !== clubId)!;
-  assert.deepEqual(other.today, { revenue: 0, games: 0, playedSeconds: 0 });
+  assert.deepEqual(other.today, billedOnly(0, 0, 0));
   assert.equal(other.hub?.online, false);
   assert.equal(other.hub?.lastSeenAt, null);
 
@@ -81,9 +97,9 @@ test('two clubs of one company: totals add up, each club keeps its own numbers',
   assert.equal(ov.body.clubs.length, 2);
   const s1 = ov.body.clubs.find((x) => x.id === club1)!;
   const s2 = ov.body.clubs.find((x) => x.id === club2)!;
-  assert.deepEqual(s1.today, { revenue: 2000_00, games: 1, playedSeconds: 3600 });
-  assert.deepEqual(s2.today, { revenue: 5000_00, games: 2, playedSeconds: 7200 + 1800 });
-  assert.deepEqual(ov.body.totals.today, { revenue: 7000_00, games: 3, playedSeconds: 3600 + 7200 + 1800 });
+  assert.deepEqual(s1.today, billedOnly(2000_00, 1, 3600));
+  assert.deepEqual(s2.today, billedOnly(5000_00, 2, 7200 + 1800));
+  assert.deepEqual(ov.body.totals.today, billedOnly(7000_00, 3, 3600 + 7200 + 1800));
   assert.deepEqual(ov.body.totals.week, ov.body.totals.today);
   assert.deepEqual(ov.body.totals.month, ov.body.totals.today);
 
@@ -143,7 +159,8 @@ test('load by hour: a game 12:00–14:30 Almaty fills hours 12, 13 and 14', asyn
   assert.equal(d.body.tables.length, 6);
   assert.equal(d.body.days.length, 30);
   assert.equal(d.body.days.at(-1)?.day, '2026-10-12');
-  assert.equal(d.body.days.at(-1)?.revenue, 5000_00);
+  assert.equal(d.body.days.at(-1)?.billed, 5000_00);
+  assert.equal(d.body.days.at(-1)?.revenue, 0);
   assert.equal(d.body.days[0]?.day, '2026-09-13');
   assert.equal(d.body.settings.tariffs.length, 2);
 });

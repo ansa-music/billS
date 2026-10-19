@@ -12,8 +12,8 @@ export const STATUS_LABEL: Record<SessionStatus, string> = {
   ACTIVE: 'Идёт',
   PAUSED: 'На паузе',
   AWAITING_PAYMENT: 'Ждёт оплаты',
-  CLOSED: 'Оплачена',
-  CANCELLED: 'Отменена',
+  CLOSED: 'Оплачено',
+  CANCELLED: 'Отменено',
   FAILED: 'Не началась',
 };
 
@@ -29,6 +29,25 @@ export const WEEKDAYS: Array<{ day: Weekday; label: string }> = [
 
 export function money(amount: number, currency: string): string {
   return formatMoney(amount, currency);
+}
+
+/** Signed amount: "+1 500 ₸" / "−1 500 ₸" / "0 ₸" — for cash differences and other deltas. */
+export function formatSigned(amount: number, currency: string): string {
+  if (amount > 0) return `+${formatMoney(amount, currency)}`;
+  if (amount < 0) return `−${formatMoney(-amount, currency)}`;
+  return formatMoney(0, currency);
+}
+
+/** "излишек +1 500 ₸" / "недостача −300 ₸" / "сходится" — the Z report difference in words. */
+export function differenceLabel(difference: number, currency: string): string {
+  if (difference > 0) return `излишек ${formatSigned(difference, currency)}`;
+  if (difference < 0) return `недостача ${formatSigned(difference, currency)}`;
+  return 'сходится';
+}
+
+/** "пауза 12 мин" / "пауза 1 ч 05 мин". */
+export function pauseLabel(seconds: number): string {
+  return `пауза ${formatMinutes(seconds)}`;
 }
 
 /** 1:05 — hours:minutes of a duration in seconds. */

@@ -19,10 +19,24 @@ HUB клуба B ──POST /sync/snapshot─▶ │   облако    │      
   повторная доставка той же пачки безвредна: дубликат пропускается и проекция для него
   не применяется повторно. Вставка события и проекция — одна транзакция.
 - **Проекция** (`src/projection.ts`) превращает события в читаемые таблицы:
-  `sessions` (игры), `alerts` (тревоги), `daily_stats` (выручка/игры/время/тревоги
-  по локальным дням клуба). Неизвестные топики (например, будущий `check.paid`)
-  остаются только в сыром журнале. Пропуски выдерживаются: `session.stopped`
-  без `session.started` всё равно создаёт строку игры.
+  `sessions` (игры, включая паузы `PAUSED`, перенос стола, отмену с подтверждением
+  управляющего, счёт и время оплаты), `checks` (счета: OPEN/PAID/VOID, скидка, оплачено,
+  возвращено), `payments` (строка на каждую часть оплаты и на каждый возврат,
+  `id = hub:outbox[:part]`), `shifts` и `cash_movements` (кассовые смены с Z-отчётом,
+  внесения/изъятия), `power_outages` (отключения света по ИБП), `alerts` (тревоги)
+  и `daily_stats` по локальным дням клуба. В `daily_stats` колонка `revenue` — это
+  **начислено на «Стоп»** (в отчётах `billed`; отменённые игры вычитаются), а
+  `paid_cash/card/qr/paid_total` и `refunded` — оплаты по дню платежа; в отчётах
+  `revenue = paid_total − refunded`, `averageCheck = revenue / checksPaid`.
+  Неизвестные топики остаются только в сыром журнале. Пропуски выдерживаются:
+  `session.closed` или `check.paid` без предыдущих событий всё равно создают строку.
+- **Смены и отключения в кабинете.** `ClubSummary.openShift/lastClosedShift` и
+  `OwnerOverview.recentShifts` (закрытые за 7 дней по всем клубам) — `CloudShiftView`:
+  у закрытой смены `net` берётся из Z-отчёта HUB, `sales/refunds` — из `payments`
+  по смене, `checksPaid` — число оплаченных счетов смены, `deposits/withdrawals` —
+  из `cash_movements`; у открытой смены `expectedCash/countedCash/difference` = null.
+  `ClubDetails.shifts` и `ClubDetails.outages` — за 30 дней. `TableStats.revenue`
+  остаётся начисленным по столу (загрузка стола), не оплаченным.
 - **Настройки** (`src/sync.ts`, `src/settings.ts`). У клуба одна запись `club_settings`
   с версией. HUB присылает снимок своих настроек (`POST /sync/snapshot`); он принимается,
   если HUB на текущей версии облака, иначе 409 — HUB сначала должен забрать
@@ -37,6 +51,9 @@ HUB клуба B ──POST /sync/snapshot─▶ │   облако    │      
   переводит `?` → `$n` вне строковых литералов, транзакцию выполняет на выделенном клиенте.
   Миграции `src/migrations/NNN_name.sql` — портируемый SQL для обоих движков
   (TEXT-идентификаторы, BIGINT-время, INTEGER 0/1, JSON в TEXT, без AUTOINCREMENT/SERIAL/PRAGMA).
+  `002_money.sql` пересобирает `sessions` (SQLite не меняет CHECK на месте: `sessions_v2` →
+  копия → `DROP` → `RENAME`, индексы заново), добавляет денежные колонки в `daily_stats`
+  и создаёт `checks`, `payments`, `shifts`, `cash_movements`, `power_outages`.
 
 ## Запуск
 

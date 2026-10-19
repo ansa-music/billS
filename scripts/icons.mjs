@@ -1,10 +1,12 @@
-// Генератор иконок PWA: «шар 8» на тёмном фоне.
-// Без зависимостей и без сети: PNG кодируется вручную (zlib из Node),
-// картинка растеризуется аналитически с supersampling 4×4.
+// Генератор иконок PWA: буквы «TS» на зелёном фоне.
+// Без зависимостей и без сети: буквы строятся геометрически (прямоугольники и
+// дуги), картинка растеризуется с supersampling 4×4, PNG кодируется вручную
+// (zlib из Node).
 //
-//   node scripts/icons.mjs
+//   node scripts/icons.mjs        (или: npm run icons)
 //
 // Выход: apps/web/public/icons/{icon-192.png, icon-512.png, apple-touch-icon.png, icon.svg}
+// PNG 192/512 — maskable: фон на весь квадрат, буквы в безопасной зоне (круг 80 %).
 
 import { deflateSync } from "node:zlib";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -16,12 +18,9 @@ const OUT_DIR = join(ROOT, "apps", "web", "public", "icons");
 
 // ---------- цвета ----------
 
-const BG = hex("#0e1311"); // theme-color интерфейса
-const BALL_LIGHT = hex("#4a4a4a"); // блик
-const BALL_DARK = hex("#050505"); // край шара
-const WHITE_TOP = hex("#ffffff");
-const WHITE_BOTTOM = hex("#e4e4e4");
-const DIGIT = hex("#0a0a0a");
+const BG_LIGHT = hex("#2a9a63"); // блик слева-сверху (чуть светлее --accent)
+const BG_DARK = hex("#17563a"); // края (между --felt и --felt-dark)
+const INK = hex("#ffffff"); // буквы
 
 function hex(s) {
   const n = parseInt(s.slice(1), 16);
@@ -45,67 +44,79 @@ function smoothstep(t) {
   return t * t * (3 - 2 * t);
 }
 
+// ---------- буквы ----------
+// Буквы заданы в единицах высоты «u» (высота заглавной = 1u), начало координат —
+// левый верхний угол надписи, y вниз. Те же размеры использует SVG ниже.
+
+const T_WIDTH = 0.84; // ширина перекладины T
+const STROKE = 0.17; // толщина штриха
+// Внешний радиус дуг S. Средние линии дуг касаются в центре буквы
+// (расстояние между центрами = 2·(R − STROKE/2)), поэтому штрих идёт без залома:
+// 1 − 2R = 2R − STROKE  →  R = (1 + STROKE) / 4. Высота S = 1u.
+const S_R = (1 + STROKE) / 4;
+const GAP = 0.14; // просвет между T и S
+const TEXT_WIDTH = T_WIDTH + GAP + 2 * S_R; // ≈ 1.52u
+
+/** Точка (x, y) в единицах «u» внутри буквы T? */
+function inT(x, y) {
+  if (y < 0 || y > 1) return false;
+  if (y <= STROKE && x >= 0 && x <= T_WIDTH) return true; // перекладина
+  const cx = T_WIDTH / 2;
+  return Math.abs(x - cx) <= STROKE / 2; // ножка
+}
+
+/**
+ * Буква S из двух дуг-колец: верхнее кольцо открыто справа-снизу, нижнее —
+ * слева-сверху; кольца перекрываются по центру, так что штрих непрерывен.
+ * x — от левого края буквы.
+ */
+function inS(x, y) {
+  const cx = S_R;
+  const cyTop = S_R;
+  const cyBottom = 1 - S_R;
+  const inner = S_R - STROKE;
+  const dxT = x - cx;
+  const dyT = y - cyTop;
+  const dT = Math.hypot(dxT, dyT);
+  if (dT <= S_R && dT >= inner && !(dxT > 0 && dyT > 0)) return true;
+  const dyB = y - cyBottom;
+  const dB = Math.hypot(dxT, dyB);
+  if (dB <= S_R && dB >= inner && !(dxT < 0 && dyB < 0)) return true;
+  return false;
+}
+
+/** Надпись «TS» в пикселях: левый верхний угол (ox, oy), высота букв u. */
+function inText(px, py, ox, oy, u) {
+  const x = (px - ox) / u;
+  const y = (py - oy) / u;
+  if (inT(x, y)) return true;
+  return inS(x - (T_WIDTH + GAP), y);
+}
+
 // ---------- сцена ----------
 
 /**
  * Цвет точки (x, y) в непрерывных координатах.
- * size — сторона квадрата, ballFrac — доля стороны под диаметр шара.
+ * size — сторона квадрата, textFrac — доля стороны под высоту букв.
  */
-function makeScene(size, ballFrac) {
-  const cx = size / 2;
-  const cy = size / 2;
-  const r = (size * ballFrac) / 2; // радиус шара
-
-  // блик: 35% / 30% от bounding box шара
-  const hx = cx - r + 0.35 * 2 * r;
-  const hy = cy - r + 0.3 * 2 * r;
-  const gradR = r * 1.45;
-
-  // белый круг ~48% диаметра шара
-  const wr = r * 0.48;
-  const D = wr * 2; // диаметр белого круга
-
-  // цифра «8»: два кольца, верхнее чуть меньше нижнего
-  const stroke = D * 0.105; // толщина линии
-  const ru = D * 0.175; // внешний радius верхнего кольца
-  const rl = D * 0.2; // внешний радиус нижнего кольца
-  const yu = cy - D * 0.175; // центр верхнего
-  const yl = cy + D * 0.15; // центр нижнего
-  const xScale = 1 / 0.94; // кольца чуть сплюснуты по горизонтали, как у настоящей восьмёрки
-
-  function ring(px, py, ox, oy, R) {
-    const dx = (px - ox) * xScale;
-    const dy = py - oy;
-    const d = Math.hypot(dx, dy);
-    return d <= R && d >= R - stroke;
-  }
+function makeScene(size, textFrac) {
+  const u = size * textFrac;
+  const ox = (size - TEXT_WIDTH * u) / 2;
+  const oy = (size - u) / 2;
+  const hx = size * 0.3;
+  const hy = size * 0.25;
+  const gradR = size * 0.95;
 
   return function colorAt(px, py) {
-    const dx = px - cx;
-    const dy = py - cy;
-    const d = Math.hypot(dx, dy);
-    if (d > r) return BG;
-
-    if (d <= wr) {
-      if (ring(px, py, cx, yu, ru) || ring(px, py, cx, yl, rl)) return DIGIT;
-      // лёгкая вертикальная тень на белом круге
-      const t = clamp01((py - (cy - wr)) / D);
-      return mix(WHITE_TOP, WHITE_BOTTOM, t);
-    }
-
-    // чёрный шар: радиальный градиент от блика к краю
+    if (inText(px, py, ox, oy, u)) return INK;
     const hd = Math.hypot(px - hx, py - hy) / gradR;
-    let c = mix(BALL_LIGHT, BALL_DARK, smoothstep(hd));
-    // тонкая тёмная кромка по краю шара
-    const edge = clamp01((d - r * 0.9) / (r * 0.1));
-    c = mix(c, BALL_DARK, edge * 0.5);
-    return c;
+    return mix(BG_LIGHT, BG_DARK, smoothstep(hd));
   };
 }
 
 /** Растеризация в RGBA с supersampling SS×SS на пиксель. */
-function render(size, ballFrac, SS = 4) {
-  const colorAt = makeScene(size, ballFrac);
+function render(size, textFrac, SS = 4) {
+  const colorAt = makeScene(size, textFrac);
   const data = new Uint8Array(size * size * 4);
   const inv = 1 / (SS * SS);
   for (let y = 0; y < size; y++) {
@@ -119,7 +130,6 @@ function render(size, ballFrac, SS = 4) {
         for (let i = 0; i < SS; i++) {
           const px = x + (i + 0.5) / SS;
           const c = colorAt(px, py);
-          // премультипликация по альфе, чтобы прозрачный фон не красил кромку
           const al = c[3] / 255;
           r += c[0] * al;
           g += c[1] * al;
@@ -190,33 +200,40 @@ function encodePNG(width, height, rgba) {
 }
 
 // ---------- SVG ----------
+// Та же геометрия путями (без шрифтов, чтобы favicon совпадал с PNG). Скруглённые
+// углы: браузер не маскирует favicon сам.
 
 function svgIcon() {
   const S = 512;
-  const c = S / 2;
-  const r = (S * 0.7) / 2; // 179.2
-  const wr = r * 0.48; // 86
-  const D = wr * 2;
-  const fontSize = (D * 0.7) / 0.716; // высота цифры ≈ 70% белого круга (cap-height Arial ≈ 0.716em)
-  const baseline = c + D * 0.35;
-  const hx = c - r + 0.35 * 2 * r;
-  const hy = c - r + 0.3 * 2 * r;
+  const u = S * 0.39;
+  const ox = (S - TEXT_WIDTH * u) / 2;
+  const oy = (S - u) / 2;
   const f = (v) => Number(v.toFixed(2));
+  // T: перекладина и ножка
+  const tBar = `<rect x="${f(ox)}" y="${f(oy)}" width="${f(T_WIDTH * u)}" height="${f(STROKE * u)}"/>`;
+  const tStem = `<rect x="${f(ox + (T_WIDTH / 2 - STROKE / 2) * u)}" y="${f(oy)}" width="${f(STROKE * u)}" height="${f(u)}"/>`;
+  // S: две дуги по средней линии штриха
+  const sx = ox + (T_WIDTH + GAP) * u;
+  const cx = sx + S_R * u;
+  const rMid = (S_R - STROKE / 2) * u;
+  const cyTop = oy + S_R * u;
+  const cyBottom = oy + (1 - S_R) * u;
+  const sPath =
+    `M ${f(cx + rMid)} ${f(cyTop)} A ${f(rMid)} ${f(rMid)} 0 1 0 ${f(cx)} ${f(cyTop + rMid)} ` +
+    `A ${f(rMid)} ${f(rMid)} 0 1 1 ${f(cx - rMid)} ${f(cyBottom)}`;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}">
   <defs>
-    <radialGradient id="ball" gradientUnits="userSpaceOnUse" cx="${f(hx)}" cy="${f(hy)}" r="${f(r * 1.45)}">
-      <stop offset="0" stop-color="#4a4a4a"/>
-      <stop offset="1" stop-color="#050505"/>
+    <radialGradient id="bg" gradientUnits="userSpaceOnUse" cx="${f(S * 0.3)}" cy="${f(S * 0.25)}" r="${f(S * 0.95)}">
+      <stop offset="0" stop-color="#2a9a63"/>
+      <stop offset="1" stop-color="#17563a"/>
     </radialGradient>
-    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#e4e4e4"/>
-    </linearGradient>
   </defs>
-  <rect width="${S}" height="${S}" fill="#0e1311"/>
-  <circle cx="${c}" cy="${c}" r="${f(r)}" fill="url(#ball)"/>
-  <circle cx="${c}" cy="${c}" r="${f(wr)}" fill="url(#face)"/>
-  <text x="${c}" y="${f(baseline)}" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="${f(fontSize)}" fill="#0a0a0a">8</text>
+  <rect width="${S}" height="${S}" rx="${f(S * 0.2)}" fill="url(#bg)"/>
+  <g fill="#ffffff">
+    ${tBar}
+    ${tStem}
+  </g>
+  <path d="${sPath}" fill="none" stroke="#ffffff" stroke-width="${f(STROKE * u)}"/>
 </svg>
 `;
 }
@@ -224,16 +241,16 @@ function svgIcon() {
 // ---------- main ----------
 
 const targets = [
-  { file: "icon-192.png", size: 192, ballFrac: 0.7 }, // maskable: шар в безопасной зоне 80%
-  { file: "icon-512.png", size: 512, ballFrac: 0.7 },
-  { file: "apple-touch-icon.png", size: 180, ballFrac: 0.8 }, // iOS скругляет сам
+  { file: "icon-192.png", size: 192, textFrac: 0.39 }, // maskable: надпись в безопасной зоне 80 %
+  { file: "icon-512.png", size: 512, textFrac: 0.39 },
+  { file: "apple-touch-icon.png", size: 180, textFrac: 0.42 }, // iOS скругляет сам
 ];
 
 mkdirSync(OUT_DIR, { recursive: true });
 
 const written = [];
 for (const t of targets) {
-  const png = encodePNG(t.size, t.size, render(t.size, t.ballFrac));
+  const png = encodePNG(t.size, t.size, render(t.size, t.textFrac));
   const path = join(OUT_DIR, t.file);
   writeFileSync(path, png);
   written.push({ path, bytes: png.length, dims: `${t.size}×${t.size}` });

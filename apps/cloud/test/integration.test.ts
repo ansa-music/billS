@@ -133,10 +133,13 @@ test('HUB offline → events pile up → cloud comes up → everything arrives o
   assert.equal(overview.status, 200);
   const byHub = new Map<string, OwnerOverview['clubs'][number]>();
   for (const club of overview.body.clubs) byHub.set(club.hub?.id ?? '', club);
-  assert.equal(byHub.get(HUB1.id)?.today.revenue, 3000_00);
+  // Games are stopped but not paid: billed moves, revenue (payments) stays 0.
+  assert.equal(byHub.get(HUB1.id)?.today.billed, 3000_00);
+  assert.equal(byHub.get(HUB1.id)?.today.revenue, 0);
   assert.equal(byHub.get(HUB1.id)?.today.games, 2);
-  assert.equal(byHub.get(HUB2.id)?.today.revenue, 4000_00);
-  assert.equal(overview.body.totals.today.revenue, 7000_00);
+  assert.equal(byHub.get(HUB2.id)?.today.billed, 4000_00);
+  assert.equal(overview.body.totals.today.billed, 7000_00);
+  assert.equal(overview.body.totals.today.revenue, 0);
   assert.equal(overview.body.totals.today.games, 3);
   assert.equal(byHub.get(HUB1.id)?.hub?.online, true);
   assert.equal(byHub.get(HUB1.id)?.hub?.pendingSettings, false);
