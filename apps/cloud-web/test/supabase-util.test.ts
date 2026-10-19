@@ -13,7 +13,10 @@ import {
   isVapidPublicKey,
   magicLinkRedirect,
   mapRpcError,
+  mustChangePassword,
+  newPasswordProblem,
   normalizeNtfyServer,
+  setPasswordLink,
   ntfyLinks,
   ntfyTopicName,
   ntfyTopicUrl,
@@ -137,4 +140,28 @@ test('parsePlatformSession: valid, expired, broken', () => {
   assert.equal(parsePlatformSession('{', 0), null);
   assert.equal(parsePlatformSession(null, 0), null);
   assert.equal(parsePlatformSession(JSON.stringify({ expiresAt: 5 }), 0), null);
+});
+
+test('setPasswordLink: a letter link #/set-password#access_token=… is cut to a hash supabase-js reads', () => {
+  const tokens = 'access_token=a.b.c&expires_in=3600&refresh_token=r&token_type=bearer&type=invite';
+  assert.deepEqual(setPasswordLink(`#/set-password#${tokens}`), { hash: `#${tokens}`, setPassword: true });
+  // Redirect not allowed → Supabase falls back to the Site URL: recognised by the type.
+  assert.deepEqual(setPasswordLink(`#${tokens}`), { hash: `#${tokens}`, setPassword: true });
+  assert.equal(setPasswordLink('#access_token=x&type=recovery').setPassword, true);
+  assert.equal(setPasswordLink('#access_token=x&type=magiclink').setPassword, false);
+  // A failed link keeps its error for authErrorFromHash.
+  const failed = setPasswordLink('#/set-password#error=access_denied&error_code=otp_expired');
+  assert.equal(failed.hash, '#error=access_denied&error_code=otp_expired');
+  assert.match(authErrorFromHash(failed.hash) ?? '', /устарела/);
+  for (const plain of ['', '#/', '#/set-password', '#/clubs/1']) assert.deepEqual(setPasswordLink(plain), { hash: plain, setPassword: false });
+});
+
+test('mustChangePassword, newPasswordProblem, password errors', () => {
+  assert.equal(mustChangePassword({ ts_must_change_password: true }), true);
+  for (const m of [{ ts_must_change_password: false }, {}, null, undefined, 'x']) assert.equal(mustChangePassword(m), false);
+  assert.match(newPasswordProblem('short', 'short') ?? '', /8/);
+  assert.match(newPasswordProblem('long-enough-1', 'long-enough-2') ?? '', /не совпадают/);
+  assert.equal(newPasswordProblem('long-enough', 'long-enough'), null);
+  assert.equal(describeAuthError({ status: 422, code: 'same_password', message: 'New password should be different' }).code, 'SAME_PASSWORD');
+  assert.equal(describeAuthError({ status: 422, code: 'weak_password', message: 'too short' }).code, 'WEAK_PASSWORD');
 });

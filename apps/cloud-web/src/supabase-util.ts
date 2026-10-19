@@ -71,7 +71,13 @@ export function describeAuthError(err: { status?: number; code?: string; message
   if (err.code === 'over_email_send_rate_limit' || err.code === 'over_request_rate_limit' || status === 429) {
     return { status: 429, code: 'RATE_LIMIT', message: 'Слишком часто. Подождите минуту и попробуйте снова', offline: false, unauthorized: false };
   }
-  if (err.code === 'otp_disabled' || err.code === 'signup_disabled' || err.code === 'user_not_found') {
+  if (err.code === 'same_password') {
+    return { status: 422, code: 'SAME_PASSWORD', message: 'Новый пароль совпадает со старым — придумайте другой', offline: false, unauthorized: false };
+  }
+  if (err.code === 'weak_password') {
+    return { status: 422, code: 'WEAK_PASSWORD', message: `Слишком простой пароль${message ? `: ${message}` : ''}`, offline: false, unauthorized: false };
+  }
+  if (err.code === 'otp_disabled' ||err.code === 'signup_disabled' || err.code === 'user_not_found') {
     return { status: 403, code: 'NOT_OWNER', message: 'Эта почта не зарегистрирована как владелец', offline: false, unauthorized: false };
   }
   return { status, code: err.code || 'AUTH_ERROR', message: message || 'Не удалось войти', offline: false, unauthorized: false };
@@ -124,6 +130,37 @@ export function magicLinkRedirect(base: string, href: string): string {
   url.search = '';
   url.hash = '';
   return url.href;
+}
+
+/** user_metadata flag set with a temporary password (apps/cloud/src/edge/invite-manager.ts MUST_CHANGE_PASSWORD). */
+export const MUST_CHANGE_PASSWORD = 'ts_must_change_password';
+
+export const SET_PASSWORD_HASH = '#/set-password';
+
+/**
+ * The hash a letter's link (invitation, password reset) lands with. Supabase appends its tokens
+ * with one more `#`: `#/set-password#access_token=…&type=invite` — supabase-js reads only a clean
+ * `#access_token=…`, so the route part is cut off and remembered as `setPassword`. A link that came
+ * to the Site URL instead (redirect not allowed) is recognised by `type=invite|recovery`.
+ */
+export function setPasswordLink(hash: string): { hash: string; setPassword: boolean } {
+  if (hash.startsWith(`${SET_PASSWORD_HASH}#`)) return { hash: `#${hash.slice(SET_PASSWORD_HASH.length + 1)}`, setPassword: true };
+  const raw = hash.replace(/^#/, '');
+  if (raw.startsWith('/') || !raw.includes('access_token')) return { hash, setPassword: false };
+  const type = new URLSearchParams(raw).get('type');
+  return { hash, setPassword: type === 'invite' || type === 'recovery' };
+}
+
+/** user_metadata of a signed-in user → must the password be (re)set before the cabinet opens? */
+export function mustChangePassword(userMetadata: unknown): boolean {
+  return !!userMetadata && typeof userMetadata === 'object' && (userMetadata as Record<string, unknown>)[MUST_CHANGE_PASSWORD] === true;
+}
+
+/** null when the new password is fine, otherwise what is wrong with it. */
+export function newPasswordProblem(password: string, repeat: string): string | null {
+  if (password.length < 8) return 'Пароль — не короче 8 символов';
+  if (password !== repeat) return 'Пароли не совпадают';
+  return null;
 }
 
 /** `#error=access_denied&error_code=otp_expired&error_description=…` left by a failed magic link → text, or null. */

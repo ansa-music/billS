@@ -82,7 +82,7 @@ async function platformByAuthUser(req: EdgeRequest, ctx: EdgeContext, token: str
   return { id: row.id, name: row.name, role: row.role };
 }
 
-async function requirePlatform(req: EdgeRequest, ctx: EdgeContext): Promise<PlatformMe> {
+export async function requirePlatform(req: EdgeRequest, ctx: EdgeContext): Promise<PlatformMe> {
   const token = bearerToken(req);
   if (token && isJwt(token)) return platformByAuthUser(req, ctx, token);
   const me = token ? await platformByToken(ctx.db, token, ctx.now()) : null;

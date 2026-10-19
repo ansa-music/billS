@@ -52,3 +52,8 @@ verify_jwt = false
 # Called by pg_cron with the x-ts-cron secret.
 [functions.notify]
 verify_jwt = false
+
+# A client's manager gets a Supabase Auth account (invitation letter or a temporary password).
+# The caller is the platform (a key session or a Supabase JWT), checked inside like `platform`.
+[functions.invite-manager]
+verify_jwt = false

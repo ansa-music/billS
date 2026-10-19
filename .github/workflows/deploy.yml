@@ -15,6 +15,9 @@
 #   VAPID_PUBLIC_KEY  — публичный ключ Web Push (тоже не секрет);
 #   CF_PAGES_CABINET / CF_PAGES_DEMO — имена проектов Pages, если не ts-cabinet / ts-demo;
 #   TS_OWNER_EMAILS — e-mail владельцев платформы через запятую (учётки Supabase Auth, см. docs);
+#   TS_CABINET_URL — адрес кабинета для ссылок в письмах (приглашение управляющего, смена пароля)
+#                    и в push; по умолчанию https://ts-cabinet.pages.dev. С SUPABASE_ACCESS_TOKEN он же
+#                    ставится в Supabase → Authentication → URL Configuration (Site URL и Redirect URLs);
 #   TS_DEMO_CLOUD=1 — завести демо-клиента «Демо-сеть»; TS_DEMO_MANAGER_EMAIL — его управляющий
 #                     (по умолчанию demo-manager@ts.demo).
 # Секреты лицензий (необязательно): LICENSE_SIGNING_KEY, LICENSE_KEY_ID — без них лицензии
@@ -38,6 +41,7 @@ concurrency:
 
 env:
   CF_PAGES_CABINET: ${{ vars.CF_PAGES_CABINET || 'ts-cabinet' }}
+  TS_CABINET_URL: ${{ vars.TS_CABINET_URL || secrets.TS_CABINET_URL || 'https://ts-cabinet.pages.dev' }}
   CF_PAGES_DEMO: ${{ vars.CF_PAGES_DEMO || 'ts-demo' }}
 
 jobs:
@@ -120,7 +124,6 @@ jobs:
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
           NOTIFY_SECRET: ${{ secrets.NOTIFY_SECRET }}
-          TS_CABINET_URL: ${{ (vars.TS_CABINET_URL || secrets.TS_CABINET_URL) }}
           LICENSE_SIGNING_KEY: ${{ secrets.LICENSE_SIGNING_KEY }}
           LICENSE_KEY_ID: ${{ (vars.LICENSE_KEY_ID || secrets.LICENSE_KEY_ID) }}
         run: |
@@ -129,6 +132,25 @@ jobs:
             if [ -n "${!name}" ]; then args+=("$name=${!name}"); fi
           done
           if [ ${#args[@]} -gt 0 ]; then supabase secrets set --project-ref "$SUPABASE_PROJECT_REF" "${args[@]}"; else echo "секретов для функций нет — push выключен"; fi
+
+      # Ссылки из писем Supabase (приглашение управляющего, смена пароля, вход по ссылке) ведут в кабинет
+      # только если адрес разрешён: Site URL = кабинет, Redirect URLs += кабинет/** и копия на GitHub Pages.
+      # Management API: GET /config/auth → дописываем свои адреса к уже разрешённым → PATCH.
+      - name: Supabase Auth URL configuration
+        if: env.LIVE == 'true' && env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != ''
+        env:
+          GH_PAGES_CABINET: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/cabinet
+        run: |
+          api="https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_REF/config/auth"
+          cabinet="${TS_CABINET_URL%/}"
+          code=$(curl -sS -o /tmp/ts-auth.json -w '%{http_code}' "$api" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN")
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then echo "::warning::Auth config: HTTP $code — задайте URL вручную (docs/PUBLIC_DEPLOY_RU.md)"; exit 0; fi
+          body=$(jq -c --arg site "$cabinet" --arg add "$cabinet/**,$GH_PAGES_CABINET/**" '
+            ((.uri_allow_list // "") | split(",") | map(gsub("^ +| +$"; "")) | map(select(. != ""))) as $have
+            | {site_url: $site, uri_allow_list: (($have + ($add | split(","))) | unique | join(","))}' /tmp/ts-auth.json)
+          code=$(curl -sS -o /tmp/ts-auth-patch.json -w '%{http_code}' -X PATCH "$api" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H 'Content-Type: application/json' -d "$body")
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then echo "::warning::Auth config: HTTP $code $(cat /tmp/ts-auth-patch.json)"; exit 0; fi
+          echo "Supabase Auth: $(jq -c '{site_url, uri_allow_list}' /tmp/ts-auth-patch.json)"
 
       - name: Supabase Edge Functions
         if: env.LIVE == 'true' && env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != ''

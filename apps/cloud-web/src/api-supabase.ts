@@ -21,6 +21,8 @@ import type {
   IssueCloudKeyResponse,
   IssuedLongKey,
   LicenseTermsRequest,
+  ManagerInviteResponse,
+  ManagerTempPasswordResponse,
   LicenseView,
   PlatformLoginRequest,
   PlatformLoginResponse,
@@ -53,17 +55,27 @@ import {
   edgeUrl,
   magicLinkRedirect,
   mapRpcError,
+  MUST_CHANGE_PASSWORD,
+  mustChangePassword,
+  SET_PASSWORD_HASH,
+  setPasswordLink,
 } from './supabase-util.ts';
 import type { MappedError } from './supabase-util.ts';
 
 let client: SupabaseClient | null = null;
 let linkError: string | null = null;
+/** Opened from an invitation / password-reset letter: the password is set before the cabinet opens. */
+let linkSetPassword = false;
 
 function sb(): SupabaseClient {
   if (client) return client;
   // A failed magic link comes back as `#error=…`: keep the text for the login form and give the
   // hash router a clean route before supabase-js looks at the URL.
+  const link = setPasswordLink(location.hash);
+  linkSetPassword = link.setPassword;
+  if (link.hash !== location.hash) history.replaceState(history.state, '', `${location.pathname}${location.search}${link.hash}`);
   linkError = authErrorFromHash(location.hash);
+  if (linkError) linkSetPassword = false;
   if (linkError) history.replaceState(history.state, '', `${location.pathname}${location.search}#/`);
   client = createSupabaseClient(supabaseUrl(), supabaseAnonKey(), {
     auth: {
@@ -208,7 +220,7 @@ export async function loginEmail(email: string, password: string): Promise<{ own
 }
 
 /** Who the stored Supabase session belongs to; signs out and throws NOT_OWNER when it is nobody. */
-export async function whoAmI(): Promise<{ owner: OwnerView | null; platform: PlatformMe | null }> {
+export async function whoAmI(): Promise<{ owner: OwnerView | null; platform: PlatformMe | null; mustSetPassword: boolean }> {
   const platform = await platformMeOrNull();
   const owner = await rpc<OwnerView | null>('owner_me');
   if (!owner && !platform) {
@@ -217,7 +229,57 @@ export async function whoAmI(): Promise<{ owner: OwnerView | null; platform: Pla
       .catch(() => undefined);
     throw new CloudRequestError(401, 'NOT_OWNER', 'Эта почта не привязана ни к управляющему, ни к команде TS');
   }
-  return { owner: owner ?? null, platform };
+  return { owner: owner ?? null, platform, mustSetPassword: await mustSetPassword() };
+}
+
+/**
+ * The signed-in user must set a password first: opened from an invitation / reset letter, or
+ * signed in with a temporary password (user_metadata ts_must_change_password).
+ */
+export async function mustSetPassword(): Promise<boolean> {
+  try {
+    const user = (await sb().auth.getSession()).data.session?.user;
+    if (!user) return false;
+    return linkSetPassword || mustChangePassword(user.user_metadata);
+  } catch {
+    return false;
+  }
+}
+
+/** «Задать пароль»: the new password for the signed-in user; the temporary-password flag is cleared. */
+export async function setNewPassword(password: string): Promise<void> {
+  await session();
+  let res: Awaited<ReturnType<SupabaseClient['auth']['updateUser']>>;
+  try {
+    res = await sb().auth.updateUser({ password, data: { [MUST_CHANGE_PASSWORD]: false } });
+  } catch {
+    return offline();
+  }
+  if (res.error) {
+    const m = describeAuthError(res.error);
+    emit({ type: 'online', online: !m.offline });
+    throw new CloudRequestError(m.status, m.code, m.message);
+  }
+  linkSetPassword = false;
+  emit({ type: 'online', online: true });
+}
+
+/** «Забыли пароль?»: Supabase sends a reset letter whose link leads to «Задать пароль» on this page. */
+export async function sendPasswordReset(email: string): Promise<void> {
+  let res: Awaited<ReturnType<SupabaseClient['auth']['resetPasswordForEmail']>>;
+  try {
+    res = await sb().auth.resetPasswordForEmail(email, {
+      redirectTo: `${magicLinkRedirect(import.meta.env.BASE_URL, location.href)}${SET_PASSWORD_HASH}`,
+    });
+  } catch {
+    return offline();
+  }
+  if (res.error) {
+    const m = describeAuthError(res.error);
+    emit({ type: 'online', online: !m.offline });
+    throw new CloudRequestError(m.status, m.code, m.message);
+  }
+  emit({ type: 'online', online: true });
 }
 
 /** The manager of this session, or null (no sign-out, unlike fetchMe). */
@@ -461,8 +523,9 @@ export async function hasPlatformSession(): Promise<boolean> {
  * The `platform` Edge Function. Bearer = the platform key session token, or else the Supabase
  * Auth JWT (accepted when the e-mail is in platform_staff; 403 NOT_PLATFORM otherwise).
  * `quiet`: a 401 does not send the shell to the login form (probing who is signed in).
+ * `fn`: another function that checks the caller the same way (`invite-manager`).
  */
-async function platformEdge<T>(method: string, path: string, body?: unknown, auth = true, quiet = false): Promise<T> {
+async function platformEdge<T>(method: string, path: string, body?: unknown, auth = true, quiet = false, fn = 'platform'): Promise<T> {
   const headers: Record<string, string> = { apikey: supabaseAnonKey() };
   let keySession = false;
   if (auth) {
@@ -487,7 +550,7 @@ async function platformEdge<T>(method: string, path: string, body?: unknown, aut
   if (body !== undefined) headers['content-type'] = 'application/json';
   let res: Response;
   try {
-    res = await fetch(edgeFunctionUrl(supabaseUrl(), 'platform', path), {
+    res = await fetch(edgeFunctionUrl(supabaseUrl(), fn, path), {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -552,6 +615,16 @@ export function blockClient(companyId: string, body: BlockClientRequest): Promis
 
 export function issueManagerKey(companyId: string): Promise<IssuedLongKey> {
   return platformEdge<IssuedLongKey>('POST', `/platform/clients/${enc(companyId)}/manager-key`);
+}
+
+/** Edge Function `invite-manager`: Supabase mails the manager an invitation (or a reset letter for an existing account). */
+export function inviteManager(companyId: string): Promise<ManagerInviteResponse> {
+  return platformEdge<ManagerInviteResponse>('POST', `/invite-manager/clients/${enc(companyId)}/invite`, {}, true, false, 'invite-manager');
+}
+
+/** Edge Function `invite-manager`: a temporary password, shown once; the manager changes it on first sign-in. */
+export function managerTempPassword(companyId: string): Promise<ManagerTempPasswordResponse> {
+  return platformEdge<ManagerTempPasswordResponse>('POST', `/invite-manager/clients/${enc(companyId)}/temp-password`, {}, true, false, 'invite-manager');
 }
 
 // --- manager cabinet: Edge Function `owner`, /owner/company/… -----------------

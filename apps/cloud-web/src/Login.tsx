@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { normalizeAccessKey, normalizeCloudUrl, parseLoginQr, roleOfKeyPrefix } from '@bills/domain';
-import { CloudRequestError, SUPABASE_MODE, loginByKey, loginEmail, platformLogin, sendMagicLink, takeLinkError } from './api.ts';
+import { CloudRequestError, SUPABASE_MODE, loginByKey, loginEmail, platformLogin, sendMagicLink, sendPasswordReset, takeLinkError } from './api.ts';
 import type { Identity } from './api.ts';
 import { BrandMark } from './BrandMark.tsx';
 import { nativeBridge } from './platform.ts';
 
-/** 'key' — self-hosted only (owner keys); 'link' — Supabase only (magic link to the e-mail). */
-type Mode = 'password' | 'key' | 'link';
+/**
+ * 'key' — self-hosted only (owner keys); 'link' — Supabase only (magic link to the e-mail);
+ * 'reset' — Supabase only («Забыли пароль?»: a letter leading to «Задать пароль»).
+ */
+type Mode = 'password' | 'key' | 'link' | 'reset';
 
 const NOT_TS_QR = 'Этот QR-код не от TS. Откройте кабинет на компьютере → «Телефон и уведомления» → «Создать ключ для телефона».';
 
@@ -64,6 +67,7 @@ export function Login({
   const [side, setSide] = useState<Side>('manager');
   const [platformKey, setPlatformKey] = useState('');
   const [linkSentTo, setLinkSentTo] = useState<string | null>(null);
+  const [resetSentTo, setResetSentTo] = useState<string | null>(null);
   const [cloud, setCloud] = useState(() => bridge?.cloudUrl() ?? '');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -126,6 +130,15 @@ export function Login({
       if (cloudUrl === false) return;
       if (mode === 'password') {
         await run('password', () => loginEmail(email.trim(), password), cloudUrl);
+        return;
+      }
+      if (mode === 'reset') {
+        try {
+          await sendPasswordReset(email.trim());
+          setResetSentTo(email.trim());
+        } catch (err) {
+          setError(describe(err, 'reset', null));
+        }
         return;
       }
       if (mode === 'link') {
@@ -316,7 +329,22 @@ export function Login({
         </div>
         )}
 
-        {mode === 'link' ? (
+        {mode === 'reset' ? (
+          resetSentTo ? (
+            <p className="saved" role="status">
+              Письмо для смены пароля отправлено на {resetSentTo}. Откройте ссылку из письма — кабинет предложит задать
+              новый пароль. Письма нет — проверьте «Спам».
+            </p>
+          ) : (
+            <>
+              <p className="hint">Пришлём письмо со ссылкой: по ней вы зададите новый пароль.</p>
+              <label className="field">
+                <span>E-mail</span>
+                <input type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
+              </label>
+            </>
+          )
+        ) : mode === 'link' ? (
           linkSentTo ? (
             <p className="saved" role="status">
               Письмо со ссылкой отправлено на {linkSentTo}. Откройте ссылку на этом устройстве — кабинет откроется уже
@@ -388,6 +416,25 @@ export function Login({
           <button type="submit" className="btn btn-primary" disabled={busy}>
             {busy ? 'Входим…' : 'Войти'}
           </button>
+        ) : mode === 'reset' ? (
+          <>
+            {!resetSentTo && (
+              <button type="submit" className="btn btn-primary" disabled={busy}>
+                {busy ? 'Отправляем…' : 'Прислать ссылку для смены пароля'}
+              </button>
+            )}
+            <button
+              type="button"
+              className="link"
+              onClick={() => {
+                setMode('password');
+                setResetSentTo(null);
+                setError(null);
+              }}
+            >
+              Назад ко входу
+            </button>
+          </>
         ) : mode === 'link' ? (
           linkSentTo ? (
             <button type="button" className="btn" onClick={() => setLinkSentTo(null)}>
@@ -399,9 +446,23 @@ export function Login({
             </button>
           )
         ) : (
-          <button type="submit" className="btn btn-primary" disabled={busy}>
-            {busy ? 'Входим…' : 'Войти'}
-          </button>
+          <>
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {busy ? 'Входим…' : 'Войти'}
+            </button>
+            {SUPABASE_MODE && mode === 'password' && (
+              <button
+                type="button"
+                className="link"
+                onClick={() => {
+                  setMode('reset');
+                  setError(null);
+                }}
+              >
+                Забыли пароль?
+              </button>
+            )}
+          </>
         )}
       </form>
       <a className="link login-apps" href="#/apps">

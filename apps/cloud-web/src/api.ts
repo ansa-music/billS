@@ -14,6 +14,8 @@ import type {
   IssuedLongKey,
   LicenseTermsRequest,
   LicenseView,
+  ManagerInviteResponse,
+  ManagerTempPasswordResponse,
   PlatformMe,
   UpdateCloudStaffRequest,
   ClubDetails,
@@ -30,7 +32,8 @@ import type {
   UpdateTariffsResponse,
 } from '@bills/domain';
 import * as http from './api-http.ts';
-import type { CloudRequestError, RegisterDeviceBody } from './api-core.ts';
+import { CloudRequestError } from './api-core.ts';
+import type { RegisterDeviceBody } from './api-core.ts';
 import type { AlertEvent } from './api-supabase.ts';
 import { SUPABASE_MODE } from './config.ts';
 
@@ -221,6 +224,32 @@ export async function issueManagerKey(companyId: string): Promise<IssuedLongKey>
   return SUPABASE_MODE ? (await sb()).issueManagerKey(companyId) : http.issueManagerKey(companyId);
 }
 
+const SUPABASE_ONLY = () => new CloudRequestError(400, 'NOT_SUPPORTED', 'Только для облака на Supabase: здесь пароль управляющего задаётся при создании клиента');
+
+/** Supabase: the manager gets an invitation letter (an existing account — a password-reset letter). */
+export async function inviteManager(companyId: string): Promise<ManagerInviteResponse> {
+  if (!SUPABASE_MODE) throw SUPABASE_ONLY();
+  return (await sb()).inviteManager(companyId);
+}
+
+/** Supabase: a temporary password for the manager, shown once; changed on first sign-in. */
+export async function managerTempPassword(companyId: string): Promise<ManagerTempPasswordResponse> {
+  if (!SUPABASE_MODE) throw SUPABASE_ONLY();
+  return (await sb()).managerTempPassword(companyId);
+}
+
+/** «Забыли пароль?» (Supabase): a reset letter leading to «Задать пароль». */
+export async function sendPasswordReset(email: string): Promise<void> {
+  if (!SUPABASE_MODE) throw SUPABASE_ONLY();
+  return (await sb()).sendPasswordReset(email);
+}
+
+/** «Задать пароль» (Supabase): the signed-in user's new password. */
+export async function setNewPassword(password: string): Promise<void> {
+  if (!SUPABASE_MODE) throw SUPABASE_ONLY();
+  return (await sb()).setNewPassword(password);
+}
+
 // --- manager cabinet: license, branches, staff ------------------------------------
 
 export async function companyLicense(): Promise<LicenseView | null> {
@@ -260,6 +289,8 @@ export async function revokeKey(keyId: string): Promise<CloudKeyView> {
 export interface Identity {
   owner: OwnerView | null;
   platform: PlatformMe | null;
+  /** Supabase: opened from an invitation / reset letter or signed in with a temporary password — «Задать пароль» first. */
+  mustSetPassword?: boolean;
 }
 
 /**
@@ -281,7 +312,7 @@ export async function restoreSession(): Promise<Identity> {
       // A Supabase account matching nobody: fetchMe signs it out and words the error.
       return { owner: await api.fetchMe(), platform: null };
     }
-    return { owner, platform };
+    return { owner, platform, mustSetPassword: await api.mustSetPassword() };
   }
   if (await platformSessionLikely()) {
     try {

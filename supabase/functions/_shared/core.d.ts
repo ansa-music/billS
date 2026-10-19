@@ -26,4 +26,5 @@ export function edgeContext(db: SqlDriver, env: Record<string, string | undefine
 export function handleSync(req: Request, ctx: EdgeContext): Promise<Response>;
 export function handleOwner(req: Request, ctx: EdgeContext): Promise<Response>;
 export function handlePlatform(req: Request, ctx: EdgeContext): Promise<Response>;
+export function handleInviteManager(req: Request, ctx: EdgeContext): Promise<Response>;
 export function handleNotify(req: Request, ctx: EdgeContext): Promise<Response>;

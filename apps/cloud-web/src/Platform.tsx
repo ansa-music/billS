@@ -1,9 +1,18 @@
 /** Platform cabinet (owner and tech of TS): clients, their managers and licenses. */
 import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { ClientView, CreateClientResponse, IssuedLongKey, PlatformMe } from '@bills/domain';
+import type { ClientView, CreateClientResponse, IssuedLongKey, ManagerInviteResponse, ManagerTempPasswordResponse, PlatformMe } from '@bills/domain';
 import { ROLE_LABEL, can } from '@bills/domain';
-import { SUPABASE_MODE, blockClient, createClient, issueManagerKey, listClients, setLicense } from './api.ts';
+import {
+  SUPABASE_MODE,
+  blockClient,
+  createClient,
+  inviteManager,
+  issueManagerKey,
+  listClients,
+  managerTempPassword,
+  setLicense,
+} from './api.ts';
 import { BrandMark } from './BrandMark.tsx';
 import { CopyButton, CopyValue, LicenseFields, LicenseLine, ShownOnce } from './cabinet-ui.tsx';
 import { formatDateTime } from './format.ts';
@@ -23,6 +32,91 @@ import { OfflineBanner, Section, loadingText } from './shared.tsx';
 
 const ZONE = 'Asia/Almaty';
 
+/** What happened to the invitation letter, in words. */
+function inviteText(res: ManagerInviteResponse): string {
+  return res.status === 'invited'
+    ? `Приглашение отправлено на ${res.email}: управляющий откроет письмо, задаст пароль и попадёт в кабинет.`
+    : `У ${res.email} уже есть учётная запись — отправлено письмо для смены пароля.`;
+}
+
+/**
+ * Supabase: the manager's access to the cabinet — the invitation letter again, or a temporary
+ * password (no mail needed) shown once, to pass on in a messenger.
+ */
+function ManagerAccess({ companyId, invite }: { companyId: string; invite?: { result: ManagerInviteResponse | null; error: string | null } }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(invite?.error ?? null);
+  const [sent, setSent] = useState<ManagerInviteResponse | null>(invite?.result ?? null);
+  const [temp, setTemp] = useState<ManagerTempPasswordResponse | null>(null);
+
+  async function act(fn: () => Promise<void>) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+    } catch (err) {
+      setError(describeCabinetError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function tempPassword() {
+    if (!confirm('Выдать управляющему временный пароль? Прежний пароль перестанет работать; при первом входе управляющий задаст свой.')) return;
+    void act(async () => {
+      setSent(null);
+      setTemp(await managerTempPassword(companyId));
+    });
+  }
+
+  return (
+    <div className="sub-panel">
+      {sent && (
+        <p className="saved" role="status">
+          {inviteText(sent)}
+        </p>
+      )}
+      {temp && (
+        <ShownOnce
+          onDone={() => setTemp(null)}
+          note={
+            <p className="hint">
+              Передайте управляющему в мессенджере: вход в кабинет — почта {temp.email} и этот пароль. При первом входе кабинет
+              попросит задать свой пароль.
+            </p>
+          }
+        >
+          <CopyValue label="Временный пароль" value={temp.password} />
+        </ShownOnce>
+      )}
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="row wrap">
+        <button
+          type="button"
+          className="btn"
+          disabled={busy}
+          onClick={() =>
+            void act(async () => {
+              setTemp(null);
+              setSent(await inviteManager(companyId));
+            })
+          }
+        >
+          Отправить приглашение ещё раз
+        </button>
+        <button type="button" className="btn" disabled={busy} onClick={tempPassword}>
+          Временный пароль
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function NewClient({ onDone }: { onDone: () => void }) {
   const [companyName, setCompanyName] = useState('');
   const [managerName, setManagerName] = useState('');
@@ -32,6 +126,7 @@ function NewClient({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreateClientResponse | null>(null);
+  const [invite, setInvite] = useState<{ result: ManagerInviteResponse | null; error: string | null }>({ result: null, error: null });
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -55,6 +150,14 @@ function NewClient({ onDone }: { onDone: () => void }) {
         ...(!SUPABASE_MODE && password ? { managerPassword: password } : {}),
         license: built.request,
       });
+      // Supabase: the manager gets the invitation letter at once (a failure does not undo the client).
+      if (SUPABASE_MODE) {
+        try {
+          setInvite({ result: await inviteManager(res.client.companyId), error: null });
+        } catch (err) {
+          setInvite({ result: null, error: `Приглашение не отправлено: ${describeCabinetError(err)}` });
+        }
+      }
       setCreated(res);
     } catch (err) {
       setError(describeCabinetError(err));
@@ -71,7 +174,7 @@ function NewClient({ onDone }: { onDone: () => void }) {
           note={
             <p className="hint">
               Ключ управляющего — для входа на HUB филиалов. {SUPABASE_MODE
-                ? `В облачный кабинет управляющий входит по почте ${managerEmail.trim()} (ссылка на почту).`
+                ? `В облачный кабинет управляющий входит по почте ${managerEmail.trim()} и паролю, который задаст по ссылке из письма-приглашения.`
                 : `В облачный кабинет — по почте ${managerEmail.trim()} и паролю.`}
             </p>
           }
@@ -79,6 +182,7 @@ function NewClient({ onDone }: { onDone: () => void }) {
           <CopyValue label="Ключ управляющего" value={created.managerKey.key} />
           {created.managerPassword && <CopyValue label="Пароль кабинета" value={created.managerPassword} />}
         </ShownOnce>
+        {SUPABASE_MODE && <ManagerAccess companyId={created.client.companyId} invite={invite} />}
       </Section>
     );
   }
@@ -261,6 +365,8 @@ function ClientCard({
           <dd>{formatDateTime(client.createdAt, ZONE)}</dd>
         </div>
       </dl>
+
+      {SUPABASE_MODE && editable && mode === 'view' && client.managers.length > 0 && <ManagerAccess key={client.companyId} companyId={client.companyId} />}
 
       {newKey && (
         <ShownOnce onDone={() => setNewKey(null)}>

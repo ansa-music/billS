@@ -480,6 +480,26 @@ export interface CreateClientRequest {
   license: LicenseTermsRequest;
 }
 
+/**
+ * Edge Function `invite-manager` (Supabase): how the manager got access to the cabinet.
+ * 'invited' — Supabase sent an invitation letter (new account); 'reset-sent' — the account
+ * already existed, a password-reset letter went out instead.
+ */
+export interface ManagerInviteResponse {
+  status: 'invited' | 'reset-sent';
+  email: string;
+  /** Where the letter's link leads: <cabinet>/#/set-password. */
+  redirectTo: string;
+}
+
+/** `invite-manager` temp-password: shown ONCE to the platform; the manager must change it on first sign-in. */
+export interface ManagerTempPasswordResponse {
+  email: string;
+  password: string;
+  /** true — the Auth account was created now; false — an existing one got the new password. */
+  created: boolean;
+}
+
 export interface IssuedLongKey {
   /** Shown once: MGR-… */
   key: string;

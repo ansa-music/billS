@@ -23,6 +23,7 @@ import { Shifts } from './Shifts.tsx';
 import { Tariffs } from './Tariffs.tsx';
 import { BrandMark } from './BrandMark.tsx';
 import { Phone } from './Phone.tsx';
+import { SetPasswordPage } from './SetPassword.tsx';
 import { enablePhonePush, resetPhonePush } from './phonePush.ts';
 import { nativeBridge } from './platform.ts';
 
@@ -30,14 +31,15 @@ type Auth =
   | { status: 'loading' }
   | { status: 'anonymous' }
   /** `platform`: the same person is in the TS team too (Supabase e-mail sign-in) — a switch to that cabinet. */
-  | { status: 'ok'; owner: OwnerView; platform: PlatformMe | null }
+  | { status: 'ok'; owner: OwnerView; platform: PlatformMe | null; mustSetPassword?: boolean }
   /** Owner or tech of TS: the platform cabinet; `owner` when they also manage a client. */
-  | { status: 'platform'; me: PlatformMe; owner: OwnerView | null };
+  | { status: 'platform'; me: PlatformMe; owner: OwnerView | null; mustSetPassword?: boolean };
 
 /** Platform first: someone in the TS team lands in the platform cabinet. */
 function authOf(id: Identity): Auth {
-  if (id.platform) return { status: 'platform', me: id.platform, owner: id.owner };
-  if (id.owner) return { status: 'ok', owner: id.owner, platform: null };
+  const mustSetPassword = id.mustSetPassword === true;
+  if (id.platform) return { status: 'platform', me: id.platform, owner: id.owner, mustSetPassword };
+  if (id.owner) return { status: 'ok', owner: id.owner, platform: null, mustSetPassword };
   return { status: 'anonymous' };
 }
 
@@ -185,6 +187,26 @@ export function App() {
         <OfflineBanner online={online} />
         <Login onLogin={(id) => setAuth(authOf(id))} />
       </>
+    );
+  }
+
+  // Supabase: the letter's link or a temporary password — the password first; #/set-password by choice.
+  if (SUPABASE_MODE && (auth.status === 'ok' || auth.status === 'platform') && (auth.mustSetPassword || route.kind === 'set-password')) {
+    const signedIn = auth;
+    return (
+      <SetPasswordPage
+        email={signedIn.owner?.email ?? null}
+        forced={signedIn.mustSetPassword === true}
+        onDone={() => {
+          location.hash = '#/';
+          setAuth({ ...signedIn, mustSetPassword: false });
+        }}
+        onSignOut={() => {
+          void logout()
+            .catch(() => undefined)
+            .then(() => setAuth({ status: 'anonymous' }));
+        }}
+      />
     );
   }
 
