@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useStandalone } from './pwa.tsx';
 
 /** Hall-tablet helpers: fullscreen toggle and keeping the screen awake. */
 
@@ -20,7 +21,10 @@ function isFullscreenActive(): boolean {
 }
 
 export function useFullscreen(): { supported: boolean; active: boolean; toggle: () => void } {
-  const [supported] = useState(isFullscreenSupported);
+  const [api] = useState(isFullscreenSupported);
+  // Installed as an app (PWA standalone) there is no address bar already; the button would be noise.
+  const standalone = useStandalone();
+  const supported = api && !standalone;
   const [active, setActive] = useState(isFullscreenActive);
 
   useEffect(() => {

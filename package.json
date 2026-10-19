@@ -19,7 +19,9 @@
     "dev:cloud-web": "npm run dev -w @bills/cloud-web",
     "start:hub": "npm run start -w @bills/hub",
     "start:cloud": "npm run start -w @bills/cloud",
-    "local": "node scripts/local.mjs"
+    "local": "node scripts/local.mjs",
+    "icons": "node scripts/icons.mjs",
+    "audit:pwa": "npx --yes @lhci/cli@0.15 collect --url=http://localhost:4800/ --settings.preset=desktop --numberOfRuns=1"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

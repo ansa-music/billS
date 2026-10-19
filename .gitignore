@@ -8,3 +8,4 @@ apps/cloud/data/
 *.db
 *.db-wal
 *.db-shm
+.lighthouseci/

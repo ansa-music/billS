@@ -462,8 +462,41 @@
   align-content: start;
 }
 
-.shell-main > .hall-offline {
+.shell-main > .hall-offline,
+.shell-main > .pwa-banner {
   margin: 12px 24px 0;
+}
+
+/* PWA strips under the top bar (pwa.tsx): a waiting update (blue) and an install hint (plain). */
+.pwa-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.pwa-banner[data-kind='update'] {
+  border-color: color-mix(in oklab, var(--info) 55%, transparent);
+  background: var(--info-soft);
+}
+
+.pwa-banner-text {
+  flex: 1 1 280px;
+  min-width: 0;
+  margin: 0;
+}
+
+.pwa-banner-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .bottom-nav {
@@ -559,7 +592,8 @@
     padding: 14px 12px calc(88px + env(safe-area-inset-bottom));
   }
 
-  .shell-main > .hall-offline {
+  .shell-main > .hall-offline,
+  .shell-main > .pwa-banner {
     margin: 10px 12px 0;
   }
 

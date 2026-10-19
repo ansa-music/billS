@@ -50,6 +50,12 @@
       "port": 5610
     },
     {
+      "name": "pwa-check",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/local.mjs", "--hub-port=4800", "--db=pwa-check", "--dist"],
+      "port": 4800
+    },
+    {
       "name": "hub-alt",
       "runtimeExecutable": "node",
       "runtimeArgs": ["--env-file=.env.alt", "--watch", "apps/hub/src/main.ts"],

@@ -6,6 +6,11 @@
 //
 // Ports and database: --hub-port=4400 --web-port=5400 --db=local (apps/hub/data/<db>.db),
 // or LOCAL_HUB_PORT / LOCAL_WEB_PORT / LOCAL_DB. A second copy needs all three different.
+//
+// --dist: no Vite dev server; the HUB serves the built screen (apps/web/dist, run
+// `npm run build` first) like in a club. This is how the installable app (PWA:
+// manifest, service worker, install banner) is checked — the dev server has no
+// service worker.
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +20,7 @@ const flag = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.spl
 const hubPort = flag('hub-port') ?? process.env.LOCAL_HUB_PORT ?? '4400';
 const webPort = flag('web-port') ?? process.env.LOCAL_WEB_PORT ?? '5400';
 const dbName = (flag('db') ?? process.env.LOCAL_DB ?? 'local').replace(/[^\w-]/g, '');
+const serveDist = process.argv.includes('--dist');
 const children = [];
 let stopping = false;
 
@@ -49,11 +55,14 @@ start('hub', ['--watch', 'src/main.ts'], join(root, 'apps/hub'), {
   HUB_PORT: hubPort,
   HUB_DB_PATH: join(root, `apps/hub/data/${dbName}.db`),
 });
-start('web', [join(root, 'node_modules/vite/bin/vite.js')], join(root, 'apps/web'), {
-  WEB_PORT: webPort,
-  HUB_URL: `http://127.0.0.1:${hubPort}`,
-});
+if (!serveDist) {
+  start('web', [join(root, 'node_modules/vite/bin/vite.js')], join(root, 'apps/web'), {
+    WEB_PORT: webPort,
+    HUB_URL: `http://127.0.0.1:${hubPort}`,
+  });
+}
 
-console.log(`\n  Экран зала: http://localhost:${webPort}\n  HUB:        http://localhost:${hubPort}/api/health\n  Остановить: Ctrl+C\n`);
+const screen = serveDist ? `http://localhost:${hubPort}  (собранный apps/web/dist, отдаёт HUB)` : `http://localhost:${webPort}`;
+console.log(`\n  Экран зала: ${screen}\n  HUB:        http://localhost:${hubPort}/api/health\n  Остановить: Ctrl+C\n`);
 process.on('SIGINT', () => stop());
 process.on('SIGTERM', () => stop());
