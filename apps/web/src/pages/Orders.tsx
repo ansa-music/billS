@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { OrderView, ProductView, SessionView } from '@bills/domain';
 import { calculateCharge, formatMoney, ORDER_MAX_QTY, orderTotal, sessionTotal } from '@bills/domain';
 import { fetchJson } from '../api.ts';
 import { useAuth } from '../auth.ts';
 import { formatClock, formatDuration } from '../format.ts';
 import { OfflineBanner } from '../OfflineBanner.tsx';
+import { Link } from '../router.tsx';
 import { Empty, Field, Loading, Modal, Page, Section, Toast, useToast } from '../ui.tsx';
 import { useCommands, useHub, useServerNow } from '../useHub.tsx';
 import { sellable, sortCatalog, useCatalog } from './bar/useCatalog.tsx';
@@ -23,6 +25,9 @@ export function OrdersPage() {
   const { can } = useAuth();
   const { toast, show, clear } = useToast();
   const { run, busy, isBusy } = useCommands(show);
+  // Cancel errors go into the dialog: a toast would sit under its backdrop.
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const cancelCmd = useCommands(setCancelError);
   const { catalog, error: catalogError } = useCatalog();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -82,7 +87,7 @@ export function OrdersPage() {
 
   const currency = state.club.currency;
   const timezone = state.club.timezone;
-  const locked = busy.size > 0 || !online;
+  const locked = busy.size > 0 || cancelCmd.busy.size > 0 || !online;
   const products = catalog ? sellable(catalog) : [];
   const productById = new Map((catalog ? sortCatalog(catalog).products : []).map((p) => [p.id, p]));
   const activeCategories = catalog ? sortCatalog(catalog).categories.filter((c) => c.isActive) : [];
@@ -126,13 +131,26 @@ export function OrdersPage() {
     show('Заказ добавлен');
   };
 
+  const openCancel = (o: OrderView) => {
+    setReason('');
+    setCancelError(null);
+    setCancelling(o);
+  };
+
+  const closeCancel = () => {
+    setCancelling(null);
+    setCancelError(null);
+  };
+
   const confirmCancel = async () => {
     if (!cancelling) return;
-    const res = await run<OrderView>(`cancel:${cancelling.id}`, `/api/orders/${cancelling.id}/cancel`, {
+    setCancelError(null);
+    // The HUB refuses an order whose check already has money on it (409 CHECK_HAS_PAYMENTS).
+    const res = await cancelCmd.run<OrderView>(`cancel:${cancelling.id}`, `/api/orders/${cancelling.id}/cancel`, {
       reason: reason.trim(),
     });
     if (!res) return;
-    setCancelling(null);
+    closeCancel();
     setReason('');
     show('Заказ отменён');
   };
@@ -145,6 +163,18 @@ export function OrdersPage() {
     if (history?.sessionId === selected.session.id) for (const o of history.orders) map.set(o.id, o);
     return [...map.values()].sort((a, b) => b.createdAt - a.createdAt);
   })();
+
+  // Open orders whose game is over (e.g. a prepaid game): no table to pick, paid on a check of their own.
+  const tableNames = new Map(state.tables.map((t) => [t.id, t.name]));
+  // Games still on a table (paused and opening ones too) or waiting for payment.
+  const onFloor = new Set([
+    ...state.tables.flatMap((t) => (t.session ? [t.session.id] : [])),
+    ...state.unpaid.map((s) => s.id),
+  ]);
+  const afterGame = state.orders.filter((o) => !onFloor.has(o.sessionId)).sort((a, b) => b.createdAt - a.createdAt);
+  const afterGameOwed = afterGame.reduce((sum, o) => (o.status === 'OPEN' ? sum + o.total : sum), 0);
+  const canCancel = can('order.cancel');
+  const checksLink = can('checks.view') ? <Link to="/checks">«Счета»</Link> : '«Счета»';
 
   return (
     <Page
@@ -303,63 +333,22 @@ export function OrdersPage() {
 
           <Section
             title={`Заказы · ${selected.tableName}`}
-            aside={
-              <span className="muted">
-                Открытых на {formatMoney(selected.session.ordersTotal, currency)}
-              </span>
-            }
+            aside={<span className="muted">Не оплачено: {formatMoney(selected.session.ordersTotal, currency)}</span>}
           >
             {orders.length === 0 ? (
               <Empty>На эту игру заказов ещё нет.</Empty>
             ) : (
               <ul className="order-list">
                 {orders.map((o) => (
-                  <li key={o.id} className="order-card" data-cancelled={o.status === 'CANCELLED' ? '' : undefined}>
-                    <div className="order-card-head">
-                      <span>
-                        <strong>{formatClock(o.createdAt, timezone)}</strong>{' '}
-                        <span className="muted">· {o.createdBy}</span>
-                      </span>
-                      {o.status === 'CANCELLED' ? (
-                        <span className="tag tag-danger">отменён</span>
-                      ) : (
-                        <span className="tag tag-ok">открыт</span>
-                      )}
-                    </div>
-                    <ul className="order-card-items">
-                      {o.items.map((it) => (
-                        <li key={it.id}>
-                          <span>
-                            {it.title} × {it.qty}
-                          </span>
-                          <span className="bar-money">{formatMoney(it.amount, currency)}</span>
-                        </li>
-                      ))}
-                    </ul>
-                    {o.note && <p className="order-card-note">Комментарий: {o.note}</p>}
-                    {o.status === 'CANCELLED' && (
-                      <p className="order-card-note">
-                        Отменил {o.cancelledBy}
-                        {o.cancelledAt != null && ` в ${formatClock(o.cancelledAt, timezone)}`}: {o.cancelReason}
-                      </p>
-                    )}
-                    <div className="order-card-foot">
-                      <span className="order-card-total bar-money">{formatMoney(o.total, currency)}</span>
-                      {o.status === 'OPEN' && can('order.cancel') && (
-                        <button
-                          type="button"
-                          className="btn btn-small btn-outline-danger"
-                          disabled={locked}
-                          onClick={() => {
-                            setReason('');
-                            setCancelling(o);
-                          }}
-                        >
-                          Отменить
-                        </button>
-                      )}
-                    </div>
-                  </li>
+                  <OrderCard
+                    key={o.id}
+                    order={o}
+                    currency={currency}
+                    timezone={timezone}
+                    canCancel={canCancel}
+                    locked={locked}
+                    onCancel={() => openCancel(o)}
+                  />
                 ))}
               </ul>
             )}
@@ -367,7 +356,33 @@ export function OrdersPage() {
         </>
       )}
 
-      <Modal open={cancelling !== null} title="Отменить заказ" onClose={() => setCancelling(null)}>
+      {afterGame.length > 0 && (
+        <Section
+          title="Заказы закрытых игр"
+          aside={<span className="muted">Не оплачено: {formatMoney(afterGameOwed, currency)}</span>}
+        >
+          <ul className="order-list">
+            {afterGame.map((o) => (
+              <OrderCard
+                key={o.id}
+                order={o}
+                currency={currency}
+                timezone={timezone}
+                tableName={tableNames.get(o.tableId) ?? 'Стол'}
+                canCancel={canCancel}
+                locked={locked}
+                onCancel={() => openCancel(o)}
+              >
+                {o.status === 'OPEN' && o.checkId === null && (
+                  <p className="order-card-note">Игра уже закрыта — оплатите в разделе {checksLink}.</p>
+                )}
+              </OrderCard>
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      <Modal open={cancelling !== null} title="Отменить заказ" onClose={closeCancel}>
         {cancelling && (
           <form
             className="form"
@@ -379,6 +394,7 @@ export function OrdersPage() {
             <p>
               Заказ на {formatMoney(cancelling.total, currency)} от {formatClock(cancelling.createdAt, timezone)}. Остатки
               вернутся на склад, отмена попадёт в журнал.
+              {cancelling.checkId !== null && ' Заказ уже в счёте — его строки уйдут из счёта.'}
             </p>
             <Field label="Причина" hint="Не короче 3 символов">
               <textarea
@@ -390,8 +406,13 @@ export function OrdersPage() {
                 required
               />
             </Field>
+            {cancelError && (
+              <p className="bar-error" role="alert">
+                {cancelError}
+              </p>
+            )}
             <div className="row wrap modal-actions">
-              <button type="button" className="btn btn-ghost" onClick={() => setCancelling(null)} disabled={locked}>
+              <button type="button" className="btn btn-ghost" onClick={closeCancel} disabled={locked}>
                 Назад
               </button>
               <button type="submit" className="btn btn-danger" disabled={locked || reason.trim().length < 3}>
@@ -404,6 +425,81 @@ export function OrdersPage() {
 
       <Toast message={toast} onClose={clear} />
     </Page>
+  );
+}
+
+/**
+ * OPEN and on no check — not paid; OPEN on a check — being paid at the cash desk;
+ * CLOSED — its check is paid (history, not owed); CANCELLED — with a reason.
+ */
+function orderStatus(o: OrderView): { label: string; tag: string } {
+  if (o.status === 'CANCELLED') return { label: 'отменён', tag: 'tag-danger' };
+  if (o.status === 'CLOSED') return { label: 'оплачен', tag: 'tag-muted' };
+  return o.checkId ? { label: 'в счёте', tag: 'tag-ok' } : { label: 'не оплачен', tag: 'tag-warn' };
+}
+
+function OrderCard({
+  order: o,
+  currency,
+  timezone,
+  tableName,
+  canCancel,
+  locked,
+  onCancel,
+  children,
+}: {
+  order: OrderView;
+  currency: string;
+  timezone: string;
+  /** Shown when the list mixes tables. */
+  tableName?: string;
+  canCancel: boolean;
+  locked: boolean;
+  onCancel: () => void;
+  children?: ReactNode;
+}) {
+  const status = orderStatus(o);
+  return (
+    <li className="order-card" data-status={o.status} data-cancelled={o.status === 'CANCELLED' ? '' : undefined}>
+      <div className="order-card-head">
+        <span>
+          {tableName && <strong>{tableName} · </strong>}
+          <strong>{formatClock(o.createdAt, timezone)}</strong> <span className="muted">· {o.createdBy}</span>
+        </span>
+        <span className={`tag ${status.tag}`}>{status.label}</span>
+      </div>
+      <ul className="order-card-items">
+        {o.items.map((it) => (
+          <li key={it.id}>
+            <span>
+              {it.title} × {it.qty}
+            </span>
+            <span className="bar-money">{formatMoney(it.amount, currency)}</span>
+          </li>
+        ))}
+      </ul>
+      {o.note && <p className="order-card-note">Комментарий: {o.note}</p>}
+      {o.status === 'CANCELLED' && (
+        <p className="order-card-note">
+          Отменил {o.cancelledBy}
+          {o.cancelledAt != null && ` в ${formatClock(o.cancelledAt, timezone)}`}: {o.cancelReason}
+        </p>
+      )}
+      {o.status === 'CLOSED' && (
+        <p className="order-card-note">
+          Оплачен{o.closedAt != null && ` в ${formatClock(o.closedAt, timezone)}`}
+        </p>
+      )}
+      {children}
+      <div className="order-card-foot">
+        <span className="order-card-total bar-money">{formatMoney(o.total, currency)}</span>
+        {o.status === 'OPEN' && canCancel && (
+          <button type="button" className="btn btn-small btn-outline-danger" disabled={locked} onClick={onCancel}>
+            Отменить
+          </button>
+        )}
+      </div>
+    </li>
   );
 }
 

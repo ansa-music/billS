@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import type { SessionStatus, SessionView } from '@bills/domain';
+import type { OrderView, SessionStatus, SessionView, ShiftReport } from '@bills/domain';
 import { calculateChargeWithPauses, formatMoney, unpaidSpans } from '@bills/domain';
 import { amountOf, isLive, playedMsOf } from '../hall.ts';
-import { fetchSessions } from '../api.ts';
+import { fetchSessions, getJson } from '../api.ts';
+import { gameDue, orderSummary, owedTotal, unbilledOrders } from '../cash/lines.ts';
 import { ShiftPanel } from '../cash/ShiftPanel.tsx';
 import { UnpaidPanel } from '../cash/UnpaidPanel.tsx';
 import { EmptyState, SectionCard, StatTile, StatusBadge } from '../components.tsx';
@@ -24,7 +25,7 @@ const FILTERS: Array<{ value: HistoryFilter; label: string; match: (s: SessionSt
 const playedMs = playedMsOf;
 const liveAmount = amountOf;
 
-function CheckBreakdown({ s, currency }: { s: SessionView; currency: string }) {
+function CheckBreakdown({ s, orders, currency }: { s: SessionView; orders: OrderView[]; currency: string }) {
   if (s.startedAt == null || s.stoppedAt == null) return null;
   const charge = calculateChargeWithPauses(
     s.startedAt,
@@ -56,6 +57,30 @@ function CheckBreakdown({ s, currency }: { s: SessionView; currency: string }) {
           ))}
         </tbody>
       </table>
+      {orders.length > 0 && (
+        <table className="breakdown-bar">
+          <thead>
+            <tr>
+              <th>Бар</th>
+              <th>Кол-во</th>
+              <th className="num">Сумма</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orders.flatMap((o) =>
+              o.items.map((it) => (
+                <tr key={it.id}>
+                  <td>{it.title}</td>
+                  <td>
+                    {it.qty} × {formatMoney(it.price, currency)}
+                  </td>
+                  <td className="num">{formatMoney(it.amount, currency)}</td>
+                </tr>
+              )),
+            )}
+          </tbody>
+        </table>
+      )}
       <p className="hint">
         Сыграно {formatSpan((s.playedSeconds ?? 0) * 1000)}, к оплате {formatSpan((s.billedSeconds ?? 0) * 1000)} · тариф «{s.tariffName}»
         {s.stoppedBy ? ` · остановил ${s.stoppedBy}` : ''}
@@ -64,7 +89,7 @@ function CheckBreakdown({ s, currency }: { s: SessionView; currency: string }) {
   );
 }
 
-function UnpaidCard({ s, name, currency }: { s: SessionView; name: string; currency: string }) {
+function UnpaidCard({ s, name, orders, currency }: { s: SessionView; name: string; orders: OrderView[]; currency: string }) {
   const [open, setOpen] = useState(false);
   return (
     <article className="check-card">
@@ -77,12 +102,36 @@ function UnpaidCard({ s, name, currency }: { s: SessionView; name: string; curre
           {s.startedAt != null && formatClock(s.startedAt, s.timezone)}–{s.stoppedAt != null && formatClock(s.stoppedAt, s.timezone)} ·{' '}
           {formatSpan((s.playedSeconds ?? 0) * 1000)} · {s.tariffName}
         </span>
+        {s.ordersTotal > 0 && (
+          <span className="row-sub">
+            Игра {formatMoney(s.amount ?? 0, currency)} + бар {formatMoney(s.ordersTotal, currency)}
+          </span>
+        )}
         <button type="button" className="check-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
           {open ? 'Скрыть расчёт' : 'Как посчитано'}
         </button>
       </div>
-      <span className="check-amount">{formatMoney(s.amount ?? 0, currency)}</span>
-      {open && <CheckBreakdown s={s} currency={currency} />}
+      <span className="check-amount">{formatMoney(gameDue(s), currency)}</span>
+      {open && <CheckBreakdown s={s} orders={orders} currency={currency} />}
+    </article>
+  );
+}
+
+/** A bar order left after its game (read-only here; the cashier bills it in «Ожидают оплаты»). */
+function UnbilledOrderCard({ o, name, timezone, currency }: { o: OrderView; name: string; timezone: string; currency: string }) {
+  return (
+    <article className="check-card">
+      <span className="check-icon" aria-hidden="true">
+        <Icon name="orders" />
+      </span>
+      <div className="row-main">
+        <strong>{name} · бар</strong>
+        <span className="row-sub">{orderSummary(o)}</span>
+        <span className="row-sub">
+          Заказ в {formatClock(o.createdAt, timezone)} · игра окончена, заказ без счёта
+        </span>
+      </div>
+      <span className="check-amount">{formatMoney(o.total, currency)}</span>
     </article>
   );
 }
@@ -93,19 +142,34 @@ export function ChecksSection() {
   const { timezone, currency } = state.club;
   const dayStart = workdayStart(serverNow, timezone);
   const day = useLive(() => fetchSessions(dayStart, dayStart + DAY_MS), [dayStart], hub.version);
+  // Money actually taken (time and bar, after discounts and refunds) comes from the open shift's X report.
+  const shiftId = state.shift?.id ?? null;
+  const shiftReport = useLive(
+    () => (shiftId ? getJson<ShiftReport>(`/api/shifts/${shiftId}/report`) : Promise.resolve(null)),
+    [shiftId],
+    hub.version,
+  );
+  const report = shiftReport.data;
   const [filter, setFilter] = useState<HistoryFilter>('all');
   const [tableId, setTableId] = useState('');
 
   const names = useMemo(() => new Map(state.tables.map((t) => [t.id, t.name])), [state.tables]);
   const sessions = day.data ?? [];
   const inDay = sessions.filter((s) => (s.startedAt ?? s.requestedAt) >= dayStart);
-  // What is owed: open checks plus stopped games not yet on a check.
-  const unpaidSum =
-    state.checks.reduce((sum, c) => sum + c.due, 0) +
-    state.unpaid.filter((s) => s.checkId == null).reduce((sum, s) => sum + (s.amount ?? 0), 0);
+  // What is owed: open checks, stopped games not yet on a check (with their bar), bar orders left after their game.
+  const unpaidSum = owedTotal(state);
+  const unbilled = unbilledOrders(state);
+  const ordersOf = (sessionId: string) => state.orders.filter((o) => o.sessionId === sessionId && o.status === 'OPEN');
+  const owing = state.unpaid.length + state.checks.length + unbilled.length > 0;
+  const owingDetail = [
+    state.unpaid.length ? `${state.unpaid.length} ${state.unpaid.length === 1 ? 'игра' : 'игр'}` : '',
+    state.checks.length ? `счетов: ${state.checks.length}` : '',
+    unbilled.length ? `заказов без счёта: ${unbilled.length}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
   const cashDesk = hub.can('payment.take') || hub.can('shift.open');
   const desk = { state, actor: hub.actor, refresh: hub.refresh, notify: hub.notify };
-  const paid = inDay.filter((s) => s.status === 'CLOSED');
   const played = inDay.filter((s) => isLive(s) || s.status === 'AWAITING_PAYMENT' || s.status === 'CLOSED');
   const charged = played.reduce((sum, s) => sum + liveAmount(s, serverNow), 0);
   const troubles = inDay.filter((s) => s.status === 'CANCELLED' || s.status === 'FAILED');
@@ -120,15 +184,21 @@ export function ChecksSection() {
         <StatTile
           label="Ждут оплаты"
           value={formatMoney(unpaidSum, currency)}
-          detail={
-            state.unpaid.length || state.checks.length
-              ? `${state.unpaid.length} ${state.unpaid.length === 1 ? 'игра' : 'игр'}${state.checks.length ? ` · счетов: ${state.checks.length}` : ''}`
-              : 'всё оплачено'
-          }
-          tone={state.unpaid.length || state.checks.length ? 'info' : undefined}
+          detail={owing ? owingDetail : 'всё оплачено'}
+          tone={owing ? 'info' : undefined}
         />
-        <StatTile label="Начислено за день" value={formatMoney(charged, currency)} detail={`${played.length} игр с 06:00`} />
-        <StatTile label="Оплачено" value={formatMoney(paid.reduce((s, x) => s + (x.amount ?? 0), 0), currency)} detail={`${paid.length} счетов`} />
+        <StatTile label="Начислено за день" value={formatMoney(charged, currency)} detail={`время · ${played.length} игр с 06:00`} />
+        <StatTile
+          label="Оплачено за смену"
+          value={report ? formatMoney(report.net.total, currency) : '—'}
+          detail={
+            report
+              ? `счетов: ${report.checksPaid}${report.revenue ? ` · бар ${formatMoney(report.revenue.bar, currency)}` : ''}`
+              : state.shift
+                ? 'считаем…'
+                : 'смена закрыта'
+          }
+        />
         <StatTile
           label="Отмены и сбои света"
           value={troubles.length}
@@ -144,14 +214,17 @@ export function ChecksSection() {
         </div>
       ) : (
         <SectionCard title="Ждут оплаты" actions={<span className="hint">Оплату принимает кассир</span>}>
-          {state.unpaid.length === 0 ? (
+          {state.unpaid.length === 0 && unbilled.length === 0 ? (
             <EmptyState icon="check" title="Неоплаченных игр нет">
               Когда игру останавливают, стол сразу освобождается, а сумма появляется здесь.
             </EmptyState>
           ) : (
             <div className="check-list">
               {state.unpaid.map((s) => (
-                <UnpaidCard key={s.id} s={s} name={names.get(s.tableId) ?? 'Стол'} currency={currency} />
+                <UnpaidCard key={s.id} s={s} name={names.get(s.tableId) ?? 'Стол'} orders={ordersOf(s.id)} currency={currency} />
+              ))}
+              {unbilled.map((o) => (
+                <UnbilledOrderCard key={o.id} o={o} name={names.get(o.tableId) ?? 'Стол'} timezone={timezone} currency={currency} />
               ))}
             </div>
           )}
@@ -163,7 +236,7 @@ export function ChecksSection() {
           <SectionCard title="Как посчитаны неоплаченные игры">
             <div className="check-list">
               {state.unpaid.map((s) => (
-                <UnpaidCard key={s.id} s={s} name={names.get(s.tableId) ?? 'Стол'} currency={currency} />
+                <UnpaidCard key={s.id} s={s} name={names.get(s.tableId) ?? 'Стол'} orders={ordersOf(s.id)} currency={currency} />
               ))}
             </div>
           </SectionCard>

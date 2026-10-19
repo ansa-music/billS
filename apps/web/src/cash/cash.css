@@ -213,6 +213,26 @@ textarea:focus-visible {
   flex: 1;
 }
 
+/* Bar orders left after their game (paid upfront, voided) */
+
+.unpaid-orders {
+  display: grid;
+  gap: 2px;
+}
+
+.unpaid-orders .hint {
+  margin-bottom: 4px;
+}
+
+.cash-panel .unpaid li.unpaid-all {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.cash-panel .unpaid li.unpaid-all .btn {
+  flex: 1;
+}
+
 /* Modal dialog */
 
 .modal {
@@ -367,7 +387,7 @@ html:has(.modal[open]) {
   display: grid;
 }
 
-.pay-items li {
+.pay-items > li {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -376,7 +396,7 @@ html:has(.modal[open]) {
   border-top: 1px solid var(--border);
 }
 
-.pay-items li:first-child {
+.pay-items > li:first-child {
   border-top: 0;
 }
 
@@ -392,6 +412,54 @@ html:has(.modal[open]) {
 
 .pay-items .money {
   font-weight: 600;
+}
+
+/* Bar lines under their game: «Пиво светлое · 2 × 600 ₸ … 1 200 ₸», no remove button. */
+.pay-items > li.pay-bar {
+  display: grid;
+  gap: 2px;
+  min-height: 0;
+  padding: 0 0 8px;
+  border-top: 0;
+}
+
+.pay-items > li.pay-bar:first-child {
+  padding-top: 6px;
+}
+
+.pay-bar-head {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.pay-bar-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 10px;
+  border-left: 2px solid var(--border);
+  display: grid;
+}
+
+.pay-bar-lines li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 3px 0;
+  font-size: 14px;
+}
+
+.pay-bar-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pay-items .pay-bar-title .money {
+  font-size: 13px;
+  font-weight: 400;
 }
 
 .icon-btn {
@@ -659,6 +727,32 @@ html:has(.modal[open]) {
   gap: 16px;
 }
 
+.report-split {
+  display: grid;
+  gap: 16px;
+}
+
+.report-split > * {
+  min-width: 0;
+}
+
+/* «Выручка: время / бар» beside the sales table when the dialog is wide enough. */
+@media (min-width: 760px) {
+  .report-split {
+    grid-template-columns: minmax(0, 1fr) minmax(170px, 200px);
+    align-items: start;
+  }
+}
+
+.report-revenue {
+  display: grid;
+  gap: 6px;
+}
+
+.report-revenue .hint {
+  font-size: 13px;
+}
+
 .report-title {
   font-weight: 650;
   margin-bottom: 6px;
@@ -702,6 +796,12 @@ html:has(.modal[open]) {
 .movement-reason {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* «Счета» section: the bar part of «Как посчитано» */
+
+.breakdown table.breakdown-bar {
+  margin-top: 12px;
 }
 
 /* Printing lives in print/print.css: receipt-printer forms in #print-root. */
