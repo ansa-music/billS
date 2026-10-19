@@ -13,6 +13,7 @@
 #   bills connect-cloud ... подключить этот HUB к облаку (в другом клубе сети)
 #   bills cloud-logs        логи облака
 #   bills tailscale|tunnel|duckdns ...  доступ к кабинету снаружи (tailscale.sh, cloudflare-tunnel.sh, duckdns.sh)
+#   bills ca init|show      HTTPS: сертификат клуба для планшетов (см. README)
 
 set -Eeuo pipefail
 SCRIPT_NAME="bills"
@@ -51,6 +52,8 @@ usage() {
   tailscale [...]   РЕКОМЕНДУЕТСЯ: частная сеть Tailscale (bills tailscale --help)
   tunnel [...]      Cloudflare Tunnel (bills tunnel --help)
   duckdns [...]     DuckDNS + Caddy с HTTPS, нужен «белый» IP (bills duckdns --help)
+  ca init [...]     HTTPS в сети клуба: корневой сертификат + сертификат HUB, порты 443/80, hub.local
+  ca show           показать сертификаты
 USAGE
 }
 
@@ -115,11 +118,15 @@ case "$cmd" in
       prev="$(release_path "$PREVIOUS_LINK")"
       [ -n "$prev" ] && echo "Предыдущий релиз: $(basename "$prev")"
     fi
-    echo "Адрес для планшетов: http://$(primary_ip):${PORT}"
+    if [ -n "${HUB_TLS_CERT:-}" ]; then
+      echo "Адрес для планшетов: https://$(primary_ip):${PORT} (или https://hub.local), сертификат: http://$(primary_ip):${HUB_HTTP_PORT:-80}/ca"
+    else
+      echo "Адрес для планшетов: http://$(primary_ip):${PORT}  (HTTPS: bills ca init)"
+    fi
     if health_wait 3; then
       echo "Health: $(health_summary)"
     else
-      echo "Health: HUB не отвечает на http://127.0.0.1:${PORT}/api/health"
+      echo "Health: HUB не отвечает на $(hub_url)/api/health"
     fi
     if [ -n "${CLOUD_URL:-}" ]; then
       echo "HUB подключён к облаку: $CLOUD_URL (HUB_ID=${HUB_ID:-?})"
@@ -236,9 +243,59 @@ case "$cmd" in
     fi
     connect_hub "$url" "$hub_id" "$key"
     ;;
+  ca)
+    [ -n "$current_dir" ] || die "нет установленного релиза ($CURRENT_LINK)"
+    sub="${1:-}"; shift || true
+    tls_dir="$STATE_DIR/tls"
+    case "$sub" in
+      show)
+        hub_cli "$current_dir" ca show "--dir=$tls_dir" "$@"
+        ;;
+      init)
+        https_port=443; http_port=80; cli_args=()
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --https-port) https_port="$2"; shift 2 ;;
+            --http-port)  http_port="$2"; shift 2 ;;
+            --ip|--name|--label) cli_args+=("$1=$2"); shift 2 ;;
+            *) cli_args+=("$1"); shift ;;
+          esac
+        done
+        # Имя в сети клуба: hub.local (HUB объявляет его сам по mDNS).
+        set_env_var HUB_MDNS_NAME "${HUB_MDNS_NAME:-hub}"
+        load_env
+        lines="$(hub_cli "$current_dir" ca init "--dir=$tls_dir" "${cli_args[@]}")" || die "ca init не удался"
+        while IFS= read -r line; do
+          case "$line" in HUB_TLS_*=*) set_env_var "${line%%=*}" "${line#*=}" ;; esac
+        done <<< "$lines"
+        set_env_var HUB_PORT "$https_port"
+        set_env_var HUB_HTTP_PORT "$http_port"
+        if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
+          ufw allow "$https_port/tcp" comment 'TS HUB HTTPS (только LAN)' >/dev/null
+          ufw allow "$http_port/tcp" comment 'TS HUB: сертификат и переход на HTTPS' >/dev/null
+          ufw allow 5353/udp comment 'TS HUB: имя hub.local (mDNS)' >/dev/null
+        fi
+        # Службы, поставленные до HTTPS, не умеют занимать порты ниже 1024 — добавляем это право одним файлом.
+        dropin="/etc/systemd/system/${HUB_SERVICE}.service.d"
+        mkdir -p "$dropin"
+        printf '[Service]\nAmbientCapabilities=CAP_NET_BIND_SERVICE\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE\n' > "$dropin/https-ports.conf"
+        systemctl daemon-reload
+        load_env
+        PORT="$(hub_port)"
+        systemctl restart "$HUB_SERVICE"
+        if health_wait; then ok "HUB работает по HTTPS: $(health_summary)"; else die "HUB не ответил на $(hub_url)/api/health — journalctl -u $HUB_SERVICE -n 100"; fi
+        ip="$(primary_ip)"
+        echo "  Приложение:            https://hub.local$( [ "$https_port" = 443 ] || printf ':%s' "$https_port")/  или  https://${ip}$( [ "$https_port" = 443 ] || printf ':%s' "$https_port")/"
+        echo "  Сертификат для планшетов (QR-код — на странице «Оборудование»):"
+        echo "                         http://${ip}$( [ "$http_port" = 80 ] || printf ':%s' "$http_port")/ca"
+        echo "  Сменился IP сервера — выполните bills ca init ещё раз: корневой сертификат останется прежним."
+        ;;
+      *) die "bills ca init [--https-port 443] [--http-port 80] [--ip a,b] [--force] | bills ca show" ;;
+    esac
+    ;;
   health)
-    body="$(curl -fsS --max-time 5 "http://127.0.0.1:${PORT}/api/health")" \
-      || die "HUB не отвечает на http://127.0.0.1:${PORT}/api/health (systemctl status $HUB_SERVICE)"
+    body="$(hub_curl -fsS --max-time 5 "$(hub_url)/api/health")" \
+      || die "HUB не отвечает на $(hub_url)/api/health (systemctl status $HUB_SERVICE)"
     printf '%s' "$body" | node -e '
       let raw = "";
       process.stdin.on("data", (c) => (raw += c));

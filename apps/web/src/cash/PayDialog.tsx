@@ -20,6 +20,7 @@ import { currencySymbol, METHOD_LABEL, toMoneyInput } from './format.ts';
 import { groupLines } from './lines.ts';
 import { FormError, Modal } from './Modal.tsx';
 import { printReceipt } from './print/Receipt.tsx';
+import { useHub } from '../useHub.tsx';
 
 type Amounts = Record<PaymentMethod, string>;
 const NO_AMOUNTS: Amounts = { CASH: '', CARD: '', QR: '' };
@@ -63,6 +64,8 @@ interface LastPayment {
 
 export function PayDialog({ desk, initial, onClose }: { desk: Desk; initial: CheckView; onClose: () => void }) {
   const { state } = desk;
+  // Discounts are for managers and owners; the HUB answers 403 to anyone else.
+  const { can } = useHub();
   const { currency, timezone } = state.club;
   const money = (a: Minor) => formatMoney(a, currency);
 
@@ -294,7 +297,7 @@ export function PayDialog({ desk, initial, onClose }: { desk: Desk; initial: Che
         </div>
       )}
 
-      {open && <DiscountForm check={check} currency={currency} pending={action.pending} onApply={setDiscount} />}
+      {open && can('discount.apply') && <DiscountForm check={check} currency={currency} pending={action.pending} onApply={setDiscount} />}
 
       <dl className="kv">
         <div>

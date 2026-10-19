@@ -25,6 +25,10 @@ KillSignal=SIGTERM
 StateDirectory=bills
 StateDirectoryMode=0750
 
+# Порты 443/80 для HTTPS (bills ca init) без root: только право занять порт ниже 1024.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
 # Ограничения безопасности
 NoNewPrivileges=true
 ProtectSystem=full

@@ -462,7 +462,8 @@ html:has(.modal[open]) {
   font-weight: 400;
 }
 
-.icon-btn {
+/* Scoped: a bare .icon-btn here restyled the top bar (fixed width cut off the staff name). */
+.pay-items .icon-btn {
   width: 40px;
   height: 40px;
   flex: none;
@@ -475,12 +476,12 @@ html:has(.modal[open]) {
   cursor: pointer;
 }
 
-.icon-btn:hover:not(:disabled) {
+.pay-items .icon-btn:hover:not(:disabled) {
   color: var(--danger);
   border-color: color-mix(in oklab, var(--danger) 60%, transparent);
 }
 
-.icon-btn:disabled,
+.pay-items .icon-btn:disabled,
 .chip:disabled {
   opacity: 0.5;
   cursor: not-allowed;

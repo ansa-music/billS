@@ -90,7 +90,28 @@ bills connect-cloud --url <URL> --hub-id <id> --key <ключ>   подключ�
 bills tailscale [...]   доступ через Tailscale (рекомендуется)
 bills tunnel <режим>    Cloudflare Tunnel (quick | token <TOKEN> | status | stop)
 bills duckdns [...]     DuckDNS + Caddy (HTTPS), нужен «белый» IP
+bills ca init [...]     HTTPS в сети клуба: сертификат клуба, порты 443/80, имя hub.local
+bills ca show           какие сертификаты стоят и до какого числа
 ```
+
+### HTTPS в сети клуба (`bills ca init`)
+
+Chrome на Android и Windows ставит приложение TS и включает офлайн-кэш только на защищённом адресе. Одна команда на сервере:
+
+```bash
+sudo bills ca init
+```
+
+Она создаёт **корневой сертификат клуба** (один раз, 10 лет, `/var/lib/bills/tls/ca.crt`, ключ `ca.key` читает только `bills`) и **сертификат HUB** для `hub.local`, `localhost`, всех IP сервера и `127.0.0.1` (800 дней — больше iPad не примет). Дальше она прописывает в `hub.env` переменные `HUB_TLS_CERT`, `HUB_TLS_KEY`, `HUB_TLS_CA`, `HUB_PORT=443`, `HUB_HTTP_PORT=80` и `HUB_MDNS_NAME=hub`, даёт службе право занять порты ниже 1024 (`CAP_NET_BIND_SERVICE`, файл `/etc/systemd/system/bills-hub.service.d/https-ports.conf`), открывает в ufw порты 443/tcp, 80/tcp и 5353/udp и перезапускает HUB. Порты можно сменить: `--https-port 8443 --http-port 8080`; адреса — `--ip 192.168.1.10`.
+
+После этого:
+- приложение открывается по адресу `https://hub.local/` или `https://<ip>/`;
+- `http://<ip>/ca` — страница с сертификатом и инструкцией для Android, iPad и Windows; QR-код на неё есть на странице «Оборудование»;
+- всё остальное по `http://` переводится на `https://`.
+
+Сертификат клуба ставится на каждый планшет и ПК **один раз**. Сменился IP сервера или сертификат HUB подходит к концу (страница «Оборудование» покажет «продлить»)? Снова выполните `sudo bills ca init`: корневой сертификат останется прежним, перевыпустится только сертификат HUB, и планшеты ничего не заметят. Папку `/var/lib/bills/tls` стоит хранить в бэкапе: без `ca.key` новый сертификат HUB придётся ставить на все устройства заново.
+
+Имя `hub.local` HUB объявляет в сети сам (mDNS, `HUB_MDNS_NAME`). Если на сервере работает Avahi, они уживаются; если какое-то устройство `.local` не находит, используйте IP-адрес.
 
 Команда сама поднимается до root через `sudo`.
 

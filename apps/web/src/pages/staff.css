@@ -104,8 +104,8 @@
   min-height: 44px;
 }
 
-/* Desktop: one row per employee. */
-@media (min-width: 820px) {
+/* One line per person only when the row fits (four buttons + tags + tables); tablets get cards. */
+@media (min-width: 1280px) {
   .staff-list {
     gap: 0;
     background: var(--surface);

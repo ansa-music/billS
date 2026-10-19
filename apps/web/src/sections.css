@@ -925,3 +925,83 @@ a.stat-tile:hover {
     grid-template-columns: 80px minmax(0, 1fr) auto;
   }
 }
+
+/* Сертификат клуба (HTTPS) на странице «Оборудование» */
+.tls-body {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 24px;
+  align-items: start;
+}
+.tls-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 220px;
+}
+.tls-qr .qr-code {
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--border, rgba(0, 0, 0, 0.12));
+}
+.tls-link {
+  font-size: 0.85rem;
+  word-break: break-all;
+  text-align: center;
+}
+.tls-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.tls-guide p,
+.tls-off p {
+  margin: 0;
+}
+.tls-steps {
+  margin: 0;
+  padding-left: 1.3em;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tls-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 0.9rem;
+}
+.tls-facts dt {
+  opacity: 0.7;
+}
+.tls-facts dd {
+  margin: 0;
+  min-width: 0;
+  word-break: break-all;
+}
+.tls-off {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tls-cmd {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--surface-2, rgba(127, 127, 127, 0.12));
+  font-size: 0.95rem;
+  overflow-x: auto;
+}
+@media (max-width: 720px) {
+  .tls-body {
+    grid-template-columns: 1fr;
+  }
+  .tls-qr {
+    max-width: none;
+  }
+}
+.tls-qr .btn {
+  text-decoration: none;
+}

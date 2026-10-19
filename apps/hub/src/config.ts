@@ -1,3 +1,4 @@
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export type LampDriverKind = 'simulator' | 'esp32-http' | 'modbus-tcp';
@@ -48,6 +49,17 @@ export interface HubConfig {
   hubId: string;
   /** How often the outbox is pushed to the cloud (also the heartbeat period). */
   cloudSyncIntervalMs: number;
+  /** HTTPS (`bills ca init`): server certificate and key (PEM); both unset = plain HTTP. */
+  tlsCert: string | undefined;
+  tlsKey: string | undefined;
+  /** Root certificate handed out on /ca.crt; default `ca.crt` next to HUB_TLS_CERT. */
+  tlsCa: string | undefined;
+  /** With HTTPS: plain-HTTP port that redirects to HTTPS and serves /ca; null = no such listener. */
+  httpPort: number | null;
+  /** mDNS name announced in the club network (`hub` → hub.local); null = off. */
+  mdnsName: string | null;
+  /** Folder for `ca init`; default `tls/` next to the database. */
+  tlsDir: string;
 }
 
 function int(value: string | undefined, fallback: number, name: string): number {
@@ -70,10 +82,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
   const coilBase = int(env.HUB_MODBUS_COIL_BASE, 1, 'HUB_MODBUS_COIL_BASE');
   if (coilBase !== 0 && coilBase !== 1) throw new Error('HUB_MODBUS_COIL_BASE must be 0 or 1');
   const cloudUrl = env.CLOUD_URL?.trim();
+  const dbPath = env.HUB_DB_PATH ?? fileURLToPath(new URL('../data/hub.db', import.meta.url));
   return {
     host: env.HUB_HOST ?? '127.0.0.1',
     port: int(env.HUB_PORT, 4310, 'HUB_PORT'),
-    dbPath: env.HUB_DB_PATH ?? fileURLToPath(new URL('../data/hub.db', import.meta.url)),
+    dbPath,
     demoTimezone: env.HUB_DEMO_TZ ?? 'Asia/Almaty',
     simulatorLatencyMs: int(env.HUB_SIM_LATENCY_MS, 300, 'HUB_SIM_LATENCY_MS'),
     webDistPath: env.HUB_WEB_DIST ?? fileURLToPath(new URL('../../web/dist', import.meta.url)),
@@ -102,5 +115,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
     cloudApiKey: env.CLOUD_API_KEY ?? '',
     hubId: env.HUB_ID ?? '',
     cloudSyncIntervalMs: int(env.CLOUD_SYNC_INTERVAL_MS, 10_000, 'CLOUD_SYNC_INTERVAL_MS'),
+    tlsCert: env.HUB_TLS_CERT || undefined,
+    tlsKey: env.HUB_TLS_KEY || undefined,
+    tlsCa: env.HUB_TLS_CA || undefined,
+    httpPort: env.HUB_HTTP_PORT ? int(env.HUB_HTTP_PORT, 0, 'HUB_HTTP_PORT') : null,
+    mdnsName: env.HUB_MDNS_NAME?.trim() || null,
+    tlsDir: env.HUB_TLS_DIR || join(dirname(dbPath), 'tls'),
   };
 }

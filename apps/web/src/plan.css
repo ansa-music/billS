@@ -653,6 +653,8 @@
   overflow: auto;
   padding: 16px 20px 20px;
   display: grid;
+  /* minmax(0, …): a wide row (tariff buttons) must not push the body past the drawer and add a sideways scroll. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   align-content: start;
   overscroll-behavior: contain;
@@ -661,6 +663,13 @@
 .drawer-section {
   display: grid;
   gap: 12px;
+}
+
+/* Nested grids shrink with the drawer instead of sizing to their longest line. */
+.drawer-section,
+.tariff-picker,
+.tariff-option {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .drawer-section-head {

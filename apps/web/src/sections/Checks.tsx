@@ -7,7 +7,7 @@ import { gameDue, orderSummary, owedTotal, unbilledOrders } from '../cash/lines.
 import { ShiftPanel } from '../cash/ShiftPanel.tsx';
 import { UnpaidPanel } from '../cash/UnpaidPanel.tsx';
 import { EmptyState, SectionCard, StatTile, StatusBadge } from '../components.tsx';
-import { DAY_MS, formatClock, formatSpan, workdayStart } from '../format.ts';
+import { DAY_MS, formatClock, formatSpan, plural, workdayStart } from '../format.ts';
 import { Icon } from '../icons.tsx';
 import { useHub, useLive } from '../useHub.tsx';
 
@@ -162,7 +162,7 @@ export function ChecksSection() {
   const ordersOf = (sessionId: string) => state.orders.filter((o) => o.sessionId === sessionId && o.status === 'OPEN');
   const owing = state.unpaid.length + state.checks.length + unbilled.length > 0;
   const owingDetail = [
-    state.unpaid.length ? `${state.unpaid.length} ${state.unpaid.length === 1 ? 'игра' : 'игр'}` : '',
+    state.unpaid.length ? `${state.unpaid.length} ${plural(state.unpaid.length, ['игра', 'игры', 'игр'])}` : '',
     state.checks.length ? `счетов: ${state.checks.length}` : '',
     unbilled.length ? `заказов без счёта: ${unbilled.length}` : '',
   ]
@@ -187,7 +187,7 @@ export function ChecksSection() {
           detail={owing ? owingDetail : 'всё оплачено'}
           tone={owing ? 'info' : undefined}
         />
-        <StatTile label="Начислено за день" value={formatMoney(charged, currency)} detail={`время · ${played.length} игр с 06:00`} />
+        <StatTile label="Начислено за день" value={formatMoney(charged, currency)} detail={`время · ${played.length} ${plural(played.length, ['игра', 'игры', 'игр'])} с 06:00`} />
         <StatTile
           label="Оплачено за смену"
           value={report ? formatMoney(report.net.total, currency) : '—'}

@@ -277,7 +277,7 @@ export function validateLayout(layout: unknown, tableIds: ReadonlySet<string>): 
 
 /* Read models for the journal and equipment screens. */
 
-export const JOURNAL_CATEGORIES = ['games', 'lamps', 'alerts', 'bar', 'club', 'system'] as const;
+export const JOURNAL_CATEGORIES = ['games', 'money', 'lamps', 'alerts', 'bar', 'club', 'system'] as const;
 export type JournalCategory = (typeof JOURNAL_CATEGORIES)[number];
 
 export interface JournalEntry {
