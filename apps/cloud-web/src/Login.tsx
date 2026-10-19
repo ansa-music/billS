@@ -65,6 +65,9 @@ export function Login({ onLogin }: { onLogin: (owner: OwnerView) => void }) {
           {busy ? 'Входим…' : 'Войти'}
         </button>
       </form>
+      <a className="link login-apps" href="#/apps">
+        Скачать приложение для телефона и кассы
+      </a>
     </main>
   );
 }

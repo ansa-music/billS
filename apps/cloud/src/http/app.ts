@@ -21,6 +21,7 @@ import type { Clock } from '../clock.ts';
 import { systemClock } from '../clock.ts';
 import type { SqlDriver } from '../db/driver.ts';
 import { CloudError } from '../errors.ts';
+import { registerStatic } from './static.ts';
 import { isValidDay, localDay } from '../localtime.ts';
 import { clubDetails, clubOfCompany, clubSessions, overview } from '../reports.ts';
 import type { ClubRow } from '../settings.ts';
@@ -33,6 +34,8 @@ export interface AppDeps {
   logger?: boolean;
   /** Mark the owner cookie `Secure`; only behind HTTPS. */
   secureCookies?: boolean;
+  /** Built owner cabinet (apps/cloud-web/dist) to serve on `/`; nothing is served when missing. */
+  staticDir?: string;
 }
 
 const MAX_BATCH = 1000;
@@ -119,9 +122,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return reply.status(500).send({ error: { code: 'INTERNAL', message: 'Внутренняя ошибка облака' } });
   });
 
-  app.setNotFoundHandler((_req, reply) =>
-    reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'Такого адреса нет' } }),
-  );
+  // Unknown URLs: JSON 404, or index.html for the cabinet's client-side routes (see static.ts).
+  registerStatic(app, deps.staticDir);
 
   // --- auth helpers ---------------------------------------------------------
 

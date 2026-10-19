@@ -9,6 +9,9 @@
 # Схема: /opt/bills/repo (git) → /opt/bills/releases/<дата>-<sha> (npm ci + сборка web)
 #        → симлинк /opt/bills/current (атомарно) → systemctl restart bills-hub → /api/health.
 # При неуспехе health симлинк возвращается на предыдущий релиз (ОТКАТ).
+# Если на мини-ПК включено облако (/etc/bills/cloud.env): перед обновлением — ещё и бэкап базы облака,
+# в релизе дополнительно собирается кабинет (npm run build -w @bills/cloud-web), после переключения
+# перезапускается и bills-cloud; health облака тоже обязателен — иначе общий ОТКАТ (current/previous).
 # Журнал обновлений: /var/lib/bills/updates.log
 
 set -Eeuo pipefail
@@ -51,18 +54,53 @@ exec 9>"$LOCK_FILE"
 flock -n 9 || die "обновление уже выполняется (блокировка $LOCK_FILE)"
 
 PORT="$(hub_port)"
+CLOUD_ON=0
+if cloud_enabled; then
+  CLOUD_ON=1
+  CLOUD_PORT="$(cloud_port)"
+fi
 
 # ---------- Общие шаги ----------
-# Перезапуск HUB и ожидание health. Возвращает 0/1.
+# Перезапуск HUB (и облака, если оно включено) и ожидание health. Возвращает 0/1.
 restart_and_check() {
+  local rc=0
   log "Перезапуск $HUB_SERVICE ..."
   systemctl restart "$HUB_SERVICE"
+  if [ "$CLOUD_ON" -eq 1 ]; then
+    log "Перезапуск $CLOUD_SERVICE ..."
+    systemctl restart "$CLOUD_SERVICE" || rc=1
+  fi
   if health_wait "$HEALTH_TIMEOUT"; then
     ok "HUB отвечает на http://127.0.0.1:${PORT}/api/health: $(health_summary)"
-    return 0
+  else
+    warn "HUB не ответил ok на /api/health за ${HEALTH_TIMEOUT} с"
+    rc=1
   fi
-  warn "HUB не ответил ok на /api/health за ${HEALTH_TIMEOUT} с"
-  return 1
+  if [ "$CLOUD_ON" -eq 1 ]; then
+    if cloud_health_wait "$HEALTH_TIMEOUT"; then
+      ok "Облако отвечает на http://127.0.0.1:${CLOUD_PORT}/api/health: $(health_summary "$CLOUD_HEALTH_BODY")"
+    else
+      warn "облако не ответило ok на /api/health за ${HEALTH_TIMEOUT} с"
+      rc=1
+    fi
+  fi
+  return "$rc"
+}
+
+# Последние строки журналов сервисов (при неудаче).
+show_journals() {
+  journalctl -u "$HUB_SERVICE" -n 30 --no-pager 2>/dev/null || true
+  if [ "$CLOUD_ON" -eq 1 ]; then
+    echo "--- $CLOUD_SERVICE ---"
+    journalctl -u "$CLOUD_SERVICE" -n 30 --no-pager 2>/dev/null || true
+  fi
+}
+
+# Сборка кабинета владельца в папке релиза. Код 0/1.
+build_cloud_web() {
+  local dir="$1"
+  log "Сборка кабинета владельца (npm run build -w @bills/cloud-web) ..."
+  as_bills_in "$dir" npm run build -w @bills/cloud-web
 }
 
 # Удаляет старые релизы, оставляя KEEP_RELEASES (current, previous и самые свежие из остальных).
@@ -135,6 +173,15 @@ log "Целевой коммит: $target_short — $target_subject"
 
 if [ -n "$current_dir" ] && [ "$current_sha" = "$target_sha" ]; then
   ok "HUB уже на коммите $target_short — обновлять нечего."
+  # Облако включили на уже работающем HUB (install.sh --with-cloud): кабинета в релизе ещё нет — дособираем.
+  if [ "$CLOUD_ON" -eq 1 ] && [ ! -f "$current_dir/apps/cloud-web/dist/index.html" ]; then
+    [ -f "$current_dir/apps/cloud/src/main.ts" ] || die "в текущем релизе нет облака (apps/cloud) — обновите TS до версии с облаком"
+    build_cloud_web "$current_dir" || die "сборка кабинета не удалась — HUB при этом работает как раньше"
+    if cloud_is_active; then
+      systemctl restart "$CLOUD_SERVICE"
+    fi
+    ok "Кабинет владельца собран в текущем релизе."
+  fi
   exit 0
 fi
 
@@ -175,6 +222,23 @@ else
   log "Текущего релиза нет (первая установка) — бэкап пропущен."
 fi
 
+if [ "$CLOUD_ON" -eq 1 ]; then
+  if [ -n "$current_dir" ] && [ -f "$current_dir/apps/cloud/src/cli.ts" ] && [ -f "$(env_value "$CLOUD_ENV_FILE" CLOUD_DB_PATH "$STATE_DIR/cloud.db")" ]; then
+    log "Бэкап базы облака перед обновлением ..."
+    if cloud_backup="$(cloud_cli "$current_dir" backup "$(backup_dir)")"; then
+      ok "Бэкап облака: $(printf '%s\n' "$cloud_backup" | awk 'NF {line=$0} END {print line}')"
+    else
+      if [ "$FORCE" -eq 1 ]; then
+        warn "бэкап облака не удался, но указан --force — продолжаю без него"
+      else
+        die "не удалось сделать бэкап базы облака — обновление остановлено (чтобы обновить без бэкапа: --force)"
+      fi
+    fi
+  else
+    log "Базы облака ещё нет (или в текущем релизе нет облака) — бэкап облака пропущен."
+  fi
+fi
+
 # ---------- Сборка нового релиза ----------
 mkdir -p "$RELEASES_DIR"
 chown "$BILLS_USER:$BILLS_USER" "$RELEASES_DIR"
@@ -211,6 +275,14 @@ if ! as_bills_in "$release_dir" npm run build -w @bills/web; then
   die "сборка web не удалась — релиз $release_name удалён, текущий релиз не тронут"
 fi
 
+if [ "$CLOUD_ON" -eq 1 ]; then
+  if [ ! -f "$release_dir/apps/cloud/src/main.ts" ] || ! build_cloud_web "$release_dir"; then
+    cleanup_failed_release
+    log_update "update: ${current_short:-нет} → $target_short — ОШИБКА сборки кабинета (cloud-web)"
+    die "сборка кабинета владельца (cloud-web) не удалась или в версии нет облака — релиз $release_name удалён, текущий релиз не тронут"
+  fi
+fi
+
 [ -f "$release_dir/apps/hub/src/main.ts" ] || { cleanup_failed_release; die "в релизе нет apps/hub/src/main.ts"; }
 # Метка релиза (для людей и для HUB_GIT_SHA при желании).
 printf 'sha=%s
@@ -234,7 +306,7 @@ fi
 
 # ---------- Health не прошёл — откат ----------
 warn "Новый релиз не поднялся. Последние строки журнала:"
-journalctl -u "$HUB_SERVICE" -n 30 --no-pager 2>/dev/null || true
+show_journals
 
 if [ -z "$current_dir" ]; then
   log_update "update: нет → $target_short — HUB не ответил на health (откатываться некуда)"

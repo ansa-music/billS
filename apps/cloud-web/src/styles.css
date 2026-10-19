@@ -1272,3 +1272,169 @@ a:focus-visible {
     min-height: 44px;
   }
 }
+
+/* Login: the link to the download page under the form. */
+
+.login-page {
+  align-content: center;
+  gap: 8px;
+}
+
+.login-apps {
+  justify-self: center;
+}
+
+.topbar-link {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.topbar-link:hover,
+.topbar-link[aria-current='page'] {
+  color: var(--text);
+}
+
+/* «Скачать приложение» (#/apps). The owner opens it on a phone, so unlike the
+   rest of the cabinet it works at phone width. */
+
+html:has(.apps-page) body {
+  min-width: 0;
+}
+
+.apps-page {
+  width: min(880px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 16px;
+}
+
+.apps-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.apps-head h2 {
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin-bottom: 6px;
+}
+
+.apps-release {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 14px;
+}
+
+.apps-note {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.apps-note .link {
+  padding-left: 0;
+}
+
+.apps-sections {
+  display: grid;
+  gap: 16px;
+}
+
+.apps-section[data-current] {
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+}
+
+.apps-section .panel-head .tag {
+  background: color-mix(in oklab, var(--accent) 18%, var(--surface));
+  color: var(--accent);
+}
+
+.apps-group {
+  display: grid;
+  gap: 8px;
+}
+
+.apps-group h3 {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.apps-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.apps-download {
+  display: inline-grid;
+  align-content: center;
+  justify-items: start;
+  gap: 1px;
+  padding: 6px 18px;
+  text-decoration: none;
+  max-width: 100%;
+}
+
+.apps-download > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.apps-size {
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.apps-steps {
+  margin: 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 6px;
+  font-size: 15px;
+}
+
+.apps-steps a {
+  word-break: break-all;
+}
+
+.apps-foot {
+  text-align: center;
+}
+
+.apps-foot .btn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+@media (max-width: 600px) {
+  .app:has(.apps-page) {
+    padding: 12px 16px 32px;
+  }
+
+  .apps-head .brand-mark {
+    display: none;
+  }
+
+  .apps-head h2 {
+    font-size: 22px;
+  }
+
+  .apps-download {
+    width: 100%;
+  }
+}

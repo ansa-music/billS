@@ -437,6 +437,15 @@
   flex: none;
 }
 
+.actor-form .actor-apps {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-decoration: none;
+  color: var(--text);
+}
+
 .content {
   padding: 20px 24px 40px;
   min-width: 0;

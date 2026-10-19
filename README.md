@@ -178,12 +178,28 @@ npm run local
 
 Служебные команды HUB (без зависимости от `sqlite3`): `node apps/hub/src/cli.ts backup <папка>` — консистентная копия базы при работающем HUB, `restore <файл> --yes`, `check` — целостность, `version`.
 
+## Бесплатный запуск
+
+TS можно запустить для всей сети клубов **без платежей**: без аренды VPS, домена и магазинов приложений. Пошагово «для чайника» — [docs/FREE_SETUP_RU.md](docs/FREE_SETUP_RU.md).
+
+- **Облако на мини-ПК главного клуба.** `install.sh --with-cloud` ставит рядом с HUB службу `bills-cloud` (облако + кабинет владельца на порту 4320, база SQLite `/var/lib/bills/cloud.db`, без PostgreSQL); ночной таймер бэкапов копирует и её базу. Данные лежат в клубе, то есть в Казахстане, — это заодно выполняет требование закона РК о хранении персональных данных.
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/ansa-music/billS/main/deploy/linux/install.sh | sudo bash -s -- --with-cloud
+  sudo bills cloud init --company "Моя сеть" --email owner@example.kz      # владелец, печатает пароль
+  sudo bills cloud add-club --name "Клуб «Центр»" --connect                # клуб + подключение этого HUB
+  ```
+- **Доступ снаружи.** Рекомендуемый — Tailscale (`sudo bills tailscale`, по желанию `--https`): бесплатная частная сеть, кабинет видят только устройства владельца и HUB других клубов, в интернет ничего не открыто. Альтернатива — Cloudflare Tunnel (`sudo bills tunnel quick` — временный адрес `*.trycloudflare.com` для показа; `sudo bills tunnel token <ТОКЕН>` — постоянный адрес на своём домене). Запасной — бесплатное имя DuckDNS + HTTPS через Caddy (`sudo bills duckdns --domain … --token … --https`, нужен «белый» IP).
+- **Другие клубы** получают ключ `sudo bills cloud add-club --name "…"` на главном мини-ПК и подключаются `sudo bills connect-cloud --url http://<имя-в-tailscale>:4320 --hub-id … --key …` (Windows — `deploy/windows/connect-cloud.ps1`).
+- **Приложения без магазинов.** Страница «Скачать приложение» в кабинете (`#/apps`) и на экранах клуба раздаёт файлы из GitHub Releases: Android — APK напрямую, ПК — установщик, iPhone — кабинет через Safari «На экран „Домой“» (PWA).
+- **Платное — только при росте:** Google Play $25 один раз, Apple $99 в год, VPS в Казахстане — когда сеть вырастет и кабинет должен работать независимо от главного клуба.
+
 ## Установка в клубе
 
 Эксплуатация — этап 8, всё лежит в `deploy/` и `docs/`:
 
 | Что | Где |
 |---|---|
+| Бесплатный режим: облако на мини-ПК клуба, Tailscale / Cloudflare Tunnel / DuckDNS, приложения без магазинов | [docs/FREE_SETUP_RU.md](docs/FREE_SETUP_RU.md) |
 | Linux (Ubuntu Server LTS, основной вариант): установка одной командой, служба systemd, ночные бэкапы, обновление с автооткатом, восстановление | [deploy/linux/README.md](deploy/linux/README.md) |
 | Windows (запасной вариант): Планировщик вместо службы, бэкапы, обновление, вариант с NSSM | [deploy/windows/README.md](deploy/windows/README.md) |
 | Удалённая поддержка без открытия HUB в интернет: Tailscale или WireGuard, что открыть, регламент | [deploy/linux/remote-support.md](deploy/linux/remote-support.md) |

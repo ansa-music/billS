@@ -91,6 +91,8 @@ export const ROUTES: RouteDef[] = [
   { path: '/settings', title: 'Настройки клуба', short: 'Клуб', icon: 'settings', action: 'settings.view' },
   { path: '/owner', title: 'Кабинет владельца', short: 'Кабинет', icon: 'owner', action: 'reports.view' },
   { path: '/platform', title: 'Платформа', icon: 'platform', action: 'platform.view' },
+  // Installers for the owner phone and the cash-desk computer; linked from the staff menu in the top bar.
+  { path: '/apps', title: 'Приложения', icon: 'download', action: null, hidden: true },
   { path: '/login', title: 'Вход', icon: 'user', action: null, hidden: true },
 ];
 
