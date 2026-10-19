@@ -2,7 +2,7 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-  Обновление billS HUB до указанной версии с автоматическим откатом при неудаче.
+  Обновление TS HUB до указанной версии с автоматическим откатом при неудаче.
 
 .DESCRIPTION
   update.ps1 [-Ref main] [-Root C:\bills] [-SkipBackup]

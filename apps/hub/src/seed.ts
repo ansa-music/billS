@@ -33,7 +33,7 @@ const DEMO_STAFF: Array<[name: string, role: Role]> = [
   ['Марат Управляющий', 'manager'],
   ['Айгерим Кассир', 'cashier'],
   ['Данияр Официант', 'waiter'],
-  ['Платформа billS', 'superadmin'],
+  ['Платформа TS', 'superadmin'],
 ];
 
 const DEMO_MENU: Array<[category: string, products: Array<[name: string, priceMinor: number]>]> = [

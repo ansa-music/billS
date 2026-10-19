@@ -484,7 +484,7 @@ test('bootstrap keys: owner and tech when they have none, everyone on a fresh de
   assert.match(ownerOnly[0]!.key, /^OWNER-/);
 
   // Owner and tech both without keys: both get one, nobody else.
-  for (const s of [OWNER, 'Платформа billS']) for (const k of auth.listKeys(staffByName(hub, s).id)) auth.revokeKey(k.id, SYSTEM_ACTOR);
+  for (const s of [OWNER, 'Платформа TS']) for (const k of auth.listKeys(staffByName(hub, s).id)) auth.revokeKey(k.id, SYSTEM_ACTOR);
   const restored = auth.bootstrapKeys(false);
   assert.deepEqual(restored.map((k) => k.role).sort(), ['owner', 'superadmin']);
   assert.match(restored.find((k) => k.role === 'superadmin')!.key, /^TECH-/);

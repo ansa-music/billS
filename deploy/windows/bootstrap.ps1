@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  Установка billS HUB одной строкой (скачивает архив репозитория и запускает install.ps1).
+  Установка TS HUB одной строкой (скачивает архив репозитория и запускает install.ps1).
 
 .DESCRIPTION
   В PowerShell ОТ АДМИНИСТРАТОРА:

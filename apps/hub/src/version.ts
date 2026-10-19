@@ -43,5 +43,5 @@ function readGitSha(env: NodeJS.ProcessEnv): string | null {
 }
 
 export function versionString(info: VersionInfo = versionInfo()): string {
-  return `billS HUB ${info.version}${info.gitSha ? ` (git ${info.gitSha})` : ''}`;
+  return `TS HUB ${info.version}${info.gitSha ? ` (git ${info.gitSha})` : ''}`;
 }

@@ -11,6 +11,7 @@ import { useFullscreen } from './kiosk.ts';
 import { hrefFor } from './router.tsx';
 import type { RouteDef } from './router.tsx';
 import type { ThemePreference } from './theme.ts';
+import { BrandMark } from './BrandMark.tsx';
 
 /** Badge counts by route path (unpaid checks, lamp problems …). */
 export type NavBadges = Record<string, { count: number; tone: 'info' | 'danger' }>;
@@ -76,12 +77,10 @@ export function Sidebar({
         {logoUrl ? (
           <img className="sidebar-logo" src={logoUrl} alt="" />
         ) : (
-          <span className="ball" aria-hidden="true">
-            8
-          </span>
+          <BrandMark />
         )}
         <div className="sidebar-brand-text">
-          <strong>Billiard Control</strong>
+          <strong>TS</strong>
           <span>{title}</span>
         </div>
       </div>
@@ -180,9 +179,7 @@ export function Topbar(props: {
   return (
     <header className="topbar">
       <div className="topbar-title">
-        <span className="ball topbar-ball" aria-hidden="true">
-          8
-        </span>
+        <BrandMark className="topbar-mark" />
         <div>
           <h1>{props.title}</h1>
           <p className="topbar-club">{state.club.name}</p>

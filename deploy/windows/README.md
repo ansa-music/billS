@@ -1,4 +1,4 @@
-# billS HUB на Windows (запасной вариант ОС)
+# TS HUB на Windows (запасной вариант ОС)
 
 Основная платформа HUB — Linux (см. `deploy/linux/`). Этот набор скриптов — для случая, когда в клубе
 уже стоит ПК с Windows 10/11 и ставить Linux некому. HUB работает как задача Планировщика Windows
@@ -21,6 +21,8 @@
 | Планировщик: задача **billS HUB** | триггер «При запуске системы», от `NT AUTHORITY\SYSTEM`, без лимита времени, перезапуск при сбое каждую минуту (999 раз), одна копия, не останавливается на батарее |
 | Планировщик: задача **billS Backup** | ежедневно в 03:30 → `bin\backup.ps1` |
 | Брандмауэр: правило **billS HUB (LAN)** | входящий TCP 4310 только для профилей «Частная» и «Доменная» сеть |
+
+Имена задач, службы и правила брандмауэра (`billS HUB`, `billS Backup`, `billS-HUB`) — технические идентификаторы: они сохранены, чтобы обновление и удаление находили уже установленные копии.
 
 Папку `C:\bills` и порт можно поменять параметрами `-Root` и `-Port` при установке.
 
@@ -235,7 +237,7 @@ Disable-ScheduledTask -TaskName 'billS HUB'
 nssm install billS-HUB "C:\Program Files\nodejs\node.exe" --env-file-if-exists=C:\bills\app\.env apps\hub\src\main.ts
 nssm set billS-HUB AppDirectory C:\bills\app
 nssm set billS-HUB DisplayName "billS HUB"
-nssm set billS-HUB Description "billS HUB — сервер клуба"
+nssm set billS-HUB Description "TS HUB — сервер клуба"
 nssm set billS-HUB Start SERVICE_AUTO_START
 nssm set billS-HUB AppStdout C:\bills\logs\hub.log
 nssm set billS-HUB AppStderr C:\bills\logs\hub.log

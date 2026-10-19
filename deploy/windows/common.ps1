@@ -1,4 +1,4 @@
-﻿# common.ps1 — общие функции для скриптов развёртывания billS под Windows.
+﻿# common.ps1 — общие функции для скриптов развёртывания TS под Windows.
 # Подключается через dot-source: . (Join-Path $PSScriptRoot 'common.ps1')
 # Совместимо с Windows PowerShell 5.1.
 

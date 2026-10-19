@@ -203,15 +203,11 @@
   object-fit: contain;
 }
 
-.logo-preview .ball {
+.logo-preview .brand-mark {
   width: 32px;
   height: 32px;
-  font-size: 11px;
-}
-
-.logo-preview .ball::before {
-  width: 16px;
-  height: 16px;
+  border-radius: 8px;
+  box-shadow: none;
 }
 
 .logo-preview span:last-child {

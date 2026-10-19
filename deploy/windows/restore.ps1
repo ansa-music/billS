@@ -2,7 +2,7 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-  Восстановление базы billS HUB из бэкапа (.zip или .db).
+  Восстановление базы TS HUB из бэкапа (.zip или .db).
 
 .DESCRIPTION
   restore.ps1                      — показать последние бэкапы.

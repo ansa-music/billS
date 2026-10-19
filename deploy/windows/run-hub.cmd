@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-rem billS HUB wrapper for Task Scheduler.
+rem TS HUB wrapper for Task Scheduler.
 rem Usage: run-hub.cmd [ROOT] [NODE_EXE]
 rem   ROOT     - install root (default: parent of this script's folder, e.g. C:\bills)
 rem   NODE_EXE - full path to node.exe (default: node from PATH)

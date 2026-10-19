@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lib.sh — общие функции для скриптов развёртывания billS HUB (Linux).
+# lib.sh — общие функции для скриптов развёртывания TS HUB (Linux).
 # Подключается так: source "$(dirname "$0")/lib.sh"
 # Сам по себе не запускается.
 
@@ -29,15 +29,15 @@ else
   C_INFO=''; C_OK=''; C_WARN=''; C_ERR=''; C_OFF=''
 fi
 
-log()  { printf '%s[billS]%s %s\n' "$C_INFO" "$C_OFF" "$*"; }
-ok()   { printf '%s[billS]%s %s\n' "$C_OK" "$C_OFF" "$*"; }
-warn() { printf '%s[billS] ВНИМАНИЕ:%s %s\n' "$C_WARN" "$C_OFF" "$*" >&2; }
-die()  { printf '%s[billS] ОШИБКА:%s %s\n' "$C_ERR" "$C_OFF" "$*" >&2; exit "${2:-1}"; }
+log()  { printf '%s[TS]%s %s\n' "$C_INFO" "$C_OFF" "$*"; }
+ok()   { printf '%s[TS]%s %s\n' "$C_OK" "$C_OFF" "$*"; }
+warn() { printf '%s[TS] ВНИМАНИЕ:%s %s\n' "$C_WARN" "$C_OFF" "$*" >&2; }
+die()  { printf '%s[TS] ОШИБКА:%s %s\n' "$C_ERR" "$C_OFF" "$*" >&2; exit "${2:-1}"; }
 
 # Обработчик ошибок для set -E: печатает, где именно упал скрипт.
 on_error() {
   local exit_code=$? line="${1:-?}" cmd="${2:-?}"
-  printf '%s[billS] ОШИБКА:%s %s прерван (строка %s, код %s): %s\n' \
+  printf '%s[TS] ОШИБКА:%s %s прерван (строка %s, код %s): %s\n' \
     "$C_ERR" "$C_OFF" "${SCRIPT_NAME:-скрипт}" "$line" "$exit_code" "$cmd" >&2
   exit "$exit_code"
 }

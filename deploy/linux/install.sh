@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh — установка billS HUB одной командой на чистую Ubuntu Server LTS (22.04/24.04).
+# install.sh — установка TS HUB одной командой на чистую Ubuntu Server LTS (22.04/24.04).
 #
 #   curl -fsSL https://raw.githubusercontent.com/ansa-music/billS/main/deploy/linux/install.sh | sudo bash
 #   или из клона репозитория:
@@ -21,9 +21,9 @@ set -Eeuo pipefail
 SCRIPT_NAME="install.sh"
 
 # Минимальные log/die до подключения lib.sh (нужны на этапе самозагрузки через curl | bash).
-log() { printf '[billS] %s\n' "$*"; }
-die() { printf '[billS] ОШИБКА: %s\n' "$*" >&2; exit 1; }
-trap 'rc=$?; printf "[billS] ОШИБКА: установка прервана (строка %s, код %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2; exit $rc' ERR
+log() { printf '[TS] %s\n' "$*"; }
+die() { printf '[TS] ОШИБКА: %s\n' "$*" >&2; exit 1; }
+trap 'rc=$?; printf "[TS] ОШИБКА: установка прервана (строка %s, код %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2; exit $rc' ERR
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -274,7 +274,7 @@ install_systemd() {
 configure_firewall() {
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
     log "ufw активен — открываю порт $PORT/tcp"
-    ufw allow "$PORT/tcp" comment 'billS HUB (только LAN)' >/dev/null
+    ufw allow "$PORT/tcp" comment 'TS HUB (только LAN)' >/dev/null
   fi
   warn "HUB НЕ должен быть доступен из интернета — только из локальной сети клуба. Не пробрасывайте порт $PORT на роутере."
 }
@@ -285,7 +285,7 @@ print_summary() {
   ip="$(primary_ip)"
   echo
   echo "=============================================================="
-  ok "billS HUB установлен и работает: $(health_summary)"
+  ok "TS HUB установлен и работает: $(health_summary)"
   echo "=============================================================="
   echo "  Адрес для планшетов:   http://${ip}:${PORT}"
   echo "  Проверка здоровья:     http://${ip}:${PORT}/api/health   метрики: /metrics"

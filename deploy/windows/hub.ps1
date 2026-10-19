@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  Управление billS HUB: start | stop | restart | status | log.
+  Управление TS HUB: start | stop | restart | status | log.
 
 .DESCRIPTION
   hub.ps1 status                — состояние задачи, процессы, /api/health, последний бэкап.
@@ -39,7 +39,7 @@ function Test-Admin {
 }
 
 function Show-Status {
-    Write-Host "billS HUB — $($Paths.Root)"
+    Write-Host "TS HUB — $($Paths.Root)"
     if (Test-NssmService) {
         $svc = Get-Service -Name $script:NssmServiceName
         Write-Host "    Служба NSSM:  $($script:NssmServiceName) — $($svc.Status)"
