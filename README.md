@@ -446,6 +446,20 @@ npm run start:hub
 
 **Сборка у себя.** Нужны Node 24, Rust (`rustup`), на Windows — MSVC (Visual Studio Build Tools, «Разработка классических приложений на C++») с Windows SDK; на Linux — `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev`. Затем `npm ci`, `npm run dev -w @bills/desktop` (окно в режиме разработки) или `npm run build -w @bills/desktop -- --bundles msi` → `apps/desktop/src-tauri/target/release/bundle/msi/TS_<версия>_x64_ru-RU.msi`. Тесты Rust: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`. Иконки — из монограммы `apps/web/public/icons/icon-512.png`: `npm run icons -w @bills/desktop`.
 
+## Как выпустить новую версию
+
+Одна команда из папки репозитория (ветка `main`, всё закоммичено и отправлено). Она показывает версию, спрашивает «да» и ставит тег; GitHub Actions собирает файлы и публикует выпуск, страница «Скачать приложение» подхватывает его сама. Версия берётся из тега — править файлы перед выпуском не нужно.
+
+| Что | Команда | Тег | Файлы |
+|---|---|---|---|
+| ПК кассы (Windows, Linux) | `node scripts/release.mjs desktop` | `desktop-v<версия>` | `.msi`, `.deb`, `latest.json` |
+| Телефон владельца (Android) | `node scripts/release.mjs mobile` | `mobile-v<версия>` | `TS-<версия>.apk` |
+| Мини-ПК клуба (флешка) | `node scripts/release.mjs minipc` | `minipc-v<версия>` | `TS-minipc-<версия>.iso`, `.sha256` |
+
+Своя версия: `node scripts/release.mjs desktop 0.2.0`; без публикации: `--dry-run`. Пробная сборка — «Run workflow» в Actions (файлы в артефактах).
+
+Ключи подписи — один раз, в GitHub → Settings → Secrets and variables → Actions: ПК — `npm run desktop:signing-key` ([apps/desktop/README.md](apps/desktop/README.md)), Android — `npm run android:keystore` ([docs/MOBILE_RELEASE_RU.md](docs/MOBILE_RELEASE_RU.md)). Ключи кладутся вне репозитория и в терминал не печатаются.
+
 ## Публичный доступ
 
 Бесплатно, без своего сервера и без Firebase. Пошагово для того, кто делает это впервые, — [docs/PUBLIC_DEPLOY_RU.md](docs/PUBLIC_DEPLOY_RU.md).
