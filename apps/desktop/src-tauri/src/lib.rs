@@ -6,6 +6,7 @@
 //! navigates to the HUB origin. Ctrl+Shift+S on any page comes back to the settings.
 
 mod hub;
+mod install;
 mod print;
 mod settings;
 
@@ -206,65 +207,57 @@ fn quit(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
   Ok(())
 }
 
-/// Runs the HUB installer from deploy/ (bundled with the app) as administrator and waits for it.
+/// Installs the HUB on this PC from deploy/ (bundled with the app) as administrator, waits until it
+/// answers and returns its local origin for `connect`.
 #[tauri::command]
 async fn install_hub(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
   state.ensure_unlocked()?;
   let resources = app.path().resource_dir().map_err(|e| e.to_string())?;
-  tauri::async_runtime::spawn_blocking(move || {
-    #[cfg(windows)]
-    {
-      let script = resources.join("deploy").join("windows").join("install.ps1");
-      // UAC prompt; the installer shows its progress in its own console window.
-      let elevate = format!(
-        "$p = Start-Process powershell -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','\"{}\"'; exit $p.ExitCode",
-        script.display()
-      );
-      let status = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &elevate])
-        .status()
-        .map_err(|e| e.to_string())?;
-      if status.success() {
-        Ok("HUB установлен как служба (задача «billS HUB»)".to_string())
-      } else {
-        Err("Установка HUB не завершилась — журнал: C:\\bills\\logs\\install.log".to_string())
-      }
+  tauri::async_runtime::spawn_blocking(move || install::run(&resources)).await.map_err(|e| e.to_string())??;
+  // The installers wait for /api/health themselves; this covers a slow first start of the service.
+  let origin = hub::local_origin();
+  for _ in 0..30 {
+    if hub::probe(&origin, Duration::from_secs(2)).await {
+      return Ok(origin);
     }
-    #[cfg(not(windows))]
-    {
-      let script = resources.join("deploy").join("linux").join("install.sh");
-      let output = std::process::Command::new("pkexec")
-        .arg("bash")
-        .arg(&script)
-        .output()
-        .map_err(|e| format!("pkexec: {e}"))?;
-      if output.status.success() {
-        Ok("HUB установлен как служба (bills-hub.service)".to_string())
-      } else {
-        let log = String::from_utf8_lossy(&output.stderr);
-        let tail: Vec<&str> = log.lines().rev().take(5).collect();
-        Err(format!("Установка HUB не завершилась: {}", tail.into_iter().rev().collect::<Vec<_>>().join(" / ")))
-      }
+    tokio::time::sleep(Duration::from_secs(2)).await;
+  }
+  Err("HUB установлен, но пока не отвечает. Подождите минуту и нажмите «Найти HUB ещё раз».".into())
+}
+
+/// Updater errors in words for the owner; the technical text goes to stderr.
+fn update_error(e: tauri_plugin_updater::Error) -> String {
+  use tauri_plugin_updater::Error as E;
+  eprintln!("[TS] обновление: {e}");
+  match e {
+    E::ReleaseNotFound | E::TargetNotFound(_) | E::TargetsNotFound(_) => {
+      "Новых версий для автообновления пока нет. Новую версию можно скачать вручную на странице «Скачать приложение».".into()
     }
-  })
-  .await
-  .map_err(|e| e.to_string())?
+    E::Minisign(_) | E::Base64(_) | E::SignatureUtf8(_) | E::SignedVersionMismatch { .. } | E::MissingSignedVersion => {
+      "Обновление не прошло проверку подписи и не установлено. Скачайте новую версию вручную на странице «Скачать приложение».".into()
+    }
+    E::AuthenticationFailed => "Обновление отменено: нужен пароль администратора этого компьютера.".into(),
+    E::Reqwest(_) | E::Network(_) | E::Http(_) => {
+      "Нет связи с сервером обновлений. Проверьте интернет и попробуйте позже.".into()
+    }
+    other => format!("Не удалось обновить TS: {other}"),
+  }
 }
 
 #[tauri::command]
 async fn check_update(app: AppHandle) -> Result<Option<String>, String> {
-  let update = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
+  let update = app.updater().map_err(update_error)?.check().await.map_err(update_error)?;
   Ok(update.map(|u| u.version))
 }
 
 #[tauri::command]
 async fn install_update(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
   state.ensure_unlocked()?;
-  let update = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
+  let update = app.updater().map_err(update_error)?.check().await.map_err(update_error)?;
   let Some(update) = update else {
-    return Err("Обновлений нет".into());
+    return Err("Установлена последняя версия".into());
   };
-  update.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+  update.download_and_install(|_, _| {}, || {}).await.map_err(update_error)?;
   app.restart();
 }
 

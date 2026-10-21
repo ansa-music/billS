@@ -1,12 +1,15 @@
 # TS для ПК (apps/desktop, Tauri): установщики .msi (Windows) и .deb (Ubuntu/Debian).
 #
-# - pull request / ручной запуск: сборка и тесты, установщики — в артефактах запуска;
-# - тег desktop-v<версия> (например desktop-v0.1.0): релиз на GitHub с установщиками и latest.json
-#   для автообновления (tauri-plugin-updater читает releases/latest/download/latest.json).
+# - pull request / ручной запуск: сборка и тесты, установщики — в артефактах запуска (без выпуска);
+# - тег desktop-v<версия> (например desktop-v0.1.1): версия берётся из тега (править файлы не нужно),
+#   оба установщика собираются, затем ОДИН выпуск на GitHub с .msi, .deb, .sha256 и latest.json.
+#   latest.json дополнительно кладётся в служебный пред-выпуск desktop-latest — его читает
+#   автообновление (plugins.updater.endpoints в tauri.conf.json); страница скачивания его не показывает.
 #
-# Подпись обновлений: секреты репозитория TAURI_SIGNING_PRIVATE_KEY (содержимое ключа) и
-# TAURI_SIGNING_PRIVATE_KEY_PASSWORD (пусто, если ключ без пароля). Без ключа сборка идёт,
-# но без файлов обновления (.sig, latest.json). Открытый ключ — plugins.updater.pubkey в tauri.conf.json.
+# Подпись обновлений (apps/desktop/README.md, «Ключ автообновления»; ключи: npm run desktop:signing-key):
+#   секреты TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD, переменная TAURI_UPDATER_PUBKEY.
+#   Перед сборкой ci.mjs проверяет, что ключ подходит к открытому ключу. Без ключа — сборка без
+#   файлов обновления и предупреждение.
 name: desktop
 
 on:
@@ -18,11 +21,16 @@ on:
       - 'apps/web/src/desktop.ts'
       - 'apps/web/src/cash/print/**'
       - 'deploy/**'
+      - 'scripts/tauri-signing-key.mjs'
       - '.github/workflows/desktop.yml'
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   build:
@@ -35,12 +43,10 @@ jobs:
           - os: ubuntu-22.04
             bundles: deb
     runs-on: ${{ matrix.os }}
-    env:
-      HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -59,50 +65,97 @@ jobs:
 
       - run: npm ci
 
+      - name: Тесты скриптов выпуска
+        run: node --test "apps/desktop/scripts/*.test.mjs"
+
       - name: Тесты Rust
-        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
 
-      - name: Без ключа подписи — без файлов обновления
-        if: ${{ env.HAS_SIGNING_KEY != 'true' }}
-        shell: bash
-        run: echo '{"bundle":{"createUpdaterArtifacts":false}}' > apps/desktop/src-tauri/tauri.ci.conf.json
-
-      - name: Сборка
-        if: ${{ !startsWith(github.ref, 'refs/tags/desktop-v') }}
-        shell: bash
+      # Версия из тега, открытый ключ из переменной, проверка пары ключей -> src-tauri/tauri.ci.conf.json
+      - name: Настройки сборки и проверка ключа подписи
+        id: prepare
         env:
+          TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: node apps/desktop/scripts/ci.mjs prepare
+
+      # Ключ передаётся tauri только когда он есть: пустая переменная ломает сборку
+      # («failed to decode secret key»).
+      - name: Сборка
+        shell: bash
         working-directory: apps/desktop
+        env:
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          extra=()
-          if [ -f src-tauri/tauri.ci.conf.json ]; then extra=(--config src-tauri/tauri.ci.conf.json); fi
-          npx tauri build --bundles ${{ matrix.bundles }} "${extra[@]}"
+          if [ -n "$SIGNING_KEY" ]; then
+            export TAURI_SIGNING_PRIVATE_KEY="$SIGNING_KEY"
+            if [ -n "$SIGNING_PASSWORD" ]; then export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$SIGNING_PASSWORD"; fi
+          fi
+          unset SIGNING_KEY SIGNING_PASSWORD
+          npx tauri build --ci --bundles ${{ matrix.bundles }} --config src-tauri/tauri.ci.conf.json
+
+      - name: Подписи обновления
+        if: steps.prepare.outputs.signing == 'true'
+        env:
+          TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: node apps/desktop/scripts/ci.mjs signatures apps/desktop/src-tauri/target/release/bundle/${{ matrix.bundles }}
 
       - name: Установщик в артефакты
-        if: ${{ !startsWith(github.ref, 'refs/tags/desktop-v') }}
         uses: actions/upload-artifact@v4
         with:
           name: ts-desktop-${{ matrix.bundles }}
           path: |
-            apps/desktop/src-tauri/target/release/bundle/msi/*.msi*
-            apps/desktop/src-tauri/target/release/bundle/deb/*.deb*
+            apps/desktop/src-tauri/target/release/bundle/msi/*.msi
+            apps/desktop/src-tauri/target/release/bundle/msi/*.msi.sig
+            apps/desktop/src-tauri/target/release/bundle/deb/*.deb
+            apps/desktop/src-tauri/target/release/bundle/deb/*.deb.sig
           if-no-files-found: error
 
-      - name: Релиз на GitHub (установщики и latest.json)
-        if: ${{ startsWith(github.ref, 'refs/tags/desktop-v') }}
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+  # Один выпуск на тег — только после того, как собрались оба установщика.
+  release:
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
         with:
-          projectPath: apps/desktop
-          tauriScript: npx tauri
-          args: --bundles ${{ matrix.bundles }}
-          tagName: ${{ github.ref_name }}
-          releaseName: 'TS для ПК __VERSION__'
-          releaseBody: 'Установщики TS для ПК кассы и мини-ПК: .msi — Windows 10/11, .deb — Ubuntu 22.04+.'
-          releaseDraft: false
-          prerelease: false
-          includeUpdaterJson: true
+          node-version: 24
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ts-desktop-*
+          path: dist
+          merge-multiple: true
+
+      - name: Файлы выпуска
+        id: files
+        run: node apps/desktop/scripts/ci.mjs release dist out
+
+      - name: Выпуск на GitHub
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.files.outputs.version }}
+          CHANNEL: ${{ steps.files.outputs.channel }}
+        run: |
+          notes="Установщики TS для ПК кассы: .msi — Windows 10/11, .deb — Ubuntu 22.04 и новее.
+          Windows может показать окно SmartScreen: нажмите «Подробнее» → «Выполнить в любом случае».
+          Инструкция: https://github.com/${GITHUB_REPOSITORY}/blob/main/apps/desktop/README.md"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/* --clobber
+          else
+            gh release create "$TAG" out/* --verify-tag --title "TS для ПК $VERSION" --notes "$notes"
+          fi
+          if [ -f out/latest.json ]; then
+            if ! gh release view "$CHANNEL" >/dev/null 2>&1; then
+              gh release create "$CHANNEL" --prerelease --target "$GITHUB_SHA" --title "TS для ПК: автообновление" \
+                --notes "Служебный выпуск: здесь лежит latest.json последней версии для автообновления TS для ПК. Установщики — в выпусках desktop-v*."
+            fi
+            gh release upload "$CHANNEL" out/latest.json --clobber
+          fi

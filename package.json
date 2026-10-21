@@ -24,7 +24,9 @@
     "audit:pwa": "npx --yes @lhci/cli@0.15 collect --url=http://localhost:4800/ --settings.preset=desktop --numberOfRuns=1",
     "test:supabase": "node --test --test-concurrency=1 \"supabase/tests/**/*.test.ts\"",
     "bundle:edge": "node scripts/bundle-edge.mjs",
-    "vapid": "node scripts/vapid-keys.mjs"
+    "vapid": "node scripts/vapid-keys.mjs",
+    "desktop:signing-key": "node scripts/tauri-signing-key.mjs",
+    "android:keystore": "node scripts/android-keystore.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

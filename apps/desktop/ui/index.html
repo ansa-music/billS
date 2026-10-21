@@ -13,6 +13,7 @@
         --muted: #5d6b64;
         --line: #dde3e0;
         --accent: #1f7a4d;
+        --accent-soft: #e8f3ed;
         --danger: #b42318;
         font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
         color: var(--ink);
@@ -25,6 +26,7 @@
       .mark { width: 48px; height: 48px; border-radius: 12px; background: var(--brand); color: #fff; display: grid; place-items: center; font-weight: 800; font-size: 20px; letter-spacing: -0.5px; }
       h1 { margin: 0; font-size: 22px; }
       header small { color: var(--muted); }
+      .view { display: grid; gap: 16px; }
       section { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; display: grid; gap: 12px; }
       h2 { margin: 0; font-size: 16px; }
       p { margin: 0; color: var(--muted); line-height: 1.45; }
@@ -33,6 +35,7 @@
       button { font: inherit; padding: 10px 16px; border-radius: 10px; border: 1px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; }
       button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
       button.danger { color: var(--danger); }
+      button.link { border: 0; background: none; padding: 4px 0; color: var(--accent); text-decoration: underline; }
       button:disabled { opacity: 0.55; cursor: default; }
       label.check { display: flex; gap: 10px; align-items: flex-start; }
       label.check input { margin-top: 3px; width: 18px; height: 18px; }
@@ -44,6 +47,25 @@
       .status.ok { color: var(--accent); }
       [hidden] { display: none !important; }
       kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; font-size: 13px; }
+
+      /* First launch */
+      .welcome { padding: 26px 26px 22px; gap: 16px; }
+      .welcome h2 { font-size: 22px; }
+      .lead { font-size: 16px; }
+      .choices { display: grid; gap: 10px; }
+      .choice { display: grid; gap: 4px; width: 100%; text-align: left; padding: 16px 18px; border-radius: 12px; border: 1.5px solid var(--line); background: #fff; }
+      .choice:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+      .choice strong { font-size: 17px; }
+      .choice span { color: var(--muted); font-size: 14px; line-height: 1.4; }
+      .choice.main { border-color: var(--brand); }
+      .big { font-size: 17px; padding: 12px 20px; }
+      .waiting { display: flex; align-items: center; gap: 14px; }
+      .spinner { flex: none; width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      ol.steps { margin: 0; padding-left: 20px; color: var(--ink); line-height: 1.5; display: grid; gap: 6px; }
+      .timer { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; }
+      .links { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+      .links.end { justify-content: flex-end; }
     </style>
   </head>
   <body>
@@ -56,68 +78,150 @@
         </div>
       </header>
 
-      <section id="hub">
-        <h2>HUB клуба</h2>
-        <p id="hub-text">Приложение показывает интерфейс TS с HUB клуба. Найдите HUB в сети или введите адрес.</p>
-        <div class="row">
-          <button id="search" class="primary">Найти HUB в сети</button>
-          <button id="back" hidden>Вернуться к HUB</button>
+      <!-- First launch: find the HUB, or install it on this PC -->
+      <div id="welcome" class="view" hidden>
+        <section id="w-search" class="welcome">
+          <h2>Ищу HUB клуба</h2>
+          <div class="waiting">
+            <div class="spinner" aria-hidden="true"></div>
+            <p class="lead">Проверяю этот компьютер и локальную сеть клуба. Это займёт до 15 секунд.</p>
+          </div>
+          <p>HUB — программа, которая хранит столы, игры, кассу и клиентов клуба. Она работает на одном компьютере, а кассы, планшеты и экраны подключаются к ней.</p>
+        </section>
+
+        <section id="w-found" class="welcome" hidden>
+          <h2 id="w-found-title">HUB найден</h2>
+          <div id="w-found-list" class="choices"></div>
+          <div id="w-found-status" class="status" role="status"></div>
+          <div class="links">
+            <button class="link" data-action="search-again">Искать ещё раз</button>
+            <button class="link" data-action="address">Ввести адрес вручную</button>
+          </div>
+        </section>
+
+        <section id="w-none" class="welcome" hidden>
+          <h2>HUB в сети не найден</h2>
+          <p class="lead">HUB — программа, которая хранит столы, игры, кассу и клиентов клуба. Где он будет работать?</p>
+          <div class="choices">
+            <button id="choose-install" class="choice main">
+              <strong>Это главный компьютер клуба — установить HUB сюда</strong>
+              <span>Для клуба без отдельного мини-ПК. Нужны интернет и права администратора, установка займёт 5–15 минут. Этот компьютер должен быть включён, пока клуб работает.</span>
+            </button>
+            <button class="choice" data-action="address">
+              <strong>HUB стоит на другом компьютере — ввести адрес</strong>
+              <span>Адрес показан на экране мини-ПК или в настройках HUB, например 192.168.1.10.</span>
+            </button>
+          </div>
+          <div class="links">
+            <button class="link" data-action="search-again">Искать ещё раз</button>
+          </div>
+        </section>
+
+        <section id="w-address" class="welcome" hidden>
+          <h2>Адрес HUB</h2>
+          <p>Введите адрес компьютера, на котором работает HUB, например <b>192.168.1.10</b> или <b>hub.local</b>. Порт 4310 добавится сам.</p>
+          <form id="w-address-form" class="row">
+            <input id="w-address-input" type="text" placeholder="192.168.1.10" autocomplete="off" />
+            <button type="submit" class="primary big">Подключиться</button>
+          </form>
+          <div id="w-address-status" class="status" role="status"></div>
+          <div class="links">
+            <button class="link" data-action="back">Назад</button>
+            <button class="link" data-action="search-again">Искать ещё раз</button>
+          </div>
+        </section>
+
+        <section id="w-install" class="welcome" hidden>
+          <h2 id="install-title">Устанавливаю HUB на этот компьютер</h2>
+          <div id="install-progress" class="waiting">
+            <div class="spinner" aria-hidden="true"></div>
+            <div>
+              <p class="lead" id="install-lead"></p>
+              <div id="install-timer" class="timer"></div>
+            </div>
+          </div>
+          <ol id="install-steps" class="steps"></ol>
+          <div id="install-status" class="status" role="status"></div>
+          <div id="install-actions" class="row" hidden>
+            <button id="install-retry" class="primary">Попробовать ещё раз</button>
+            <button data-action="back">Назад</button>
+          </div>
+        </section>
+
+        <div class="links end">
+          <button class="link" data-action="settings">Настройки этого компьютера</button>
         </div>
-        <div id="found" class="found"></div>
-        <form id="manual" class="row">
-          <input id="address" type="text" placeholder="hub.local или 192.168.1.10:4310" autocomplete="off" />
-          <button type="submit">Подключиться</button>
-        </form>
-        <div id="hub-status" class="status" role="status"></div>
-      </section>
+      </div>
 
-      <section id="lock" hidden>
-        <h2>Настройки защищены</h2>
-        <p>Киоск-режим: чтобы изменить настройки или закрыть TS, приложите ключ управляющего или владельца.</p>
-        <form id="unlock" class="row">
-          <input id="key" type="password" placeholder="Ключ" autocomplete="off" />
-          <button type="submit" class="primary">Открыть</button>
-        </form>
-        <div id="lock-status" class="status" role="status"></div>
-      </section>
+      <!-- Settings of this device -->
+      <div id="settings-view" class="view" hidden>
+        <section id="hub">
+          <h2>HUB клуба</h2>
+          <p id="hub-text">Приложение показывает интерфейс TS с HUB клуба. Найдите HUB в сети или введите адрес.</p>
+          <div class="row">
+            <button id="search" class="primary">Найти HUB в сети</button>
+            <button id="back" hidden>Вернуться к HUB</button>
+          </div>
+          <div id="found" class="found"></div>
+          <form id="manual" class="row">
+            <input id="address" type="text" placeholder="hub.local или 192.168.1.10:4310" autocomplete="off" />
+            <button type="submit">Подключиться</button>
+          </form>
+          <div id="hub-status" class="status" role="status"></div>
+        </section>
 
-      <section id="device" hidden>
-        <h2>Это устройство</h2>
-        <label class="check">
-          <input id="kiosk" type="checkbox" />
-          <span>Киоск-режим<small>Окно на весь экран без рамки, экран не гаснет, закрыть можно только ключом управляющего.</small></span>
-        </label>
-        <label class="check">
-          <input id="autostart" type="checkbox" />
-          <span>Запускать TS при включении ПК</span>
-        </label>
-        <div class="row">
-          <select id="printer" aria-label="Принтер чеков"><option value="">Принтер по умолчанию</option></select>
-          <button id="printers">Обновить список</button>
-        </div>
-        <p>Чеки печатаются на этот принтер сразу, без окна печати. Ширину ленты (58/80 мм) выбирают в разделе «Касса».</p>
-        <div id="device-status" class="status" role="status"></div>
-      </section>
+        <section id="lock" hidden>
+          <h2>Настройки защищены</h2>
+          <p>Киоск-режим: чтобы изменить настройки или закрыть TS, приложите ключ управляющего или владельца.</p>
+          <form id="unlock" class="row">
+            <input id="key" type="password" placeholder="Ключ" autocomplete="off" />
+            <button type="submit" class="primary">Открыть</button>
+          </form>
+          <div id="lock-status" class="status" role="status"></div>
+        </section>
 
-      <section id="maintenance" hidden>
-        <h2>Обслуживание</h2>
-        <div class="row">
-          <button id="update">Проверить обновления</button>
-          <button id="install-hub">Установить HUB на этот ПК</button>
-          <button id="quit" class="danger">Закрыть TS</button>
-        </div>
-        <p>«Установить HUB» ставит HUB клуба на этот ПК как службу (нужны права администратора); адрес после установки — этот же ПК.</p>
-        <div id="maintenance-status" class="status" role="status"></div>
-      </section>
+        <section id="device" hidden>
+          <h2>Это устройство</h2>
+          <label class="check">
+            <input id="kiosk" type="checkbox" />
+            <span>Киоск-режим<small>Окно на весь экран без рамки, экран не гаснет, закрыть можно только ключом управляющего.</small></span>
+          </label>
+          <label class="check">
+            <input id="autostart" type="checkbox" />
+            <span>Запускать TS при включении ПК</span>
+          </label>
+          <div class="row">
+            <select id="printer" aria-label="Принтер чеков"><option value="">Принтер по умолчанию</option></select>
+            <button id="printers">Обновить список</button>
+          </div>
+          <p>Чеки печатаются на этот принтер сразу, без окна печати. Ширину ленты (58/80 мм) выбирают в разделе «Касса».</p>
+          <div id="device-status" class="status" role="status"></div>
+        </section>
 
-      <p>Вернуться к этим настройкам из интерфейса TS: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>.</p>
+        <section id="maintenance" hidden>
+          <h2>Обслуживание</h2>
+          <div class="row">
+            <button id="update">Проверить обновления</button>
+            <button id="install-hub">Установить HUB на этот ПК</button>
+            <button id="quit" class="danger">Закрыть TS</button>
+          </div>
+          <p>«Установить HUB» ставит HUB клуба на этот ПК как службу (нужны права администратора); адрес после установки — этот же ПК.</p>
+          <div id="maintenance-status" class="status" role="status"></div>
+        </section>
+
+        <p>Вернуться к этим настройкам из интерфейса TS: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>.</p>
+      </div>
     </main>
 
     <script>
       const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
       const $ = (id) => document.getElementById(id);
+      /** The HUB installed on this PC (hub::local_origin). */
+      const LOCAL_HUB = 'http://127.0.0.1:4310';
       let state = null;
       let retry = null;
+      let installing = false;
+      let previousPanel = 'none';
 
       function say(id, text, kind = '') {
         const el = $(id);
@@ -128,6 +232,26 @@
       function busy(button, on) {
         button.disabled = on;
       }
+
+      // ── Views: first launch (welcome) and the settings of this device ──
+
+      function showSettings() {
+        $('welcome').hidden = true;
+        $('settings-view').hidden = false;
+      }
+
+      function showWelcome(name) {
+        $('settings-view').hidden = true;
+        $('welcome').hidden = false;
+        panel(name);
+      }
+
+      function panel(name) {
+        for (const id of ['search', 'found', 'none', 'address', 'install']) $(`w-${id}`).hidden = id !== name;
+        if (name === 'found' || name === 'none') previousPanel = name;
+      }
+
+      const canInstallHere = () => state.platform === 'windows' || state.platform === 'linux';
 
       async function refresh() {
         state = await invoke('get_state');
@@ -142,6 +266,8 @@
         $('maintenance').hidden = state.locked;
         $('search').disabled = state.locked && Boolean(s.hubUrl);
         $('manual').hidden = state.locked && Boolean(s.hubUrl);
+        $('install-hub').hidden = !canInstallHere();
+        $('choose-install').hidden = !canInstallHere();
         $('kiosk').checked = s.kiosk;
         $('autostart').checked = s.autostart;
         setPrinter(s.printer);
@@ -162,22 +288,165 @@
         setPrinter(current);
       }
 
-      async function connect(address) {
+      /** Checks the address, saves it and opens the HUB (on success this page is replaced). */
+      async function connect(address, statusId = 'hub-status') {
         clearTimeout(retry);
-        say('hub-status', 'Подключение…');
+        say(statusId, 'Подключение…');
         try {
           await invoke('connect', { address });
         } catch (e) {
-          say('hub-status', String(e), 'error');
+          say(statusId, String(e), 'error');
           return false;
         }
         return true;
       }
 
+      const hubLabel = (origin) => (origin === LOCAL_HUB ? 'этот компьютер' : origin.replace(/^https?:\/\//, ''));
+
+      // ── First launch ──
+
+      async function firstSearch() {
+        showWelcome('search');
+        let found = [];
+        try {
+          found = await invoke('discover');
+        } catch {
+          found = [];
+        }
+        if (found.length === 0) {
+          panel('none');
+          return;
+        }
+        // A HUB on this PC, or the only one in the network: connect right away.
+        const target = found.includes(LOCAL_HUB) ? LOCAL_HUB : found.length === 1 ? found[0] : null;
+        if (target) {
+          showFound([target], 'HUB найден');
+          if (await connect(target, 'w-found-status')) return;
+          if (found.length === 1) return;
+        }
+        showFound(found, 'Найдено несколько HUB — выберите свой');
+      }
+
+      function showFound(list, title) {
+        $('w-found-title').textContent = title;
+        const box = $('w-found-list');
+        box.replaceChildren();
+        for (const origin of list) {
+          const button = document.createElement('button');
+          button.className = 'choice main';
+          const strong = document.createElement('strong');
+          strong.textContent = `Подключиться к HUB: ${hubLabel(origin)}`;
+          const small = document.createElement('span');
+          small.textContent = origin;
+          button.append(strong, small);
+          button.onclick = async () => {
+            busy(button, true);
+            await connect(origin, 'w-found-status');
+            busy(button, false);
+          };
+          box.append(button);
+        }
+        say('w-found-status', '');
+        panel('found');
+      }
+
+      function installSteps() {
+        const steps =
+          state.platform === 'windows'
+            ? [
+                'Windows спросит «Разрешить этому приложению вносить изменения?» — нажмите «Да».',
+                'Откроется окно установки — не закрывайте его. Если на компьютере нет Node.js и Git, они установятся сами.',
+                'Когда HUB заработает, окно установки закроется, а TS подключится к HUB сам.',
+              ]
+            : [
+                'Система спросит пароль администратора этого компьютера — введите его.',
+                'Установка идёт без отдельного окна: скачиваются нужные программы и TS.',
+                'Когда HUB заработает, TS подключится к нему сам.',
+              ];
+        $('install-steps').replaceChildren(
+          ...steps.map((text) => {
+            const li = document.createElement('li');
+            li.textContent = text;
+            return li;
+          }),
+        );
+      }
+
+      async function startInstall() {
+        if (installing) return;
+        installing = true;
+        showWelcome('install');
+        installSteps();
+        $('install-title').textContent = 'Устанавливаю HUB на этот компьютер';
+        $('install-lead').textContent = 'Не выключайте компьютер и не закрывайте TS. Обычно это занимает 5–15 минут.';
+        $('install-progress').hidden = false;
+        $('install-steps').hidden = false;
+        $('install-actions').hidden = true;
+        say('install-status', '');
+        const started = Date.now();
+        const tick = () => {
+          const s = Math.floor((Date.now() - started) / 1000);
+          $('install-timer').textContent = `Прошло ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+        };
+        tick();
+        const timer = setInterval(tick, 1000);
+        try {
+          const origin = await invoke('install_hub');
+          $('install-title').textContent = 'HUB установлен';
+          $('install-lead').textContent = 'Подключаюсь к HUB на этом компьютере…';
+          $('install-steps').hidden = true;
+          if (!(await connect(origin, 'install-status'))) installFailed('HUB установлен, но подключиться не удалось');
+        } catch (e) {
+          say('install-status', String(e), 'error');
+          installFailed('HUB не установлен');
+        } finally {
+          clearInterval(timer);
+          installing = false;
+        }
+      }
+
+      function installFailed(title) {
+        $('install-title').textContent = title;
+        $('install-progress').hidden = true;
+        $('install-steps').hidden = true;
+        $('install-actions').hidden = false;
+      }
+
+      function showAddress() {
+        showWelcome('address');
+        say('w-address-status', '');
+        $('w-address-input').focus();
+      }
+
+      document.addEventListener('click', (e) => {
+        const action = e.target.closest('[data-action]')?.dataset.action;
+        if (!action || installing) return;
+        if (action === 'search-again') firstSearch();
+        else if (action === 'address') showAddress();
+        else if (action === 'back') panel(previousPanel);
+        else if (action === 'settings') {
+          history.replaceState(null, '', '#settings');
+          showSettings();
+        }
+      });
+      $('choose-install').onclick = startInstall;
+      $('install-retry').onclick = startInstall;
+      $('w-address-form').onsubmit = async (e) => {
+        e.preventDefault();
+        const address = $('w-address-input').value;
+        if (!address.trim()) {
+          say('w-address-status', 'Введите адрес HUB', 'error');
+          return;
+        }
+        await connect(address, 'w-address-status');
+      };
+
+      // ── Settings ──
+
       async function search() {
         const button = $('search');
         busy(button, true);
-        say('hub-status', 'Ищу HUB: hub.local, этот ПК, затем вся сеть… (до 15 секунд)');
+        say('hub-status', 'Ищу HUB: этот ПК, hub.local, затем вся сеть… (до 15 секунд)');
         const list = $('found');
         list.replaceChildren();
         try {
@@ -260,29 +529,26 @@
           busy(button, false);
         }
       };
-      $('install-hub').onclick = async (e) => {
-        const button = e.target;
-        busy(button, true);
-        say('maintenance-status', 'Идёт установка HUB в отдельном окне (подтвердите запрос администратора)…');
-        try {
-          say('maintenance-status', await invoke('install_hub'), 'ok');
-          await connect('127.0.0.1');
-        } catch (err) {
-          say('maintenance-status', String(err), 'error');
-        } finally {
-          busy(button, false);
+      $('install-hub').onclick = () => {
+        if (confirm('Установить HUB на этот компьютер? Нужны интернет и права администратора, установка займёт 5–15 минут.')) {
+          previousPanel = 'none';
+          startInstall();
         }
       };
 
       async function start() {
         await refresh();
         if (!state.locked) loadPrinters().catch(() => {});
-        if (location.hash === '#settings') return;
+        if (location.hash === '#settings') {
+          showSettings();
+          return;
+        }
         if (!state.settings.hubUrl) {
-          await search();
+          await firstSearch();
           return;
         }
         // Saved HUB: open it; if it is down (power cut, Wi-Fi), keep retrying.
+        showSettings();
         const attempt = async () => {
           if (await connect(null)) return;
           say('hub-status', `HUB не отвечает (${state.settings.hubUrl}). Повтор через 5 секунд…`, 'error');
@@ -291,7 +557,10 @@
         await attempt();
       }
 
-      start().catch((e) => say('hub-status', String(e), 'error'));
+      start().catch((e) => {
+        showSettings();
+        say('hub-status', String(e), 'error');
+      });
     </script>
   </body>
 </html>

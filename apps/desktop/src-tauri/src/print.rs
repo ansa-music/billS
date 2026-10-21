@@ -119,7 +119,7 @@ mod platform {
     }
     let settings = PrintSettings::new();
     if !printer.is_empty() {
-      settings.set_printer(Some(printer));
+      settings.set_printer(printer);
     }
     let operation = PrintOperation::new(&webview.inner());
     operation.set_page_setup(&setup);

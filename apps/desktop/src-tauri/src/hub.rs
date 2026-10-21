@@ -61,18 +61,19 @@ fn lan_ipv4() -> Option<[u8; 4]> {
   }
 }
 
-/// Finds HUBs: first by name (hub.local over mDNS, this PC), then by scanning the /24 of this PC.
+/// The HUB installed on this PC (deploy/windows, deploy/linux listen on 4310).
+pub fn local_origin() -> String {
+  format!("http://127.0.0.1:{DEFAULT_PORT}")
+}
+
+/// Finds HUBs: first this PC and hub.local (mDNS), then by scanning the /24 of this PC.
+/// A HUB on this PC comes first: it is reached without the network.
 pub async fn discover() -> Vec<String> {
-  let named = [
-    format!("http://hub.local:{DEFAULT_PORT}"),
-    format!("http://127.0.0.1:{DEFAULT_PORT}"),
-  ];
-  let mut found = Vec::new();
-  for origin in named {
-    if probe(&origin, Duration::from_millis(1500)).await {
-      found.push(origin);
-    }
-  }
+  let local = local_origin();
+  let named = format!("http://hub.local:{DEFAULT_PORT}");
+  let wait = Duration::from_millis(1500);
+  let (here, by_name) = tokio::join!(probe(&local, wait), probe(&named, wait));
+  let mut found: Vec<String> = [(here, local), (by_name, named)].into_iter().filter_map(|(ok, o)| ok.then_some(o)).collect();
   if !found.is_empty() {
     return found;
   }
