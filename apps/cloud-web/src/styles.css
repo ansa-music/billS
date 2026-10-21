@@ -1589,14 +1589,15 @@ body:has(.phone-page) {
 }
 
 /* «Скачать приложение» (#/apps). The owner opens it on a phone, so unlike the
-   rest of the cabinet it works at phone width. */
+   rest of the cabinet it works at phone width. Cards: one column on a phone,
+   two from 760px; the visitor's device card (data-wide) spans the row. */
 
 html:has(.apps-page) body {
   min-width: 0;
 }
 
 .apps-page {
-  width: min(880px, 100%);
+  width: min(1040px, 100%);
   margin: 0 auto;
   display: grid;
   gap: 16px;
@@ -1612,105 +1613,290 @@ html:has(.apps-page) body {
   font-size: 26px;
   font-weight: 650;
   letter-spacing: -0.01em;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
-.apps-release {
+.dl-alert {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  font-size: 14px;
-}
-
-.apps-release-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.apps-note {
-  display: grid;
-  justify-items: start;
-  gap: 2px;
-  padding: 10px 14px;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 12px 16px;
   border-radius: 12px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  font-size: 14px;
+  border: 1px solid color-mix(in oklab, var(--warn) 50%, var(--border));
+  background: color-mix(in oklab, var(--warn) 10%, var(--surface));
+  font-size: 15px;
+  font-weight: 600;
 }
 
-.apps-note .link {
-  padding-left: 0;
+.dl-alert .link {
+  padding: 0;
+  font-weight: 400;
 }
 
-.apps-sections {
+.dl-cards {
   display: grid;
   gap: 16px;
+  align-items: start;
 }
 
-.apps-section[data-current] {
-  border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+.dl-card {
+  gap: 16px;
+  padding: 18px 20px 20px;
 }
 
-.apps-section .panel-head .tag {
-  background: color-mix(in oklab, var(--accent) 18%, var(--surface));
-  color: var(--accent);
+.dl-card[data-current] {
+  border-color: color-mix(in oklab, var(--accent) 65%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 40%, transparent), var(--shadow);
 }
 
-.apps-group {
+.dl-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dl-icon {
+  flex: none;
+  width: 44px;
+  height: 44px;
   display: grid;
-  gap: 8px;
-}
-
-.apps-group h3 {
-  font-size: 14px;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--surface-2);
   color: var(--muted);
 }
 
-.apps-files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.dl-card[data-current] .dl-icon {
+  background: color-mix(in oklab, var(--accent) 16%, var(--surface));
+  color: var(--accent);
 }
 
-.apps-download {
-  display: inline-grid;
-  align-content: center;
-  justify-items: start;
-  gap: 1px;
-  padding: 6px 18px;
-  text-decoration: none;
-  max-width: 100%;
+.dl-title {
+  flex: 1;
+  min-width: 0;
 }
 
-.apps-download > span {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.dl-kicker {
+  font-size: 13px;
+  color: var(--muted);
 }
 
-.apps-size {
-  font-size: 12px;
-  font-weight: 500;
-  opacity: 0.8;
+.panel .dl-title h3 {
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
 }
 
-.apps-steps {
-  margin: 0;
-  padding-left: 22px;
+.tag.dl-current {
+  background: color-mix(in oklab, var(--accent) 18%, var(--surface));
+  color: var(--accent);
+  font-weight: 650;
+  font-size: 13px;
+  padding: 3px 10px;
+}
+
+.dl-card-body {
   display: grid;
-  gap: 6px;
+  gap: 16px;
+  align-items: start;
+}
+
+.dl-main,
+.dl-more {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  align-content: start;
+}
+
+.dl-lead {
+  color: var(--muted);
   font-size: 15px;
 }
 
-.apps-steps a {
+.dl-get {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.dl-version {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.btn.dl-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 56px;
+  width: min(100%, 360px);
+  padding: 0 24px;
+  border-radius: 14px;
+  font-size: 17px;
+  text-decoration: none;
+}
+
+.dl-file {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.dl-file a {
+  color: inherit;
+  text-underline-offset: 2px;
+}
+
+.dl-wait {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+}
+
+.dl-soon {
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px dashed color-mix(in oklab, var(--muted) 45%, var(--border));
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+.dl-soon[data-quiet] {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.dl-others {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.dl-others a {
+  color: var(--muted);
+  text-underline-offset: 3px;
+}
+
+.dl-others a:hover {
+  color: var(--text);
+}
+
+.dl-qr {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dl-qr .qr {
+  flex: none;
+  width: 120px;
+  padding: 4px;
+  border-radius: 8px;
+}
+
+.dl-steps {
+  margin: 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 8px;
+  font-size: 15px;
+}
+
+.dl-steps li::marker {
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.dl-inline-link {
+  color: var(--accent);
+  text-underline-offset: 3px;
+}
+
+.dl-address {
+  overflow-wrap: anywhere;
+}
+
+.dl-warning {
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--danger) 45%, transparent);
+  background: color-mix(in oklab, var(--danger) 10%, var(--surface));
+  color: color-mix(in oklab, var(--danger) 60%, var(--text));
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dl-alt {
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.dl-alt[data-first] {
+  padding-top: 0;
+  border-top: none;
+}
+
+.dl-alt h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.dl-command {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.dl-command code {
+  flex: 1 1 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   word-break: break-all;
+  user-select: all;
+}
+
+.dl-command-status {
+  flex-basis: 100%;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.dl-command-status:empty {
+  display: none;
+}
+
+.dl-note {
+  font-size: 13px;
+  color: var(--muted);
 }
 
 .apps-foot {
-  text-align: center;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px 16px;
 }
 
 .apps-foot .btn {
@@ -1719,9 +1905,24 @@ html:has(.apps-page) body {
   text-decoration: none;
 }
 
+@media (min-width: 760px) {
+  .dl-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dl-card[data-wide] {
+    grid-column: 1 / -1;
+  }
+
+  .dl-card[data-wide] .dl-card-body {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    column-gap: 32px;
+  }
+}
+
 @media (max-width: 600px) {
   .app:has(.apps-page) {
-    padding: 12px 16px 32px;
+    padding: calc(12px + env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom));
   }
 
   .apps-head .brand-mark {
@@ -1732,7 +1933,11 @@ html:has(.apps-page) body {
     font-size: 22px;
   }
 
-  .apps-download {
+  .dl-card {
+    padding: 16px;
+  }
+
+  .btn.dl-button {
     width: 100%;
   }
 }

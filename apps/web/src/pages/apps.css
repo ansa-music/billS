@@ -1,96 +1,341 @@
-/* «Приложения» (#/apps). Only tokens from styles.css / app.css, so both themes work. */
+/* «Приложения» (#/apps). Only tokens from styles.css / app.css, so both themes work.
+   Cards: one column on a phone, two from 720px of page width (a container query: the
+   sidebar takes part of the screen); the visitor's device card (data-wide) spans the row. */
 
-.apps-release {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-}
-
-.apps-release-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.apps-release .link {
-  padding-left: 0;
-}
-
-.apps-sections {
+.apps-page {
+  container: apps / inline-size;
   display: grid;
   gap: 16px;
-  max-width: 880px;
+  max-width: 1040px;
+  min-width: 0;
 }
 
-.apps-body {
+.dl-alert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--warn) 50%, var(--border));
+  background: var(--warn-soft);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.dl-alert .link {
+  padding: 0;
+  font-weight: 400;
+}
+
+.dl-cards {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+}
+
+.panel.dl-card {
+  gap: 16px;
+  padding: 18px 20px 20px;
+  align-content: start;
+  min-width: 0;
+}
+
+.dl-card[data-current] {
+  border-color: color-mix(in oklab, var(--accent) 65%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 40%, transparent);
+}
+
+.dl-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dl-icon {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.dl-card[data-current] .dl-icon {
+  background: color-mix(in oklab, var(--accent) 16%, var(--surface));
+  color: var(--accent);
+}
+
+.dl-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.dl-kicker {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.panel .dl-title h2 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.tag.dl-current {
+  flex: none;
+  background: color-mix(in oklab, var(--accent) 18%, var(--surface));
+  color: var(--accent);
+  font-weight: 650;
+  font-size: 13px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.dl-card-body {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+}
+
+.dl-main,
+.dl-more {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  align-content: start;
+}
+
+.dl-card p {
+  margin: 0;
+}
+
+.dl-lead {
+  color: var(--text-2);
+  font-size: 15px;
+}
+
+.dl-get {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.dl-version {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.btn.dl-button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 56px;
+  width: min(100%, 360px);
+  padding: 0 24px;
+  border-radius: 14px;
+  font-size: 17px;
+  text-decoration: none;
+}
+
+.dl-file {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.dl-file a {
+  color: inherit;
+  text-underline-offset: 2px;
+}
+
+.dl-wait {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+}
+
+.dl-soon {
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px dashed var(--border-strong);
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+.dl-soon[data-quiet] {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.dl-others {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.dl-others a {
+  color: var(--muted);
+  text-underline-offset: 3px;
+}
+
+.dl-others a:hover {
+  color: var(--text);
+}
+
+.dl-qr {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dl-qr .qr-code {
+  flex: none;
+  border-radius: 8px;
+}
+
+.dl-steps {
+  margin: 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 8px;
+  font-size: 15px;
+}
+
+.dl-steps li::marker {
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.dl-inline-link {
+  color: var(--accent);
+  text-underline-offset: 3px;
+}
+
+.dl-address {
+  overflow-wrap: anywhere;
+}
+
+.dl-warning {
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--danger) 45%, transparent);
+  background: var(--danger-soft);
+  color: color-mix(in oklab, var(--danger) 60%, var(--text));
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dl-alt {
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.dl-alt[data-first] {
+  padding-top: 0;
+  border-top: none;
+}
+
+.dl-alt h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.dl-command {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.dl-command code {
+  flex: 1 1 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-all;
+  user-select: all;
+}
+
+.dl-command-status {
+  flex-basis: 100%;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.dl-command-status:empty {
+  display: none;
+}
+
+.dl-note {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.apps-screen {
   display: grid;
   gap: 12px;
 }
 
-.apps-group {
-  display: grid;
-  gap: 8px;
+.apps-screen p {
+  margin: 0;
 }
 
-.apps-group h3 {
-  font-size: 14px;
-  color: var(--muted);
-}
-
-.apps-files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.btn.apps-download {
-  flex: none;
+.btn.apps-install {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 18px;
-  text-decoration: none;
-  max-width: 100%;
+  gap: 8px;
 }
 
-.btn.apps-download:not(.btn-primary) {
-  color: var(--text);
-}
-
-.apps-download-text {
-  display: grid;
-  justify-items: start;
-  gap: 1px;
-  min-width: 0;
-}
-
-.apps-download-text > span {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.apps-size {
-  font-size: 12px;
-  font-weight: 500;
-  opacity: 0.8;
-}
-
-.apps-steps {
+.apps-foot {
   margin: 0;
-  padding-left: 22px;
-  display: grid;
-  gap: 6px;
+  text-align: center;
 }
 
-.apps-steps a {
-  word-break: break-all;
+@container apps (min-width: 720px) {
+  .dl-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dl-card[data-wide] {
+    grid-column: 1 / -1;
+  }
+
+  .dl-card[data-wide] .dl-card-body {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    column-gap: 32px;
+  }
 }
 
 @media (max-width: 600px) {
-  .btn.apps-download {
+  .panel.dl-card {
+    padding: 16px;
+  }
+
+  .btn.dl-button {
     width: 100%;
   }
 }

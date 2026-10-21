@@ -1,20 +1,34 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  ANDROID_STEPS,
   assetApp,
+  assetFileText,
+  assetLinkText,
   assetPlatform,
   buildReleaseCatalog,
   classifyReleaseAssets,
+  computerDownload,
+  computerSteps,
   detectPlatform,
+  DOWNLOAD_TEXT,
+  downloadCards,
+  formatReleaseDate,
   formatSize,
   latestReleasesByKind,
+  MINIPC_COMMAND_STEPS,
+  MINIPC_GUIDE_URL,
+  MINIPC_IMAGE_STEPS,
+  MINIPC_INSTALL_COMMAND,
+  MINIPC_SETUP_ADDRESS,
   releaseKind,
   releasesApiUrl,
   releasesPageUrl,
   releaseVersion,
+  releaseVersionText,
   TS_RELEASES_REPO,
 } from '../src/index.ts';
-import type { GithubRelease } from '../src/index.ts';
+import type { DownloadStep, GithubRelease } from '../src/index.ts';
 
 const asset = (name: string, size = 1000) => ({
   name,
@@ -34,6 +48,8 @@ test('releaseKind and releaseVersion read the tag prefix', () => {
   assert.equal(releaseKind('desktop-v0.2.0'), 'desktop');
   assert.equal(releaseKind('Desktop-v0.2.0'), 'desktop');
   assert.equal(releaseKind('mobile-v0.3.1'), 'mobile');
+  assert.equal(releaseKind('minipc-v0.1.0'), 'minipc');
+  assert.equal(releaseVersion('minipc-v0.1.0'), '0.1.0');
   assert.equal(releaseKind('v1.2.0'), 'general');
   assert.equal(releaseKind('1.2.0'), 'general');
   assert.equal(releaseKind('nightly'), 'general');
@@ -116,6 +132,7 @@ test('assetPlatform sorts installers by extension and drops the rest', () => {
   assert.deepEqual(assetPlatform('ts-1.2.0-1.x86_64.rpm'), { platform: 'linux', format: 'rpm' });
   assert.deepEqual(assetPlatform('TS_1.2.0_aarch64.dmg'), { platform: 'mac', format: 'dmg' });
   assert.deepEqual(assetPlatform('TS_aarch64.app.tar.gz'), { platform: 'mac', format: 'app.tar.gz' });
+  assert.deepEqual(assetPlatform('TS-minipc-0.1.0.iso'), { platform: 'minipc', format: 'iso' });
   for (const junk of [
     'ts-owner.aab',
     'ts-owner.apk.sha256',
@@ -124,6 +141,7 @@ test('assetPlatform sorts installers by extension and drops the rest', () => {
     'TS_1.2.0_x64-setup.nsis.zip',
     'ts_1.2.0_amd64.AppImage.tar.gz',
     'latest.json',
+    'TS-minipc-0.1.0.iso.sha256',
     'SHA256SUMS',
     'source.zip',
   ]) {
@@ -190,7 +208,7 @@ test('classifyReleaseAssets copes with an empty or sparse release', () => {
   assert.equal(r.version, 'nightly');
   assert.equal(r.title, 'Ночная сборка');
   assert.equal(r.publishedAt, null);
-  assert.deepEqual([r.android, r.windows, r.linux, r.mac], [[], [], [], []]);
+  assert.deepEqual([r.android, r.windows, r.linux, r.mac, r.minipc], [[], [], [], [], []]);
   assert.equal(classifyReleaseAssets({ tag_name: 'v2', html_url: 'x', assets: [], published_at: 'garbage' }).publishedAt, null);
 });
 
@@ -216,4 +234,119 @@ test('detectPlatform reads the user agent', () => {
   assert.equal(detectPlatform(win), 'windows');
   assert.equal(detectPlatform(linux), 'linux');
   assert.equal(detectPlatform(''), 'other');
+});
+
+const GB = 1024 * 1024 * 1024;
+
+/** The full set the release workflows publish (desktop, mobile, mini-PC). */
+const fullSet = (): GithubRelease[] => [
+  rel('minipc-v0.1.0', '2026-10-21T08:00:00Z', ['TS-minipc-0.1.0.iso', 'TS-minipc-0.1.0.iso.sha256']),
+  rel('desktop-v0.1.1', '2026-10-21T06:00:00Z', [
+    'TS_0.1.1_x64_ru-RU.msi',
+    'TS_0.1.1_x64_ru-RU.msi.sig',
+    'ts_0.1.1_amd64.deb',
+    'ts_0.1.1_amd64.deb.sig',
+    'latest.json',
+  ]),
+  rel('mobile-v0.1.0', '2026-10-20T12:00:00Z', ['TS-0.1.0.apk']),
+];
+
+test('buildReleaseCatalog exposes the mini-PC image with its checksum', () => {
+  const c = buildReleaseCatalog(fullSet());
+  assert.ok(c);
+  assert.deepEqual(c.releases.map((r) => [r.kind, r.version]), [['minipc', '0.1.0'], ['desktop', '0.1.1'], ['mobile', '0.1.0']]);
+  assert.deepEqual(c.minipc.map((a) => [a.name, a.platform, a.format]), [['TS-minipc-0.1.0.iso', 'minipc', 'iso']]);
+  assert.match(c.minipc[0]?.checksumUrl ?? '', /TS-minipc-0\.1\.0\.iso\.sha256$/);
+  assert.equal(c.minipcRelease?.kind, 'minipc');
+  assert.equal(c.minipcRelease?.version, '0.1.0');
+  assert.deepEqual(c.windows.map((a) => a.name), ['TS_0.1.1_x64_ru-RU.msi']);
+  assert.equal(c.windows[0]?.checksumUrl, undefined);
+  assert.deepEqual(c.linux.map((a) => a.name), ['ts_0.1.1_amd64.deb']);
+  assert.deepEqual(c.android.map((a) => a.name), ['TS-0.1.0.apk']);
+  assert.equal(c.desktopRelease?.version, '0.1.1');
+  assert.equal(c.androidRelease?.version, '0.1.0');
+
+  // A mini-PC release alone does not pretend to carry the apps, and an image in a general release is found.
+  const onlyImage = buildReleaseCatalog([rel('minipc-v0.1.0', null, ['TS-minipc-0.1.0.iso'])]);
+  assert.equal(onlyImage?.desktopRelease, null);
+  assert.equal(onlyImage?.androidRelease, null);
+  assert.equal(buildReleaseCatalog([rel('v1.0.0', null, ['TS-minipc-1.0.0.iso'])])?.minipcRelease?.kind, 'general');
+  assert.equal(buildReleaseCatalog([rel('desktop-v0.1.1', null, ['TS.msi'])])?.minipcRelease, null);
+});
+
+test('downloadCards puts the visitor device first and marks it', () => {
+  assert.deepEqual(downloadCards('windows'), { order: ['computer', 'android', 'minipc', 'ios'], current: 'computer' });
+  assert.deepEqual(downloadCards('linux'), { order: ['computer', 'android', 'minipc', 'ios'], current: 'computer' });
+  assert.deepEqual(downloadCards('android'), { order: ['android', 'computer', 'minipc', 'ios'], current: 'android' });
+  assert.deepEqual(downloadCards('ios'), { order: ['ios', 'computer', 'android', 'minipc'], current: 'ios' });
+  assert.deepEqual(downloadCards('other'), { order: ['computer', 'android', 'minipc', 'ios'], current: null });
+  // No Mac build: the computer card goes first, but is not «это устройство».
+  assert.deepEqual(downloadCards('mac'), { order: ['computer', 'android', 'minipc', 'ios'], current: null });
+  assert.equal(downloadCards('mac', buildReleaseCatalog(fullSet())).current, null);
+  assert.equal(downloadCards('mac', buildReleaseCatalog([rel('desktop-v1', null, ['TS.dmg'])])).current, 'computer');
+});
+
+test('computerDownload offers the installer of the visitor system first', () => {
+  const c = buildReleaseCatalog(fullSet());
+  const names = (d: ReturnType<typeof computerDownload>) => [d.primary?.name ?? null, d.others.map((a) => a.name)];
+  assert.deepEqual(names(computerDownload(c, 'windows')), ['TS_0.1.1_x64_ru-RU.msi', ['ts_0.1.1_amd64.deb']]);
+  assert.deepEqual(names(computerDownload(c, 'android')), ['TS_0.1.1_x64_ru-RU.msi', ['ts_0.1.1_amd64.deb']]);
+  assert.deepEqual(names(computerDownload(c, 'linux')), ['ts_0.1.1_amd64.deb', ['TS_0.1.1_x64_ru-RU.msi']]);
+  assert.deepEqual(names(computerDownload(c, 'mac')), ['TS_0.1.1_x64_ru-RU.msi', ['ts_0.1.1_amd64.deb']]);
+  const onlyDeb = buildReleaseCatalog([rel('desktop-v1', null, ['ts_1_amd64.deb'])]);
+  assert.deepEqual(names(computerDownload(onlyDeb, 'windows')), ['ts_1_amd64.deb', []]);
+  assert.deepEqual(names(computerDownload(null, 'windows')), [null, []]);
+});
+
+test('download labels: file, links, version and date in plain words', () => {
+  const c = buildReleaseCatalog(fullSet());
+  assert.equal(assetFileText({ format: 'msi', size: 4.2 * 1024 * 1024 }), 'файл .msi · 4,2 МБ');
+  assert.equal(assetFileText({ format: 'iso', size: 1.5 * GB }), 'файл .iso · 1,5 ГБ');
+  assert.equal(assetLinkText({ platform: 'linux', format: 'deb', size: 5 * 1024 * 1024 }), 'Linux (Ubuntu, Debian) · .deb · 5 МБ');
+  assert.equal(assetLinkText({ platform: 'linux', format: 'AppImage', size: 1024 }), 'Linux (любой) · .AppImage · 1 КБ');
+  assert.equal(assetLinkText({ platform: 'windows', format: 'exe', size: 1024 }), 'Windows · .exe · 1 КБ');
+  assert.equal(formatReleaseDate(Date.UTC(2026, 9, 21, 6), 'UTC'), '21 октября 2026');
+  assert.equal(formatReleaseDate(Date.UTC(2026, 0, 1, 20), 'Asia/Almaty'), '2 января 2026');
+  assert.equal(releaseVersionText(c!.desktopRelease!, 'UTC'), 'Версия 0.1.1 от 21 октября 2026');
+  assert.equal(releaseVersionText({ version: '0.2.0', publishedAt: null }), 'Версия 0.2.0');
+});
+
+const stepText = (steps: readonly DownloadStep[]) =>
+  steps
+    .map((step) =>
+      step.map((p) => (typeof p === 'string' ? p : 'strong' in p ? p.strong : 'command' in p ? p.command : p.text)).join(''),
+    )
+    .join('\n');
+
+test('download steps cover what the owner has to press on each device', () => {
+  assert.equal(
+    MINIPC_INSTALL_COMMAND,
+    'curl -fsSL https://raw.githubusercontent.com/ansa-music/billS/main/deploy/linux/install.sh | sudo bash',
+  );
+  assert.equal(MINIPC_SETUP_ADDRESS, 'http://<адрес мини-ПК>:4310/setup');
+  assert.equal(MINIPC_GUIDE_URL, 'https://github.com/ansa-music/billS/blob/main/docs/MINIPC_RU.md');
+
+  const windows = stepText(computerSteps());
+  assert.match(windows, /Скачать для Windows/);
+  assert.match(windows, /«Подробнее».*«Выполнить в любом случае»/);
+  assert.match(stepText(computerSteps('linux')), /Скачать для Linux/);
+  assert.match(stepText(computerSteps('mac')), /Скачать для Mac/);
+  assert.match(stepText(ANDROID_STEPS), /неизвестных источников/);
+  const image = stepText(MINIPC_IMAGE_STEPS);
+  assert.match(image, /balenaEtcher/);
+  assert.match(image, /Rufus/);
+  assert.match(image, /Компания → Филиалы → новый филиал/);
+  assert.match(DOWNLOAD_TEXT.minipc.warning, /стирает диск/);
+  const command = stepText(MINIPC_COMMAND_STEPS);
+  assert.ok(command.includes(MINIPC_INSTALL_COMMAND));
+  assert.ok(command.includes(MINIPC_SETUP_ADDRESS));
+  // Every step has some text and every step list stays short.
+  for (const steps of [computerSteps(), computerSteps('linux'), computerSteps('mac'), ANDROID_STEPS, MINIPC_IMAGE_STEPS, MINIPC_COMMAND_STEPS]) {
+    assert.ok(steps.length >= 3 && steps.length <= 4);
+    for (const step of steps) assert.ok(step.length > 0);
+  }
+  // Nothing technical in what a visitor reads when there is no release yet.
+  for (const text of [DOWNLOAD_TEXT.computer.soon, DOWNLOAD_TEXT.android.soon, DOWNLOAD_TEXT.minipc.soon, DOWNLOAD_TEXT.error]) {
+    assert.doesNotMatch(text, /GitHub|релиз|API|APK/i);
+  }
 });
