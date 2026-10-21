@@ -78,11 +78,24 @@ export async function readOptionalJson(req: EdgeRequest): Promise<unknown> {
   }
 }
 
-/** Error → response, like the Fastify error handler: CloudError as is, anything else 500 + log. */
+/**
+ * Error → response, like the Fastify error handler: CloudError as is, anything else 500 + log.
+ * The cause is said in the message too (a Postgres error with its SQLSTATE): «Внутренняя ошибка
+ * облака» alone tells the platform owner nothing, and Supabase logs are not at hand in the cabinet.
+ */
 export function errorResponse(err: unknown, log: Log, headers: Record<string, string> = {}): Response {
   if (err instanceof CloudError) return json(err.status, { error: { code: err.code, message: err.message } }, headers);
   log(`Внутренняя ошибка: ${(err as Error)?.stack ?? String(err)}`);
-  return json(500, { error: { code: 'INTERNAL', message: 'Внутренняя ошибка облака' } }, headers);
+  return json(500, { error: { code: 'INTERNAL', message: internalMessage(err) } }, headers);
+}
+
+/** «Внутренняя ошибка облака: <причина>» — Postgres errors as «база данных (23505): …». */
+export function internalMessage(err: unknown): string {
+  const e = err as { message?: unknown; code?: unknown } | null;
+  const message = typeof e?.message === 'string' ? e.message.trim().slice(0, 300) : '';
+  if (!message) return 'Внутренняя ошибка облака';
+  const pg = typeof e?.code === 'string' && /^[0-9A-Z]{5}$/.test(e.code) ? `база данных (${e.code}): ` : '';
+  return `Внутренняя ошибка облака: ${pg}${message}`;
 }
 
 // ---------------------------------------------------------------------------

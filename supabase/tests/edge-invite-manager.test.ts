@@ -6,11 +6,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { LicenseTermsRequest } from '@bills/domain';
+import { DEV_LICENSE_KEY, verifyLicense } from '@bills/domain';
 import type { AuthAdmin } from '../../apps/cloud/src/edge/auth-admin.ts';
 import { authAdminApi } from '../../apps/cloud/src/edge/auth-admin.ts';
 import { DEFAULT_CABINET_URL, edgeContext } from '../../apps/cloud/src/edge/context.ts';
 import { MUST_CHANGE_PASSWORD, handleInviteManager, setPasswordUrl, tempPassword } from '../../apps/cloud/src/edge/invite-manager.ts';
+import { internalMessage } from '../../apps/cloud/src/edge/http.ts';
 import { handleOwner } from '../../apps/cloud/src/edge/owner.ts';
+import { licenseSignerFromEnv, normalizeSigningKey } from '../../apps/cloud/src/license.ts';
 import { handlePlatform } from '../../apps/cloud/src/edge/platform.ts';
 import { DEMO_PLATFORM } from '../../apps/cloud/src/seed.ts';
 import type { EdgeTest } from './edge-helpers.ts';
@@ -211,4 +214,39 @@ test('tempPassword, setPasswordUrl and TS_CABINET_URL', async () => {
   assert.equal(edgeContext(db, { TS_CABINET_URL: ' https://c.example.kz/ ' }, { log: () => {} }).cabinetUrl, 'https://c.example.kz');
   assert.equal(edgeContext(db, {}, { log: () => {} }).authAdmin, null);
   assert.notEqual(edgeContext(db, { SUPABASE_URL: 'https://r.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k' }, { log: () => {} }).authAdmin, null);
+});
+
+test('platform: a broken signing key is named, not «Внутренняя ошибка облака»; a PEM key works', async (t) => {
+  const e = await edgeTest(t);
+  const owner = await platformToken(e, DEMO_PLATFORM[0].key);
+  const body = { companyName: 'Сеть К', managerName: 'drg', managerEmail: 'drg@k.kz', license: TRIAL_7 };
+  const companies = async () => (await e.s.db.all<{ n: number }>('SELECT count(*)::int AS n FROM companies'))[0]!.n;
+  const before = await companies();
+
+  e.ctx.licenseSigner = licenseSignerFromEnv({ LICENSE_SIGNING_KEY: 'not a key', LICENSE_KEY_ID: 'TS-2026' });
+  const bad = await e.call(handlePlatform, 'POST', '/platform/clients', { headers: owner, body });
+  assert.equal(bad.status, 500);
+  assert.equal(bad.body.error.code, 'LICENSE_SIGN_FAILED');
+  assert.match(bad.body.error.message, /LICENSE_SIGNING_KEY/);
+  assert.equal(await companies(), before, 'nothing half-created');
+
+  // The dev key pasted as PEM (base64 with padding, line breaks, armor) signs fine.
+  const b64 = Buffer.from(DEV_LICENSE_KEY.privateKey, 'base64url').toString('base64');
+  const pem = `-----BEGIN PRIVATE KEY-----\n${b64.match(/.{1,40}/g)!.join('\n')}\n-----END PRIVATE KEY-----\n`;
+  assert.equal(normalizeSigningKey(pem), DEV_LICENSE_KEY.privateKey);
+  assert.equal(normalizeSigningKey(pem.replace(/\n/g, '\n')), DEV_LICENSE_KEY.privateKey);
+  e.ctx.licenseSigner = licenseSignerFromEnv({ LICENSE_SIGNING_KEY: pem, LICENSE_KEY_ID: 'dev' });
+  const ok = await e.call(handlePlatform, 'POST', '/platform/clients', { headers: owner, body });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  assert.equal((await verifyLicense(ok.body.client.license.signed, { [DEV_LICENSE_KEY.kid]: DEV_LICENSE_KEY.publicKey })).ok, true);
+});
+
+test('internalMessage: the cause is in the text, Postgres errors with their SQLSTATE', () => {
+  assert.equal(internalMessage(new Error('boom')), 'Внутренняя ошибка облака: boom');
+  assert.equal(
+    internalMessage(Object.assign(new Error('duplicate key value violates unique constraint "x"'), { code: '23505' })),
+    'Внутренняя ошибка облака: база данных (23505): duplicate key value violates unique constraint "x"',
+  );
+  assert.equal(internalMessage(null), 'Внутренняя ошибка облака');
+  assert.equal(internalMessage('x'), 'Внутренняя ошибка облака');
 });

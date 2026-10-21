@@ -27,9 +27,23 @@ export const DEFAULT_LICENSE_KEY_ID = 'ts-2026';
 
 export const DEV_SIGNER: LicenseSigner = { kid: DEV_LICENSE_KEY.kid, privateKey: DEV_LICENSE_KEY.privateKey, dev: true };
 
+/**
+ * A private key as people paste it into a secret: PEM (`-----BEGIN PRIVATE KEY-----` … with line
+ * breaks), base64 with padding or base64url — all become one base64url line.
+ */
+export function normalizeSigningKey(raw: string): string {
+  return raw
+    .replace(/-----(BEGIN|END)[^-]*-----/g, '')
+    .replace(/\\n/g, '')
+    .replace(/\s+/g, '')
+    .replace(/=+$/, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+}
+
 /** LICENSE_SIGNING_KEY / LICENSE_KEY_ID from the environment; the dev key (with a warning) without them. */
 export function licenseSignerFromEnv(env: Record<string, string | undefined>, log: (m: string) => void = () => undefined): LicenseSigner {
-  const key = env.LICENSE_SIGNING_KEY?.trim();
+  const key = env.LICENSE_SIGNING_KEY?.trim() ? normalizeSigningKey(env.LICENSE_SIGNING_KEY) : '';
   if (!key) {
     log('LICENSE_SIGNING_KEY не задан: лицензии подписываются DEV-ключом (kid "dev") — их примет только HUB с HUB_LICENSE_DEV_KEY=1');
     return DEV_SIGNER;
@@ -126,7 +140,16 @@ export async function storeLicense(
   payload: LicensePayload,
   issuedBy: string | null,
 ): Promise<StoredLicense> {
-  const signed = await signLicense(payload, signer.privateKey, signer.kid);
+  let signed: string;
+  try {
+    signed = await signLicense(payload, signer.privateKey, signer.kid);
+  } catch (e) {
+    throw new CloudError(
+      500,
+      'LICENSE_SIGN_FAILED',
+      `Не удалось подписать лицензию: ${(e as Error).message}. Проверьте секреты функций: LICENSE_SIGNING_KEY — закрытый ключ Ed25519 (PKCS#8, base64 или PEM), LICENSE_KEY_ID — строчные латинские буквы, цифры, дефис (сейчас «${signer.kid}»)`,
+    );
+  }
   await tx.run(
     `INSERT INTO licenses (id, company_id, seq, payload_json, signed, issued_at, issued_by)
      VALUES (?, ?, (SELECT COALESCE(MAX(l.seq), 0) + 1 FROM licenses l WHERE l.company_id = ?), ?, ?, ?, ?)`,

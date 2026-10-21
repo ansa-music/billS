@@ -155,7 +155,7 @@ function NewClient({ onDone }: { onDone: () => void }) {
         try {
           setInvite({ result: await inviteManager(res.client.companyId), error: null });
         } catch (err) {
-          setInvite({ result: null, error: `Приглашение не отправлено: ${describeCabinetError(err)}` });
+          setInvite({ result: null, error: `Клиент создан, но письмо не отправлено: ${describeCabinetError(err)}. Используйте «Временный пароль» ниже.` });
         }
       }
       setCreated(res);

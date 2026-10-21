@@ -619,12 +619,12 @@ export function issueManagerKey(companyId: string): Promise<IssuedLongKey> {
 
 /** Edge Function `invite-manager`: Supabase mails the manager an invitation (or a reset letter for an existing account). */
 export function inviteManager(companyId: string): Promise<ManagerInviteResponse> {
-  return platformEdge<ManagerInviteResponse>('POST', `/invite-manager/clients/${enc(companyId)}/invite`, {}, true, false, 'invite-manager');
+  return platformEdge<ManagerInviteResponse>('POST', `/invite-manager/clients/${enc(companyId)}/invite`, {}, true, true, 'invite-manager');
 }
 
 /** Edge Function `invite-manager`: a temporary password, shown once; the manager changes it on first sign-in. */
 export function managerTempPassword(companyId: string): Promise<ManagerTempPasswordResponse> {
-  return platformEdge<ManagerTempPasswordResponse>('POST', `/invite-manager/clients/${enc(companyId)}/temp-password`, {}, true, false, 'invite-manager');
+  return platformEdge<ManagerTempPasswordResponse>('POST', `/invite-manager/clients/${enc(companyId)}/temp-password`, {}, true, true, 'invite-manager');
 }
 
 // --- manager cabinet: Edge Function `owner`, /owner/company/… -----------------
