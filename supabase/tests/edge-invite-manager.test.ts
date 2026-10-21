@@ -13,7 +13,7 @@ import { DEFAULT_CABINET_URL, edgeContext } from '../../apps/cloud/src/edge/cont
 import { MUST_CHANGE_PASSWORD, handleInviteManager, setPasswordUrl, tempPassword } from '../../apps/cloud/src/edge/invite-manager.ts';
 import { internalMessage } from '../../apps/cloud/src/edge/http.ts';
 import { handleOwner } from '../../apps/cloud/src/edge/owner.ts';
-import { licenseSignerFromEnv, normalizeSigningKey } from '../../apps/cloud/src/license.ts';
+import { licenseSignerFromEnv } from '../../apps/cloud/src/license.ts';
 import { handlePlatform } from '../../apps/cloud/src/edge/platform.ts';
 import { DEMO_PLATFORM } from '../../apps/cloud/src/seed.ts';
 import type { EdgeTest } from './edge-helpers.ts';
@@ -216,7 +216,7 @@ test('tempPassword, setPasswordUrl and TS_CABINET_URL', async () => {
   assert.notEqual(edgeContext(db, { SUPABASE_URL: 'https://r.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k' }, { log: () => {} }).authAdmin, null);
 });
 
-test('platform: a broken signing key is named, not «Внутренняя ошибка облака»; a PEM key works', async (t) => {
+test('platform: a broken signing key is named, not «Внутренняя ошибка облака»; nothing half-created', async (t) => {
   const e = await edgeTest(t);
   const owner = await platformToken(e, DEMO_PLATFORM[0].key);
   const body = { companyName: 'Сеть К', managerName: 'drg', managerEmail: 'drg@k.kz', license: TRIAL_7 };
@@ -226,16 +226,15 @@ test('platform: a broken signing key is named, not «Внутренняя оши
   e.ctx.licenseSigner = licenseSignerFromEnv({ LICENSE_SIGNING_KEY: 'not a key', LICENSE_KEY_ID: 'TS-2026' });
   const bad = await e.call(handlePlatform, 'POST', '/platform/clients', { headers: owner, body });
   assert.equal(bad.status, 500);
-  assert.equal(bad.body.error.code, 'LICENSE_SIGN_FAILED');
+  assert.equal(bad.body.error.code, 'LICENSE_KEY_MISSING');
   assert.match(bad.body.error.message, /LICENSE_SIGNING_KEY/);
   assert.equal(await companies(), before, 'nothing half-created');
 
-  // The dev key pasted as PEM (base64 with padding, line breaks, armor) signs fine.
-  const b64 = Buffer.from(DEV_LICENSE_KEY.privateKey, 'base64url').toString('base64');
-  const pem = `-----BEGIN PRIVATE KEY-----\n${b64.match(/.{1,40}/g)!.join('\n')}\n-----END PRIVATE KEY-----\n`;
-  assert.equal(normalizeSigningKey(pem), DEV_LICENSE_KEY.privateKey);
-  assert.equal(normalizeSigningKey(pem.replace(/\n/g, '\n')), DEV_LICENSE_KEY.privateKey);
-  e.ctx.licenseSigner = licenseSignerFromEnv({ LICENSE_SIGNING_KEY: pem, LICENSE_KEY_ID: 'dev' });
+  // A whole notes file with the dev key inside signs fine.
+  e.ctx.licenseSigner = licenseSignerFromEnv({ LICENSE_SIGNING_KEY: `# TS
+LICENSE_KEY_ID=dev
+LICENSE_SIGNING_KEY=${DEV_LICENSE_KEY.privateKey}
+` });
   const ok = await e.call(handlePlatform, 'POST', '/platform/clients', { headers: owner, body });
   assert.equal(ok.status, 200, JSON.stringify(ok.body));
   assert.equal((await verifyLicense(ok.body.client.license.signed, { [DEV_LICENSE_KEY.kid]: DEV_LICENSE_KEY.publicKey })).ok, true);
