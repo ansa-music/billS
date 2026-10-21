@@ -2,8 +2,9 @@
  * Client licenses in the cloud: terms → signed `TS1.…` text (packages/domain license.ts),
  * stored as history in `licenses` (the highest seq of a company is in force).
  *
- * The private key is the secret LICENSE_SIGNING_KEY (PKCS#8 Ed25519, base64url or base64)
- * with LICENSE_KEY_ID (default 'ts-2026'). Without it the cloud signs with DEV_LICENSE_KEY
+ * The private key is the secret LICENSE_SIGNING_KEY (PKCS#8 Ed25519: base64url, base64, PEM or
+ * the whole generated key file, see parseSigningKey) with LICENSE_KEY_ID (default 'ts-2026').
+ * Without it the cloud signs with DEV_LICENSE_KEY
  * (kid 'dev', private half in the repo) and says so in the log: such licenses are accepted
  * only by a HUB started with HUB_LICENSE_DEV_KEY=1.
  *
@@ -12,7 +13,17 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { LicenseModule, LicensePayload, LicenseTermsRequest, LicenseView } from '@bills/domain';
-import { DEV_LICENSE_KEY, LICENSE_MODULES, licensePayloadProblem, licenseStatus, licenseTermEnd, signLicense } from '@bills/domain';
+import {
+  b64urlDecodeBytes,
+  b64urlEncode,
+  DEV_LICENSE_KEY,
+  LICENSE_MODULES,
+  licensePayloadProblem,
+  licenseStatus,
+  licenseTermEnd,
+  PLATFORM_LICENSE_PUBLIC_KEYS,
+  signLicense,
+} from '@bills/domain';
 import type { SqlDriver } from './db/driver.ts';
 import { CloudError } from './errors.ts';
 
@@ -21,34 +32,164 @@ export interface LicenseSigner {
   privateKey: string;
   /** Signing with the public dev key (no LICENSE_SIGNING_KEY). */
   dev: boolean;
+  /** LICENSE_SIGNING_KEY is set but holds no usable key: why (signing then fails with it). */
+  problem?: string;
 }
 
 export const DEFAULT_LICENSE_KEY_ID = 'ts-2026';
 
 export const DEV_SIGNER: LicenseSigner = { kid: DEV_LICENSE_KEY.kid, privateKey: DEV_LICENSE_KEY.privateKey, dev: true };
 
-/**
- * A private key as people paste it into a secret: PEM (`-----BEGIN PRIVATE KEY-----` … with line
- * breaks), base64 with padding or base64url — all become one base64url line.
- */
-export function normalizeSigningKey(raw: string): string {
-  return raw
-    .replace(/-----(BEGIN|END)[^-]*-----/g, '')
-    .replace(/\\n/g, '')
-    .replace(/\s+/g, '')
-    .replace(/=+$/, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
+/** DER prefix of a PKCS#8 Ed25519 private key; the 32-byte seed follows it. */
+const PKCS8_ED25519_PREFIX = [0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20];
+
+export interface ParsedSigningKey {
+  /** PKCS#8 DER, base64url without padding. */
+  privateKey: string;
+  /** `kid: …` / `LICENSE_KEY_ID=…` found next to the key, if any. */
+  kid: string | null;
 }
 
-/** LICENSE_SIGNING_KEY / LICENSE_KEY_ID from the environment; the dev key (with a warning) without them. */
+function decodeKeyToken(token: string): Uint8Array | null {
+  try {
+    return b64urlDecodeBytes(token.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''));
+  } catch {
+    return null;
+  }
+}
+
+function isPkcs8Ed25519(bytes: Uint8Array): boolean {
+  return bytes.length === 48 && PKCS8_ED25519_PREFIX.every((b, i) => bytes[i] === b);
+}
+
+function pkcs8FromSeed(seed: Uint8Array): Uint8Array {
+  const out = new Uint8Array(48);
+  out.set(PKCS8_ED25519_PREFIX);
+  out.set(seed, 16);
+  return out;
+}
+
+/**
+ * The signing key as people paste it into a secret: the key alone (PKCS#8 DER in base64 or
+ * base64url, or a raw 32-byte seed), a PEM block, or the whole generated key file with its
+ * comments and labels (`private (pkcs8, base64url): …`, `… LICENSE_SIGNING_KEY=…`,
+ * `kid: ts-2026`, a `public (raw, base64url): …` line that is skipped). BOM, CR, literal `\n`
+ * and stray whitespace are ignored. Throws a plain message when no private key is found or
+ * the text holds two different ones.
+ */
+export function parseSigningKey(raw: string): ParsedSigningKey {
+  const text = raw.replace(/^﻿/, '').replace(/\\r\\n|\\n/g, '\n').replace(/\r\n?/g, '\n');
+  const kid = /(?:^|[\s(])(?:kid|LICENSE_KEY_ID)\s*[:=]\s*["'«]?([a-z0-9-]{1,32})/im.exec(text)?.[1] ?? null;
+
+  const found: Uint8Array[] = [];
+  const pem = /-----BEGIN (?:ED25519 )?PRIVATE KEY-----([\s\S]*?)-----END [^-\n]*-----/.exec(text);
+  if (pem) {
+    const bytes = decodeKeyToken(pem[1]!.replace(/\s+/g, ''));
+    if (!bytes || !isPkcs8Ed25519(bytes)) throw new Error('блок PEM в LICENSE_SIGNING_KEY — не закрытый ключ Ed25519 (PKCS#8)');
+    found.push(bytes);
+  } else {
+    const seeds: Uint8Array[] = [];
+    for (const line of text.split('\n')) {
+      // The key file also lists the public half (32 bytes, like a seed): never take it for the key.
+      const isPublic = /public|публичн|открыт/i.test(line);
+      for (const m of line.matchAll(/[A-Za-z0-9+/_-]{40,}={0,2}/g)) {
+        const bytes = decodeKeyToken(m[0]);
+        if (!bytes) continue;
+        if (isPkcs8Ed25519(bytes)) found.push(bytes);
+        else if (bytes.length === 32 && !isPublic) seeds.push(bytes);
+      }
+    }
+    // A key wrapped over several lines without PEM armor.
+    if (!found.length && !seeds.length) {
+      const joined = decodeKeyToken(text.replace(/\s+/g, ''));
+      if (joined && isPkcs8Ed25519(joined)) found.push(joined);
+      else if (joined && joined.length === 32) seeds.push(joined);
+    }
+    if (!found.length) found.push(...seeds.map(pkcs8FromSeed));
+  }
+  if (!found.length) {
+    throw new Error('в LICENSE_SIGNING_KEY не найден закрытый ключ Ed25519 (нужен PKCS#8 в base64/base64url, блок PEM или 32-байтовый seed)');
+  }
+  const key = b64urlEncode(found[0]!);
+  if (found.some((b) => b64urlEncode(b) !== key)) throw new Error('в LICENSE_SIGNING_KEY несколько разных закрытых ключей — оставьте один');
+  return { privateKey: key, kid };
+}
+
+/** The private key of a pasted secret as one base64url line (see parseSigningKey). */
+export function normalizeSigningKey(raw: string): string {
+  return parseSigningKey(raw).privateKey;
+}
+
+/**
+ * LICENSE_SIGNING_KEY / LICENSE_KEY_ID from the environment; the dev key (with a warning)
+ * without them. LICENSE_KEY_ID wins over a `kid:` line inside the pasted key file.
+ */
 export function licenseSignerFromEnv(env: Record<string, string | undefined>, log: (m: string) => void = () => undefined): LicenseSigner {
-  const key = env.LICENSE_SIGNING_KEY?.trim() ? normalizeSigningKey(env.LICENSE_SIGNING_KEY) : '';
-  if (!key) {
+  const raw = env.LICENSE_SIGNING_KEY ?? '';
+  if (!raw.replace(/^﻿/, '').trim()) {
     log('LICENSE_SIGNING_KEY не задан: лицензии подписываются DEV-ключом (kid "dev") — их примет только HUB с HUB_LICENSE_DEV_KEY=1');
     return DEV_SIGNER;
   }
-  return { kid: env.LICENSE_KEY_ID?.trim() || DEFAULT_LICENSE_KEY_ID, privateKey: key, dev: false };
+  const envKid = env.LICENSE_KEY_ID?.trim();
+  try {
+    const parsed = parseSigningKey(raw);
+    return { kid: envKid || parsed.kid || DEFAULT_LICENSE_KEY_ID, privateKey: parsed.privateKey, dev: false };
+  } catch (e) {
+    const problem = (e as Error).message;
+    log(`LICENSE_SIGNING_KEY: ${problem}`);
+    return { kid: envKid || DEFAULT_LICENSE_KEY_ID, privateKey: '', dev: false, problem };
+  }
+}
+
+/** Public keys a HUB knows: the platform's and the dev key. */
+const KNOWN_PUBLIC_KEYS: Readonly<Record<string, string>> = { ...PLATFORM_LICENSE_PUBLIC_KEYS, [DEV_LICENSE_KEY.kid]: DEV_LICENSE_KEY.publicKey };
+
+function bytesOf(b64url: string): Uint8Array<ArrayBuffer> {
+  const src = b64urlDecodeBytes(b64url);
+  const out = new Uint8Array(new ArrayBuffer(src.length));
+  out.set(src);
+  return out;
+}
+
+async function signsFor(privateKey: string, publicKey: string): Promise<boolean> {
+  const subtle = globalThis.crypto.subtle;
+  const probe = new TextEncoder().encode('TS license key check');
+  const priv = await subtle.importKey('pkcs8', bytesOf(privateKey), { name: 'Ed25519' }, false, ['sign']);
+  const sig = await subtle.sign({ name: 'Ed25519' }, priv, probe);
+  const pub = await subtle.importKey('raw', bytesOf(publicKey), { name: 'Ed25519' }, false, ['verify']);
+  return subtle.verify({ name: 'Ed25519' }, pub, sig, probe);
+}
+
+const signerChecks = new WeakMap<LicenseSigner, Promise<string | null>>();
+
+/**
+ * Why a signer cannot sign licenses a HUB accepts, or null: the key did not parse, or its
+ * public half is not the platform key of its kid. Checked once per signer.
+ */
+export function signerProblem(signer: LicenseSigner): Promise<string | null> {
+  if (signer.problem) return Promise.resolve(signer.problem);
+  if (signer.dev) return Promise.resolve(null);
+  let check = signerChecks.get(signer);
+  if (!check) {
+    check = (async () => {
+      const own = KNOWN_PUBLIC_KEYS[signer.kid];
+      if (own && (await signsFor(signer.privateKey, own))) return null;
+      for (const [kid, pub] of Object.entries(KNOWN_PUBLIC_KEYS)) {
+        if (kid !== signer.kid && (await signsFor(signer.privateKey, pub))) {
+          return `ключ подписи относится к kid «${kid}», а LICENSE_KEY_ID — «${signer.kid}»`;
+        }
+      }
+      return `ключ подписи не соответствует публичному ключу платформы (kid «${signer.kid}»): HUB не примет такие лицензии`;
+    })().catch((e: unknown) => `ключ подписи не читается: ${(e as Error).message}`);
+    signerChecks.set(signer, check);
+  }
+  return check;
+}
+
+async function signWith(signer: LicenseSigner, payload: LicensePayload): Promise<string> {
+  const problem = await signerProblem(signer);
+  if (problem) throw new Error(problem);
+  return signLicense(payload, signer.privateKey, signer.kid);
 }
 
 // ---------------------------------------------------------------------------
@@ -101,7 +242,7 @@ export async function signPendingLicenses(db: SqlDriver, signer: LicenseSigner, 
       log(`Лицензия ${row.id}: ${problem ?? 'чужая компания'} — не подписана`);
       continue;
     }
-    const text = await signLicense(payload, signer.privateKey, signer.kid);
+    const text = await signWith(signer, payload);
     await db.transaction(async (tx) => {
       const changed = await tx.run("UPDATE licenses SET signed = ?, payload_json = ? WHERE id = ? AND signed = ''", [
         text,
@@ -142,7 +283,7 @@ export async function storeLicense(
 ): Promise<StoredLicense> {
   let signed: string;
   try {
-    signed = await signLicense(payload, signer.privateKey, signer.kid);
+    signed = await signWith(signer, payload);
   } catch (e) {
     throw new CloudError(
       500,
