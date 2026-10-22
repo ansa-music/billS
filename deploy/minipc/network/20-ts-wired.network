@@ -1,0 +1,15 @@
+# TS: любой проводной порт мини-ПК получает адрес от роутера по DHCP.
+# Кабель можно включить в любой порт и в любой момент — перезагрузка не нужна.
+# Постоянный адрес для HUB лучше закрепить на роутере (резервирование DHCP по MAC-адресу).
+[Match]
+Type=ether
+Name=en* eth*
+
+[Network]
+DHCP=yes
+IPv6AcceptRA=yes
+LinkLocalAddressing=yes
+
+[DHCPv4]
+UseDomains=yes
+SendHostname=yes

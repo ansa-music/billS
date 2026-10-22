@@ -1,0 +1,98 @@
+#!/bin/sh
+# shellcheck shell=sh disable=SC3043
+# late.sh — последний шаг установщика Debian (preseed/late_command): ставит в новую систему
+# (она смонтирована в /target) файлы TS для первой загрузки. Среда — busybox sh установщика.
+#
+# Что делает:
+#   1. /opt/ts-minipc: firstboot.sh, console.sh, build-info и копия deploy/linux той же версии;
+#      /etc/ts-minipc/image-info — признак «здесь стоит TS» (его ищут меню флешки и pick-disk.sh).
+#   2. Службы ts-firstboot (ставит HUB при первой загрузке) и ts-console (адрес HUB на экране, tty1).
+#   3. Экран: шрифт с кириллицей и псевдографикой для QR-кода.
+#   4. Сеть: systemd-networkd + systemd-resolved — DHCP на любом проводном порту, переподключение
+#      кабеля и поздно включившийся роутер подхватываются без перезагрузки (ifupdown так не умеет).
+#      Не получилось поставить systemd-resolved — остаётся сеть, которую настроил установщик.
+#   5. Автоматические обновления безопасности.
+
+set -e
+TS=/ts-minipc
+T=/target
+
+log() {
+  echo "ts-minipc: $*" >&2
+  logger -t ts-minipc -- "$*" 2>/dev/null || true
+}
+
+[ -d "$T/etc" ] || { log "нет $T/etc — система не смонтирована?"; exit 1; }
+
+# ---------- 1. Файлы TS ----------
+log "копирую файлы TS в /opt/ts-minipc"
+mkdir -p "$T/opt/ts-minipc" "$T/etc/ts-minipc" "$T/etc/systemd/system/multi-user.target.wants"
+cp -a "$TS/target/." "$T/"
+chown -R 0:0 "$T/opt/ts-minipc"
+chmod 755 "$T/opt/ts-minipc" "$T/opt/ts-minipc/"*.sh "$T/opt/ts-minipc/linux/"*.sh
+chmod 644 "$T/etc/systemd/system/ts-firstboot.service" "$T/etc/systemd/system/ts-console.service"
+
+disk=$(debconf-get partman-auto/disk 2>/dev/null || true)
+{
+  cat "$TS/build-info"
+  echo "TS_INSTALLED_AT='$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+  echo "TS_TARGET_DISK='${disk:-unknown}'"
+} >"$T/etc/ts-minipc/image-info"
+chmod 644 "$T/etc/ts-minipc/image-info"
+
+# ---------- 2. Службы ----------
+ln -sf /etc/systemd/system/ts-firstboot.service "$T/etc/systemd/system/multi-user.target.wants/ts-firstboot.service"
+ln -sf /etc/systemd/system/ts-console.service "$T/etc/systemd/system/multi-user.target.wants/ts-console.service"
+# tty1 занимает экран TS; вход для техподдержки — Ctrl+Alt+F2.
+rm -f "$T/etc/systemd/system/getty.target.wants/getty@tty1.service"
+
+# ---------- 3. Экран: кириллица + блоки ▀▄█ для QR-кода (есть в FullCyrSlav) ----------
+cat >"$T/etc/default/console-setup" <<'EOF'
+# TS: шрифт консоли с кириллицей и псевдографикой (для QR-кода на экране мини-ПК).
+ACTIVE_CONSOLES="/dev/tty[1-6]"
+CHARMAP="UTF-8"
+CODESET="FullCyrSlav"
+FONTFACE="Fixed"
+FONTSIZE="8x16"
+VIDEOMODE=
+EOF
+in-target setupcon --save-only >/dev/null 2>&1 || log "setupcon --save-only не удался — шрифт загрузит ts-console"
+mkdir -p "$T/etc/sysctl.d"
+echo 'kernel.printk = 3 4 1 3' >"$T/etc/sysctl.d/90-ts-console.conf"
+
+# ---------- 4. Сеть ----------
+# Пакет ставим последним: после его установки DNS внутри /target до перезагрузки не работает.
+if apt-install systemd-resolved >/dev/null 2>&1 || in-target apt-get -y -q install systemd-resolved >/dev/null 2>&1; then
+  log "сеть: systemd-networkd + systemd-resolved"
+  mkdir -p "$T/etc/systemd/network" "$T/etc/systemd/resolved.conf.d" \
+    "$T/etc/systemd/system/systemd-networkd-wait-online.service.d"
+  cp "$TS/network/20-ts-wired.network" "$T/etc/systemd/network/20-ts-wired.network"
+  cp "$TS/network/resolved-ts.conf" "$T/etc/systemd/resolved.conf.d/ts.conf"
+  cp "$TS/network/wait-online-ts.conf" "$T/etc/systemd/system/systemd-networkd-wait-online.service.d/ts.conf"
+  if [ -f "$T/etc/network/interfaces" ] && [ ! -f "$T/etc/network/interfaces.before-ts" ]; then
+    mv "$T/etc/network/interfaces" "$T/etc/network/interfaces.before-ts"
+  fi
+  cat >"$T/etc/network/interfaces" <<'EOF'
+# TS: проводными портами управляет systemd-networkd (/etc/systemd/network/20-ts-wired.network).
+# Прежняя настройка установщика — interfaces.before-ts.
+source /etc/network/interfaces.d/*
+
+auto lo
+iface lo inet loopback
+EOF
+  in-target systemctl enable systemd-networkd.service systemd-resolved.service >/dev/null 2>&1 \
+    || log "systemctl enable systemd-networkd/resolved не удался"
+  ln -sf /run/systemd/resolve/stub-resolv.conf "$T/etc/resolv.conf"
+else
+  log "systemd-resolved не установился — оставляю сеть, настроенную установщиком (ifupdown)"
+fi
+
+# ---------- 5. Автоматические обновления безопасности ----------
+mkdir -p "$T/etc/apt/apt.conf.d"
+cat >"$T/etc/apt/apt.conf.d/20auto-upgrades" <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+
+log "готово: после перезагрузки ts-firstboot установит HUB"
+exit 0

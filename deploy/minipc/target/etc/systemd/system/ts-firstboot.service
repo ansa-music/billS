@@ -1,0 +1,23 @@
+# TS: первая установка HUB на мини-ПК, поставленном с флешки «TS для мини-ПК».
+# Ждёт интернет, запускает /opt/ts-minipc/linux/install.sh той версии, из которой собран образ,
+# при ошибке повторяет через минуту. После успеха создаёт /var/lib/ts-minipc/installed и больше
+# не запускается. Ход установки — на экране мини-ПК (ts-console) и в journalctl -u ts-firstboot.
+
+[Unit]
+Description=TS: первая установка HUB
+Documentation=https://github.com/ansa-music/billS/blob/main/docs/MINIPC_RU.md
+After=network-online.target time-sync.target
+Wants=network-online.target
+ConditionPathExists=!/var/lib/ts-minipc/installed
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/bin/bash /opt/ts-minipc/firstboot.sh
+Restart=on-failure
+RestartSec=60
+TimeoutStartSec=infinity
+Environment=LANG=ru_RU.UTF-8
+
+[Install]
+WantedBy=multi-user.target

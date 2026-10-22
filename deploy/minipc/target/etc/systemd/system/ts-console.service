@@ -1,0 +1,24 @@
+# TS: экран мини-ПК (tty1) — ход установки, адрес настройки HUB и QR-код.
+# Вход в систему для техподдержки — на соседней консоли: Ctrl+Alt+F2.
+
+[Unit]
+Description=TS: адрес HUB на экране мини-ПК
+Documentation=https://github.com/ansa-music/billS/blob/main/docs/MINIPC_RU.md
+After=systemd-user-sessions.service console-setup.service getty-pre.target
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+ExecStart=/bin/bash /opt/ts-minipc/console.sh
+Restart=always
+RestartSec=5
+StandardInput=null
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+Environment=LANG=ru_RU.UTF-8 TERM=linux
+
+[Install]
+WantedBy=multi-user.target
