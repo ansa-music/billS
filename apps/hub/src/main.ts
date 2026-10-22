@@ -1,7 +1,6 @@
 import { existsSync } from 'node:fs';
 import { systemClock } from './clock.ts';
-import { loadConfig } from './config.ts';
-import { openDb } from './db.ts';
+import { openDb, transaction } from './db.ts';
 import { buildApp } from './http/app.ts';
 import { Hub } from './hub.ts';
 import { createLampDriver } from './lamps/factory.ts';
@@ -13,15 +12,19 @@ import { writeBootstrapKeys } from './auth.ts';
 import { dirname, join } from 'node:path';
 import { MdnsResponder, normalizeHostName } from './mdns.ts';
 import { loadTls, startRedirectServer, tlsStatus } from './tls/serve.ts';
-import { DEMO_KEYS, standaloneHubId } from '@bills/domain';
+import { DEMO_KEYS, HUB_SETUP_PATH, originUrl, standaloneHubId } from '@bills/domain';
 import { clubId } from './views.ts';
 import { nextDemoReset } from './demo.ts';
 import { DEMO_LICENSE_KEYS, installDemoLicense } from './demo-license.ts';
+import { lanAddresses } from './tls/ca.ts';
+import { record } from './journal.ts';
+import { loadHubConfig, SETUP_RESTART_EXIT_CODE, SetupService } from './setup.ts';
 
-const config = loadConfig();
-if (config.cloudUrl && (!config.cloudApiKey || !config.hubId)) {
-  throw new Error('CLOUD_URL задан, но CLOUD_API_KEY или HUB_ID пустые');
-}
+// hub.env (process env) plus what the first-boot wizard saved in setup.json next to the database.
+const { config, setupPath, setupError } = loadHubConfig();
+// CLOUD_URL alone (e.g. preset in the mini-PC image) is not a connection: the HUB runs standalone
+// and the wizard at /setup asks for HUB_ID and the key.
+const cloudReady = Boolean(config.cloudUrl && config.cloudApiKey && config.hubId);
 const db = openDb(config.dbPath);
 const seeded = seedDemo(db, Date.now(), config.demoTimezone);
 
@@ -44,7 +47,7 @@ const hub = new Hub({
     publicKeys: config.demo ? DEMO_LICENSE_KEYS : config.licensePublicKeys,
     hubId: config.hubId || standaloneHubId(clubId(db)),
   },
-  ...(config.cloudUrl
+  ...(cloudReady && config.cloudUrl
     ? {
         sync: {
           url: config.cloudUrl,
@@ -68,7 +71,22 @@ const status = () =>
     mdnsName: mdnsHost,
     now: Date.now(),
   });
+// First-boot wizard: open from the club LAN while no cloud is connected; saving restarts the HUB.
+const setup = new SetupService({
+  path: setupPath,
+  env: process.env,
+  config,
+  onSaved: () => {
+    app.log.warn({ setupPath }, 'Мастер настройки сохранил подключение — HUB перезапускается, чтобы его применить');
+    void shutdown('setup', SETUP_RESTART_EXIT_CODE);
+  },
+  audit: (data) =>
+    transaction(db, () =>
+      record(db, Date.now(), { actor: 'setup', action: 'hub.setup_saved', entityType: 'club', entityId: clubId(db), data }),
+    ),
+});
 const app = buildApp(hub, {
+  setup,
   tls: { runtime: tls, status },
   simulator: lamps.simulator,
   upsSimulator: ups instanceof SimulatorUps ? ups : undefined,
@@ -132,7 +150,7 @@ app.log.info(
     ups: ups?.label ?? 'off',
     webDist: config.webDistPath,
     webDistServed,
-    cloud: config.cloudUrl ?? 'off',
+    cloud: cloudReady ? config.cloudUrl : 'off',
     hubId: config.hubId || undefined,
     license: hub.license.enforced ? hub.license.status().state : 'off',
     https: tls ? true : false,
@@ -145,19 +163,30 @@ app.log.info(
 if (!webDistServed) {
   app.log.warn('Hall screen is not built: run `npm run build` in the repo root to serve it on /');
 }
+if (setupError) app.log.error({ setupPath }, `${setupError} — HUB работает без облака, мастер /setup открыт снова`);
+if (config.cloudUrl && !cloudReady) app.log.warn('CLOUD_URL задан, но HUB_ID или CLOUD_API_KEY пустые — HUB работает без облака');
+if (setup.status().open) {
+  const scheme = tls ? 'https' : 'http';
+  const hosts = [...lanAddresses(), ...(mdnsHost ? [mdnsHost] : [])];
+  const urls = (hosts.length ? hosts : ['<адрес-мини-ПК>']).map((h) => `${originUrl(scheme, h, config.port)}${HUB_SETUP_PATH}`);
+  app.log.warn({ urls }, 'HUB не подключён к облаку — откройте мастер настройки с телефона в сети клуба');
+  if (config.host === '127.0.0.1' || config.host === 'localhost') {
+    app.log.warn('HUB_HOST=127.0.0.1: мастер /setup открывается только на этом компьютере (для сети клуба — HUB_HOST=0.0.0.0)');
+  }
+}
 
 let stopping = false;
-async function shutdown(signal: string) {
+async function shutdown(signal: string, exitCode = 0) {
   if (stopping) return;
   stopping = true;
-  app.log.info({ signal }, 'HUB stopping');
+  app.log.info({ signal, exitCode }, 'HUB stopping');
   await mdns?.close();
   redirect?.close();
   await app.close();
   hub.close();
   lamps.close();
   db.close();
-  process.exit(0);
+  process.exit(exitCode);
 }
 process.once('SIGINT', () => void shutdown('SIGINT'));
 process.once('SIGTERM', () => void shutdown('SIGTERM'));

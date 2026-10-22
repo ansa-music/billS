@@ -1,5 +1,7 @@
 // Сборка Android: собрать кабинет в www/, cap sync, затем gradle-задача.
 //   node scripts/android.mjs assembleDebug   → android/app/build/outputs/apk/debug/app-debug.apk
+//   node scripts/android.mjs assembleRelease → android/app/build/outputs/apk/release/app-release.apk
+//     (ключ подписи — ANDROID_KEYSTORE_* или android/keystore.properties, иначе отладочный ключ)
 //   node scripts/android.mjs bundleRelease   → android/app/build/outputs/bundle/release/app-release.aab
 // JDK 21 и Android SDK ищутся сами (JAVA_HOME / ANDROID_HOME или стандартные пути Windows).
 import { execFileSync } from 'node:child_process';

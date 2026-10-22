@@ -22,6 +22,8 @@ import { registerBarRoutes } from './routes/bar.ts';
 import { registerLicenseRoutes } from './routes/license.ts';
 import { registerReportRoutes } from './routes/reports.ts';
 import { registerSettingsRoutes } from './routes/settings.ts';
+import { registerSetupRoutes } from './routes/setup.ts';
+import type { SetupController } from './routes/setup.ts';
 import { registerStaffRoutes } from './routes/staff.ts';
 import { registerStatic } from './static.ts';
 import type { TlsStatus } from '@bills/domain';
@@ -47,6 +49,8 @@ export interface AppOptions extends AuthHookOptions {
   corsOrigins?: readonly string[];
   /** Public demo club: GET /api/demo tells the screen to show the demo banner and keys. */
   demo?: { resetAt: () => number };
+  /** First-boot wizard (/setup, src/setup.ts): connects the HUB to a cloud from the club LAN. */
+  setup?: SetupController;
 }
 
 export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
@@ -426,6 +430,9 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
     options.tls?.status ?? (() => tlsStatus({ tls: null, httpsPort: null, httpPort: null, mdnsName: null, now: hub.clock.now() })),
     runtime,
   );
+
+  // Before the hall screen: its SPA fallback must not answer /setup.
+  if (options.setup) registerSetupRoutes(app, options.setup);
 
   if (options.staticDir) registerStatic(app, options.staticDir);
 

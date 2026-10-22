@@ -8,12 +8,12 @@
     "build": "vite build",
     "sync": "npm run build && cap sync",
     "build:android-debug": "node scripts/android.mjs assembleDebug",
+    "build:android-apk": "node scripts/android.mjs assembleRelease",
     "build:android-release": "node scripts/android.mjs bundleRelease",
     "icons": "node scripts/icons.mjs"
   },
   "dependencies": {
     "@bills/domain": "*",
-    "@capacitor-firebase/messaging": "^8.5.2",
     "@capacitor/android": "^8.5.3",
     "@capacitor/app": "^8.0.0",
     "@capacitor/barcode-scanner": "^3.1.3",
@@ -22,7 +22,6 @@
     "@capacitor/ios": "^8.5.3",
     "@capacitor/preferences": "^8.0.1",
     "@capacitor/splash-screen": "^8.0.0",
-    "firebase": "^12.6.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

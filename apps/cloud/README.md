@@ -72,7 +72,8 @@ node --env-file-if-exists=.env apps/cloud/src/main.ts    # или: npm run dev -
 | `CLOUD_DEMO_SEED` | `1` для SQLite, `0` для PostgreSQL | демо-сид на пустой базе |
 | `CLOUD_SECURE_COOKIES` | `0` | ставить флаг `Secure` на cookie владельца (только за HTTPS) |
 | `CLOUD_WEB_DIST` | `apps/cloud-web/dist` | собранный кабинет владельца; облако отдаёт его на `/` (если папки нет — только API) |
-| `CLOUD_FCM_SERVICE_ACCOUNT` / `CLOUD_FCM_SERVICE_ACCOUNT_JSON` | — | ключ сервисного аккаунта Firebase (путь к JSON или сам JSON); без него push выключены |
+| `NTFY_DISABLED` / `NTFY_TOKEN` | — | `1` — выключить push через [ntfy](https://ntfy.sh); токен — для своего сервера ntfy с доступом по паролю |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | — | ключи Web Push для кабинета в браузере (`npm run vapid`) |
 | `CLOUD_PUBLIC_URL` | из запроса | HTTPS-адрес облака для QR входа с телефона |
 | `CLOUD_HUB_OFFLINE_MINUTES` | `10` | через сколько минут тишины HUB считается пропавшим (push `HUB_OFFLINE`) |
 | `CLOUD_SHIFT_OPEN_HOURS` | `20` | через сколько часов открытая смена даёт push `SHIFT_NOT_CLOSED` |
@@ -168,7 +169,7 @@ HUB (`Authorization: Bearer <ключ>`; `hubId` в теле должен сов
 | `GET /api/owner/keys` | `OwnerKeyView[]` — живые ключи владельца |
 | `POST /api/owner/keys { label? }` | `CreateOwnerKeyResponse`: ключ (один раз) и текст QR `ts://login?cloud=…&key=…` |
 | `DELETE /api/owner/keys/:id` | отозвать ключ |
-| `POST /api/owner/devices { token, platform, name? }` | `DeviceView` — регистрация FCM-токена (повтор с тем же токеном обновляет запись) |
+| `POST /api/owner/devices { token, platform, name? }` | `DeviceView` — регистрация устройства (повтор с тем же токеном обновляет запись) |
 | `DELETE /api/owner/devices/:id` | убрать телефон (при выходе из приложения) |
 | `GET /api/owner/push` | `PushSettingsView`: включены ли push на облаке, виды, правила, устройства |
 | `PUT /api/owner/push/rules { rules }` | полный список правил → `PushSettingsView` |
@@ -189,13 +190,17 @@ HUB (`Authorization: Bearer <ключ>`; `hubId` в теле должен сов
 
 **Как:** проекция и сторож (раз в минуту в `main.ts`) кладут уведомление в `push_queue` в той же
 транзакции, что и событие; `dedupe_key` защищает от повторов при повторной доставке пачки.
-После коммита `PushDispatcher.flush()` рассылает очередь через FCM HTTP v1: OAuth-токен
-получается из ключа сервисного аккаунта (JWT RS256 через `node:crypto`, без SDK Google) и
-кэшируется на час. Токен, о котором FCM отвечает `UNREGISTERED`/404, удаляет устройство.
-Тревоги старше `CLOUD_PUSH_MAX_AGE_MINUTES` помечаются `STALE`. **Без ключа** — режим
-«push выключены»: очередь помечается `DISABLED`, каждое уведомление пишется в лог, правила и
-устройства сохраняются. Тесты (`test/push.test.ts`) гоняют настоящий `FcmSender` на фейковом
-FCM с проверкой подписи JWT.
+После коммита `PushDispatcher.flush()` рассылает очередь; канал выбирает `RoutingSender` по
+платформе устройства: `ntfy` — POST в секретную тему ntfy (приложение ntfy на телефоне),
+`webpush` — Web Push с VAPID (кабинет в браузере). Firebase (FCM) не используется: ему нужен
+Google-проект и сервисный ключ. Устройства `android`/`ios`/`web` остались от FCM — на них
+ничего не отправляется, в кабинете у них видна ошибка «подключён по старой схеме». Подписка,
+о которой сервис отвечает 404/410, удаляет устройство. Тревоги старше
+`CLOUD_PUSH_MAX_AGE_MINUTES` помечаются `STALE`. **Без каналов** (`NTFY_DISABLED=1` и нет
+ключей VAPID) — режим «push выключены»: очередь помечается `DISABLED`, каждое уведомление
+пишется в лог, правила и устройства сохраняются. Своё облако пока принимает только устройства
+`android`/`ios`/`web` (`POST /api/owner/devices`), так что push на телефон работают в облаке на
+Supabase.
 
 ## Персональные данные и хостинг
 

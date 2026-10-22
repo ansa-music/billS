@@ -2,8 +2,12 @@
 import { useCallback, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { BranchView, CreateBranchResponse, LicenseView } from '@bills/domain';
+import { encodeHubSetupCode, hubCloudUrl, hubSetupUrl, isLocalOnlyCloudUrl } from '@bills/domain';
 import { companyLicense, listBranches, createBranch } from './api.ts';
 import { CopyValue, LicenseLine, ShownOnce } from './cabinet-ui.tsx';
+import { SUPABASE_MODE, supabaseUrl } from './config.ts';
+import { nativeBridge } from './platform.ts';
+import { QrImage } from './QrImage.tsx';
 import { formatDateTime } from './format.ts';
 import { clubHref, usePoll } from './hooks.ts';
 import {
@@ -159,23 +163,57 @@ function NewBranch({ onCreated, onCancel }: { onCreated: (res: CreateBranchRespo
   );
 }
 
+/**
+ * CLOUD_URL for a branch's HUB: the `sync` Edge Function under the Supabase project, or the
+ * self-hosted cloud this cabinet is served from (in the phone app — the cloud from its settings).
+ */
+function branchCloudUrl(): string | null {
+  if (SUPABASE_MODE) return hubCloudUrl({ supabaseUrl: supabaseUrl() });
+  return hubCloudUrl({ cloudOrigin: nativeBridge()?.cloudUrl() ?? (typeof location === 'undefined' ? null : location.origin) });
+}
+
 function BranchConnect({ res, onDone }: { res: CreateBranchResponse; onDone: () => void }) {
+  const cloudUrl = branchCloudUrl();
+  let code: string | null = null;
+  try {
+    code = cloudUrl ? encodeHubSetupCode({ hubId: res.hubId, apiKey: res.hubApiKey, cloudUrl }) : null;
+  } catch {
+    code = null; // values the cloud never issues: the manual ones below still work
+  }
+  const env = [`HUB_ID=${res.hubId}`, `CLOUD_API_KEY=${res.hubApiKey}`, ...(cloudUrl ? [`CLOUD_URL=${cloudUrl}`] : [])].join('\n');
   return (
     <ShownOnce
       onDone={onDone}
       note={
         <div className="hint">
           <p>
-            Впишите эти значения в настройки HUB филиала «{res.branch.name}» — файл <code>.env</code> рядом с HUB (или
-            мастер первого запуска), вместе с адресом облака <code>CLOUD_URL</code>, и перезапустите HUB:
+            Без кода: на странице мастера нажмите «ввести HUB_ID и ключ вручную» или впишите эти строки в файл настроек HUB
+            (<code>/etc/bills/hub.env</code>) и перезапустите HUB:
           </p>
-          <pre className="env-snippet">{`HUB_ID=${res.hubId}\nCLOUD_API_KEY=${res.hubApiKey}`}</pre>
+          <pre className="env-snippet">{env}</pre>
+          {cloudUrl && isLocalOnlyCloudUrl(cloudUrl) && (
+            <p>
+              Кабинет открыт по адресу <code>{cloudUrl}</code> — такой адрес облака работает только на этом же компьютере. HUB
+              другого клуба подключайте вручную, указав вместо него адрес этого компьютера в сети (например, Tailscale).
+            </p>
+          )}
           <p>HUB получит лицензию, сотрудников и их ключи при первой синхронизации.</p>
         </div>
       }
     >
+      {code && (
+        <>
+          <p className="hint">
+            На мини-ПК клуба: отсканируйте QR телефоном в Wi-Fi клуба — откроется мастер настройки HUB. Если не открылось —
+            откройте адрес, который показан на экране мини-ПК, и вставьте код.
+          </p>
+          <QrImage text={hubSetupUrl(code)} alt={`QR-код для подключения HUB филиала «${res.branch.name}»`} />
+          <CopyValue label="Код подключения" value={code} />
+        </>
+      )}
       <CopyValue label="HUB_ID" value={res.hubId} />
       <CopyValue label="CLOUD_API_KEY" value={res.hubApiKey} />
+      {cloudUrl && <CopyValue label="CLOUD_URL" value={cloudUrl} />}
     </ShownOnce>
   );
 }

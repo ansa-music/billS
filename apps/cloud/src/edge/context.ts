@@ -10,7 +10,7 @@ import { PushDispatcher, pushSenderFromEnv, RoutingSender } from '../push.ts';
 export interface EdgeContext {
   db: SqlDriver;
   push: PushDispatcher;
-  /** Channels that will actually send: 'webpush' (VAPID set), 'ntfy', 'fcm'. */
+  /** Channels that will actually send: 'webpush' (VAPID set), 'ntfy'. */
   pushChannels: string[];
   now: () => number;
   log: Log;
@@ -73,7 +73,7 @@ export interface EdgeContextOptions {
 /**
  * Builds the context from Supabase secrets / environment:
  * NOTIFY_SECRET, TS_CABINET_URL, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT, NTFY_TOKEN,
- * NTFY_DISABLED, CLOUD_FCM_SERVICE_ACCOUNT_JSON, SUPABASE_JWT_SECRET (optional), TS_CORS_ORIGINS,
+ * NTFY_DISABLED, SUPABASE_JWT_SECRET (optional), TS_CORS_ORIGINS,
  * CLOUD_HUB_OFFLINE_MINUTES (10), CLOUD_SHIFT_OPEN_HOURS (20), CLOUD_PUSH_MAX_AGE_MINUTES (120),
  * LICENSE_SIGNING_KEY (PKCS#8 Ed25519; the dev key when missing), LICENSE_KEY_ID ('ts-2026'),
  * SUPABASE_URL + SUPABASE_ANON_KEY (Auth API lookups), SUPABASE_SERVICE_ROLE_KEY (Auth admin API).

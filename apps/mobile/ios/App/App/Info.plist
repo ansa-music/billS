@@ -8,10 +8,6 @@
 	<string>en</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Камера нужна, чтобы отсканировать QR для входа из кабинета TS.</string>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>remote-notification</string>
-	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>CFBundleDisplayName</key>

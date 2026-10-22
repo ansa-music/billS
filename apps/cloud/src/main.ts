@@ -4,8 +4,7 @@ import { loadConfig } from './config.ts';
 import { migrate } from './db/migrate.ts';
 import { openDatabase } from './db/open.ts';
 import { buildApp } from './http/app.ts';
-import type { PushSender } from './push.ts';
-import { DisabledSender, FcmSender, loadServiceAccount, PushDispatcher, runWatchdogs } from './push.ts';
+import { PushDispatcher, pushSenderFromEnv, runWatchdogs } from './push.ts';
 import { licenseSignerFromEnv } from './license.ts';
 import { seedDemo } from './seed.ts';
 
@@ -13,10 +12,10 @@ const config = loadConfig();
 
 const { db, kind } = await openDatabase(config);
 
-// Without a service account key pushes are off: rules and devices are kept, every push is only logged.
-const account = loadServiceAccount();
+// Push channels from the environment: ntfy (unless NTFY_DISABLED=1) and Web Push (VAPID_* keys).
+// With none of them pushes are off: rules and devices are kept, every push is only logged.
 let log: (message: string) => void = (message) => console.log(message);
-const sender: PushSender = account ? new FcmSender(account) : new DisabledSender((m) => log(m));
+const sender = pushSenderFromEnv(process.env, (m) => log(m));
 const licenseSigner = licenseSignerFromEnv(process.env, (m) => log(m));
 const push = new PushDispatcher(db, sender, () => systemClock.now(), { maxAgeMs: config.pushMaxAgeMs, log: (m) => log(m) });
 
@@ -43,7 +42,7 @@ app.log.info({ database: kind, seeded, webDist: config.webDistPath, webDistServe
 if (!webDistServed) {
   app.log.warn('Кабинет не собран: выполните `npm run build` в корне репозитория, чтобы облако отдавало его на /');
 }
-app.log.info(account ? `Push включены: FCM, проект ${account.project_id}` : 'Push выключены: нет ключа FCM (CLOUD_FCM_SERVICE_ACCOUNT)');
+app.log.info(sender.enabled ? `Push включены: ${sender.channels.join(', ')}` : 'Push выключены: ntfy отключён (NTFY_DISABLED=1), ключей Web Push нет');
 
 // Watchdogs (HUB silent, shift left open) and a retry of anything left PENDING, once a minute.
 const watchdog = setInterval(() => {

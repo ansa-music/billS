@@ -1,63 +1,29 @@
 import assert from 'node:assert/strict';
-import { createVerify, generateKeyPairSync } from 'node:crypto';
 import test from 'node:test';
 import type { CloudLoginResponse, CreateOwnerKeyResponse, DeviceView, PushSettingsView, TestPushResponse } from '@bills/domain';
 import { parseLoginQr } from '@bills/domain';
-import type { FetchLike, ServiceAccount } from '../src/push.ts';
-import { FcmSender, loadServiceAccount, runWatchdogs } from '../src/push.ts';
+import type { PushMessage, PushSender } from '../src/push.ts';
+import { LEGACY_DEVICE_ERROR, pushSenderFromEnv, runWatchdogs } from '../src/push.ts';
 import type { TestCloud } from './helpers.ts';
 import { clubIdOf, cloud, event, HOUR, HUB1, HUB2, login, MONDAY_NOON, sendEvents } from './helpers.ts';
 
 // ---------------------------------------------------------------------------
-// Fake FCM: the real FcmSender talks to an in-process fetch that checks the
-// signed JWT like Google's token endpoint and records every message.
+// The dispatcher (queue, dedupe, rules, watchdogs) is tested with a sender that
+// records every message; how a device platform maps to ntfy / Web Push is
+// RoutingSender's job (webpush.test.ts), the wire format is in ntfy.test.ts.
 // ---------------------------------------------------------------------------
 
-interface FcmMessage {
-  token: string;
-  notification: { title: string; body: string };
-  data: Record<string, string>;
-  android: { priority: string; notification: { channel_id: string } };
-}
-
-function fakeFcm(options: { dead?: Set<string> } = {}) {
-  const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
-  const account: ServiceAccount = {
-    project_id: 'ts-test',
-    client_email: 'push@ts-test.iam.gserviceaccount.com',
-    private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
-    token_uri: 'https://oauth.test/token',
+function recordingSender(options: { dead?: Set<string> } = {}) {
+  const sent: PushMessage[] = [];
+  const sender: PushSender = {
+    enabled: true,
+    async send(message) {
+      if (options.dead?.has(message.token)) return { ok: false, error: 'gone', unregistered: true };
+      sent.push(message);
+      return { ok: true };
+    },
   };
-  const sent: FcmMessage[] = [];
-  let tokenRequests = 0;
-  const fetch: FetchLike = async (url, init) => {
-    if (url === 'https://oauth.test/token') {
-      tokenRequests++;
-      const form = new URLSearchParams(init.body);
-      assert.equal(form.get('grant_type'), 'urn:ietf:params:oauth:grant-type:jwt-bearer');
-      const [h, c, sig] = (form.get('assertion') ?? '').split('.');
-      const ok = createVerify('RSA-SHA256').update(`${h}.${c}`).verify(publicKey, Buffer.from(sig ?? '', 'base64url'));
-      assert.ok(ok, 'JWT signature');
-      const claims = JSON.parse(Buffer.from(c ?? '', 'base64url').toString()) as Record<string, unknown>;
-      assert.equal(claims.iss, account.client_email);
-      assert.equal(claims.scope, 'https://www.googleapis.com/auth/firebase.messaging');
-      assert.equal(claims.aud, account.token_uri);
-      return { status: 200, text: async () => JSON.stringify({ access_token: 'ya29.fake', expires_in: 3600 }) };
-    }
-    assert.equal(url, 'https://fcm.test/v1/projects/ts-test/messages:send');
-    assert.equal(init.headers.authorization, 'Bearer ya29.fake');
-    const { message } = JSON.parse(init.body) as { message: FcmMessage };
-    if (options.dead?.has(message.token)) {
-      return {
-        status: 404,
-        text: async () => JSON.stringify({ error: { status: 'NOT_FOUND', details: [{ errorCode: 'UNREGISTERED' }] } }),
-      };
-    }
-    sent.push(message);
-    return { status: 200, text: async () => '{"name":"projects/ts-test/messages/1"}' };
-  };
-  const sender = new FcmSender(account, { fetch, endpoint: 'https://fcm.test' });
-  return { sender, sent, account, tokenRequests: () => tokenRequests };
+  return { sender, sent };
 }
 
 async function appLogin(c: TestCloud): Promise<string> {
@@ -84,8 +50,8 @@ async function bearer<T>(c: TestCloud, token: string, method: 'GET' | 'POST' | '
   return { status: res.statusCode, body: res.json() as T };
 }
 
-async function registerPhone(c: TestCloud, token: string, fcmToken = 'fcm-phone-1'): Promise<DeviceView> {
-  const res = await bearer<DeviceView>(c, token, 'POST', '/api/owner/devices', { token: fcmToken, platform: 'android', name: 'Pixel 8' });
+async function registerPhone(c: TestCloud, token: string, deviceToken = 'phone-1'): Promise<DeviceView> {
+  const res = await bearer<DeviceView>(c, token, 'POST', '/api/owner/devices', { token: deviceToken, platform: 'android', name: 'Pixel 8' });
   assert.equal(res.status, 200);
   return res.body;
 }
@@ -100,9 +66,9 @@ async function queueStatuses(c: TestCloud): Promise<string[]> {
 
 // ---------------------------------------------------------------------------
 
-test('an alert from the HUB reaches the phone once, through FCM HTTP v1', async (t) => {
-  const fcm = fakeFcm();
-  const c = await cloud(t, { sender: fcm.sender });
+test('an alert from the HUB reaches the phone once', async (t) => {
+  const push = recordingSender();
+  const c = await cloud(t, { sender: push.sender });
   const token = await appLogin(c);
   await registerPhone(c, token);
   const clubId = await clubIdOf(c, HUB1.id);
@@ -110,37 +76,35 @@ test('an alert from the HUB reaches the phone once, through FCM HTTP v1', async 
   const batch = [lightAlert(1, 'alert-1')];
   await sendEvents(c, HUB1, batch);
   await c.push.flush();
-  assert.equal(fcm.sent.length, 1);
-  const m = fcm.sent[0]!;
-  assert.equal(m.token, 'fcm-phone-1');
-  assert.equal(m.notification.title, 'Клуб «Демо»: Свет горит без игры');
-  assert.equal(m.notification.body, 'Стол 2: свет горит, а игры нет');
+  assert.equal(push.sent.length, 1);
+  const m = push.sent[0]!;
+  assert.equal(m.token, 'phone-1');
+  assert.equal(m.platform, 'android');
+  assert.equal(m.title, 'Клуб «Демо»: Свет горит без игры');
+  assert.equal(m.body, 'Стол 2: свет горит, а игры нет');
   assert.deepEqual(m.data, { kind: 'LIGHT_WITHOUT_GAME', clubId, alertId: 'alert-1' });
-  assert.equal(m.android.priority, 'HIGH');
-  assert.equal(m.android.notification.channel_id, 'alerts');
 
   // The HUB resends the same batch after a lost response: no second push.
   await sendEvents(c, HUB1, batch);
   await c.push.flush();
-  assert.equal(fcm.sent.length, 1);
+  assert.equal(push.sent.length, 1);
 
-  // Power alerts come the same way; the OAuth token is reused.
+  // Power alerts come the same way.
   await sendEvents(c, HUB1, [
     lightAlert(2, 'alert-2', MONDAY_NOON, 'POWER_ON_BATTERY'),
     lightAlert(3, 'alert-3', MONDAY_NOON, 'POWER_CRITICAL'),
   ]);
   await c.push.flush();
   assert.deepEqual(
-    fcm.sent.map((s) => s.data.kind),
+    push.sent.map((s) => s.data.kind),
     ['LIGHT_WITHOUT_GAME', 'POWER_ON_BATTERY', 'POWER_CRITICAL'],
   );
-  assert.equal(fcm.tokenRequests(), 1);
   assert.deepEqual(await queueStatuses(c), ['LIGHT_WITHOUT_GAME:SENT', 'POWER_CRITICAL:SENT', 'POWER_ON_BATTERY:SENT']);
 });
 
 test('rules: per kind for all clubs, a club rule overrides, quiet kinds are off by default', async (t) => {
-  const fcm = fakeFcm();
-  const c = await cloud(t, { sender: fcm.sender });
+  const push = recordingSender();
+  const c = await cloud(t, { sender: push.sender });
   const token = await appLogin(c);
   await registerPhone(c, token);
   const club1 = await clubIdOf(c, HUB1.id);
@@ -165,7 +129,7 @@ test('rules: per kind for all clubs, a club rule overrides, quiet kinds are off 
   await sendEvents(c, HUB2, [lightAlert(1, 'b1')]);
   await c.push.flush();
   // Club 1 light: off by the club rule; UPS: on by the all-clubs rule; prepaid: off by default; club 2 light: default on.
-  assert.deepEqual(fcm.sent.map((s) => `${s.data.alertId}`).sort(), ['a2', 'b1']);
+  assert.deepEqual(push.sent.map((s) => `${s.data.alertId}`).sort(), ['a2', 'b1']);
   const statuses = await c.db.all<{ alert_id: string; status: string }>('SELECT alert_id, status FROM push_queue ORDER BY alert_id');
   assert.deepEqual(statuses.map((r) => `${r.alert_id}:${r.status}`), ['a1:SKIPPED', 'a2:SENT', 'a3:SKIPPED', 'b1:SENT']);
 
@@ -175,7 +139,7 @@ test('rules: per kind for all clubs, a club rule overrides, quiet kinds are off 
   assert.equal(foreign.status, 404);
 });
 
-test('without an FCM key pushes are off: queued, marked DISABLED and logged', async (t) => {
+test('without a push channel pushes are off: queued, marked DISABLED and logged', async (t) => {
   const c = await cloud(t);
   const token = await appLogin(c);
   await registerPhone(c, token);
@@ -191,26 +155,26 @@ test('without an FCM key pushes are off: queued, marked DISABLED and logged', as
 });
 
 test('an alert that reaches the cloud hours late (HUB catching up) is not pushed', async (t) => {
-  const fcm = fakeFcm();
-  const c = await cloud(t, { sender: fcm.sender, maxAgeMs: 2 * HOUR });
+  const push = recordingSender();
+  const c = await cloud(t, { sender: push.sender, maxAgeMs: 2 * HOUR });
   const token = await appLogin(c);
   await registerPhone(c, token);
   await sendEvents(c, HUB1, [lightAlert(1, 'old', MONDAY_NOON - 3 * HOUR), lightAlert(2, 'fresh', MONDAY_NOON - 10 * 60_000)]);
   await c.push.flush();
-  assert.deepEqual(fcm.sent.map((s) => s.data.alertId), ['fresh']);
+  assert.deepEqual(push.sent.map((s) => s.data.alertId), ['fresh']);
   const rows = await c.db.all<{ alert_id: string; status: string }>('SELECT alert_id, status FROM push_queue ORDER BY alert_id');
   assert.deepEqual(rows.map((r) => `${r.alert_id}:${r.status}`), ['fresh:SENT', 'old:STALE']);
 });
 
-test('a token FCM no longer knows removes the device; other errors are kept on it', async (t) => {
-  const fcm = fakeFcm({ dead: new Set(['fcm-dead']) });
-  const c = await cloud(t, { sender: fcm.sender });
+test('a token the push service no longer knows removes the device', async (t) => {
+  const push = recordingSender({ dead: new Set(['phone-dead']) });
+  const c = await cloud(t, { sender: push.sender });
   const token = await appLogin(c);
-  await registerPhone(c, token, 'fcm-dead');
-  await registerPhone(c, token, 'fcm-alive');
+  await registerPhone(c, token, 'phone-dead');
+  await registerPhone(c, token, 'phone-alive');
   await sendEvents(c, HUB1, [lightAlert(1, 'alert-1')]);
   await c.push.flush();
-  assert.deepEqual(fcm.sent.map((s) => s.token), ['fcm-alive']);
+  assert.deepEqual(push.sent.map((s) => s.token), ['phone-alive']);
   const devices = await bearer<PushSettingsView>(c, token, 'GET', '/api/owner/push');
   assert.equal(devices.body.devices.length, 1);
   const row = await c.db.all<{ delivered: number; failed: number }>('SELECT delivered, failed FROM push_queue');
@@ -218,8 +182,8 @@ test('a token FCM no longer knows removes the device; other errors are kept on i
 });
 
 test('HUB offline: one push per episode, "back online" when heard again, then re-armed', async (t) => {
-  const fcm = fakeFcm();
-  const c = await cloud(t, { sender: fcm.sender });
+  const push = recordingSender();
+  const c = await cloud(t, { sender: push.sender });
   const token = await appLogin(c);
   await registerPhone(c, token);
   const opts = { hubOfflineMs: 10 * 60_000, shiftOpenMs: 20 * HOUR };
@@ -233,23 +197,23 @@ test('HUB offline: one push per episode, "back online" when heard again, then re
   c.clock.advance(30 * 60_000);
   assert.equal(await runWatchdogs(c.db, c.clock.now(), opts), 0, 'once per episode');
   await c.push.flush();
-  assert.equal(fcm.sent.length, 1);
-  assert.equal(fcm.sent[0]!.data.kind, 'HUB_OFFLINE');
-  assert.equal(fcm.sent[0]!.notification.title, 'Клуб «Демо»: HUB клуба пропал со связи');
-  assert.match(fcm.sent[0]!.notification.body, /не выходит на связь 11 мин/);
+  assert.equal(push.sent.length, 1);
+  assert.equal(push.sent[0]!.data.kind, 'HUB_OFFLINE');
+  assert.equal(push.sent[0]!.title, 'Клуб «Демо»: HUB клуба пропал со связи');
+  assert.match(push.sent[0]!.body, /не выходит на связь 11 мин/);
 
   await sendEvents(c, HUB1, [event(2, c.clock.now(), 'session.started', 'g1', { tableId: 't1', startedAt: c.clock.now() })]);
   await c.push.flush();
-  assert.equal(fcm.sent.length, 2);
-  assert.equal(fcm.sent[1]!.notification.title, 'Клуб «Демо»: HUB снова на связи');
+  assert.equal(push.sent.length, 2);
+  assert.equal(push.sent[1]!.title, 'Клуб «Демо»: HUB снова на связи');
 
   c.clock.advance(11 * 60_000);
   assert.equal(await runWatchdogs(c.db, c.clock.now(), opts), 1, 're-armed after the HUB came back');
 });
 
 test('a cash shift left open too long gets one SHIFT_NOT_CLOSED push', async (t) => {
-  const fcm = fakeFcm();
-  const c = await cloud(t, { sender: fcm.sender });
+  const push = recordingSender();
+  const c = await cloud(t, { sender: push.sender });
   const token = await appLogin(c);
   await registerPhone(c, token);
   const opts = { hubOfflineMs: 1000 * HOUR, shiftOpenMs: 20 * HOUR };
@@ -261,9 +225,9 @@ test('a cash shift left open too long gets one SHIFT_NOT_CLOSED push', async (t)
   assert.equal(await runWatchdogs(c.db, c.clock.now(), opts), 1);
   assert.equal(await runWatchdogs(c.db, c.clock.now(), opts), 0);
   await c.push.flush();
-  assert.equal(fcm.sent.length, 1);
-  assert.equal(fcm.sent[0]!.data.kind, 'SHIFT_NOT_CLOSED');
-  assert.match(fcm.sent[0]!.notification.body, /Смена №7 открыта 21 ч \(открыл: Айгуль\)/);
+  assert.equal(push.sent.length, 1);
+  assert.equal(push.sent[0]!.data.kind, 'SHIFT_NOT_CLOSED');
+  assert.match(push.sent[0]!.body, /Смена №7 открыта 21 ч \(открыл: Айгуль\)/);
 });
 
 test('owner key: issued in the cabinet as a QR, signs the phone in, revocable', async (t) => {
@@ -321,8 +285,8 @@ test('owner key: issued in the cabinet as a QR, signs the phone in, revocable', 
 });
 
 test('devices: register refreshes the same token, delete only your own, test push goes straight out', async (t) => {
-  const fcm = fakeFcm();
-  const c = await cloud(t, { sender: fcm.sender });
+  const push = recordingSender();
+  const c = await cloud(t, { sender: push.sender });
   const token = await appLogin(c);
   const first = await registerPhone(c, token);
   const again = await registerPhone(c, token);
@@ -331,7 +295,7 @@ test('devices: register refreshes the same token, delete only your own, test pus
 
   const testPush = await bearer<TestPushResponse>(c, token, 'POST', '/api/owner/push/test');
   assert.deepEqual(testPush.body, { pushEnabled: true, sent: 1, failed: 0 });
-  assert.equal(fcm.sent[0]!.notification.title, 'TS: проверка уведомлений');
+  assert.equal(push.sent[0]!.title, 'TS: проверка уведомлений');
 
   const badPlatform = await bearer(c, token, 'POST', '/api/owner/devices', { token: 'x', platform: 'symbian' });
   assert.equal(badPlatform.status, 400);
@@ -359,9 +323,16 @@ test('CORS: the app WebView origins are answered, others are not', async (t) => 
   assert.equal(evil.headers['access-control-allow-origin'], undefined);
 });
 
-test('service account key from env: inline JSON, file, none, incomplete', () => {
-  assert.equal(loadServiceAccount({}), null);
-  const json = JSON.stringify({ project_id: 'p', client_email: 'e@x', private_key: 'k', extra: 1 });
-  assert.deepEqual(loadServiceAccount({ CLOUD_FCM_SERVICE_ACCOUNT_JSON: json }), { project_id: 'p', client_email: 'e@x', private_key: 'k' });
-  assert.throws(() => loadServiceAccount({ CLOUD_FCM_SERVICE_ACCOUNT_JSON: '{"project_id":"p"}' }), /client_email/);
+test('a phone registered for the removed FCM push stays listed with an explanation', async (t) => {
+  // Production routing (pushSenderFromEnv): android/ios/web tokens have no channel any more.
+  const c = await cloud(t, { sender: pushSenderFromEnv({ CLOUD_FCM_SERVICE_ACCOUNT_JSON: '{"project_id":"p"}' }) });
+  const token = await appLogin(c);
+  await registerPhone(c, token, 'old-fcm-token');
+  await sendEvents(c, HUB1, [lightAlert(1, 'alert-1')]);
+  await c.push.flush();
+  const row = await c.db.all<{ status: string; delivered: number; failed: number }>('SELECT status, delivered, failed FROM push_queue');
+  assert.deepEqual(row.map((r) => [r.status, Number(r.delivered), Number(r.failed)]), [['SENT', 0, 1]]);
+  const settings = await bearer<PushSettingsView>(c, token, 'GET', '/api/owner/push');
+  assert.equal(settings.body.devices.length, 1, 'kept, so the owner sees why and removes it');
+  assert.equal(settings.body.devices[0]!.lastError, LEGACY_DEVICE_ERROR);
 });

@@ -28,7 +28,7 @@ import { NtfySection } from './NtfySection.tsx';
 import { forgetNtfy, currentNtfyTopic } from './ntfy.ts';
 import { WebPushSection } from './WebPushSection.tsx';
 import { disableWebPush, webPushDeviceId } from './webPush.ts';
-import { enablePhonePush, usePhonePushStatus } from './phonePush.ts';
+import { usePhonePushStatus } from './phonePush.ts';
 import type { PhonePushStatus } from './phonePush.ts';
 import { nativeBridge } from './platform.ts';
 import { Section, loadingText } from './shared.tsx';
@@ -168,7 +168,7 @@ function phoneStatusText(s: PhonePushStatus): { text: string; tone: 'ok' | 'warn
       return { text: 'Включаем уведомления…', tone: 'muted' };
     case 'denied':
       return {
-        text: 'Уведомления запрещены в настройках телефона. Разрешите их для приложения TS и нажмите «Включить уведомления».',
+        text: 'Уведомления запрещены в настройках телефона. Разрешите их для приложения TS.',
         tone: 'warn',
       };
     case 'unavailable':
@@ -180,7 +180,10 @@ function phoneStatusText(s: PhonePushStatus): { text: string; tone: 'ok' | 'warn
   }
 }
 
-/** The FCM phone of the self-hosted cloud. With Supabase the phone uses ntfy instead (NtfySection). */
+/**
+ * This phone in the app built for the self-hosted cloud. The app has no push service of its own
+ * (no FCM), so there is nothing to switch on here; with Supabase the phone uses ntfy (NtfySection).
+ */
 function ThisPhone() {
   const bridge = nativeBridge();
   const status = usePhonePushStatus();
@@ -191,16 +194,6 @@ function ThisPhone() {
       <p className="phone-status" data-tone={tone}>
         {text}
       </p>
-      <div className="row wrap">
-        <button
-          type="button"
-          className="btn btn-primary"
-          disabled={status.state === 'pending'}
-          onClick={() => void enablePhonePush()}
-        >
-          Включить уведомления
-        </button>
-      </div>
       <dl className="facts">
         <div>
           <dt>Адрес облака</dt>
@@ -519,7 +512,7 @@ export function Phone() {
   const reload = useCallback(async () => {
     try {
       const next = await fetchPushSettings();
-      // Devices and the FCM flag always refresh; rules only when no toggle is being saved.
+      // Devices and the «push on» flag always refresh; rules only when no toggle is being saved.
       if (inFlight.current === 0) confirmed.current = next.rules;
       setSettings((s) => (inFlight.current > 0 && s ? { ...next, rules: s.rules } : next));
       setLoadError(null);
@@ -583,7 +576,7 @@ export function Phone() {
             <p className="notice" role="status">
               {SUPABASE_MODE
                 ? 'Push-уведомления на сервере выключены: не заданы ключи VAPID. Правила сохраняются, но ничего не отправляется.'
-                : 'Push-уведомления на облаке выключены: не задан ключ FCM. Правила сохраняются, но ничего не отправляется.'}
+                : 'Push-уведомления на облаке выключены. Правила сохраняются, но ничего не отправляется.'}
             </p>
           )}
           <ThisPhone />

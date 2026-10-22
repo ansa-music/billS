@@ -74,6 +74,8 @@ export interface HubConfig {
   licenseMode: 'enforce' | 'off';
   /** Public keys licenses are checked with: the platform's, plus the dev key with HUB_LICENSE_DEV_KEY=1. */
   licensePublicKeys: Record<string, string>;
+  /** HUB_SETUP=off closes the first-boot wizard (/setup) even while no cloud is connected (a standalone club). */
+  setupEnabled: boolean;
 }
 
 function int(value: string | undefined, fallback: number, name: string): number {
@@ -88,15 +90,24 @@ function flag(value: string | undefined, fallback: boolean): boolean {
   return !['0', 'false', 'no', 'off'].includes(value.trim().toLowerCase());
 }
 
+/** HUB_DB_PATH, or `apps/hub/data/hub.db` in a checkout. */
+export function dbPathOf(env: NodeJS.ProcessEnv): string {
+  return env.HUB_DB_PATH || fileURLToPath(new URL('../data/hub.db', import.meta.url));
+}
+
+/**
+ * Config straight from the environment. main.ts goes through `loadHubConfig` (setup.ts),
+ * which first fills in what the first-boot wizard saved in setup.json.
+ */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
-  const lampDriver = (env.HUB_LAMP_DRIVER ?? 'simulator') as LampDriverKind;
+  const lampDriver = (env.HUB_LAMP_DRIVER?.trim() || 'simulator') as LampDriverKind;
   if (!LAMP_DRIVERS.includes(lampDriver)) {
     throw new Error(`HUB_LAMP_DRIVER must be one of ${LAMP_DRIVERS.join(', ')}, got "${lampDriver}"`);
   }
   const coilBase = int(env.HUB_MODBUS_COIL_BASE, 1, 'HUB_MODBUS_COIL_BASE');
   if (coilBase !== 0 && coilBase !== 1) throw new Error('HUB_MODBUS_COIL_BASE must be 0 or 1');
   const cloudUrl = env.CLOUD_URL?.trim();
-  const dbPath = env.HUB_DB_PATH ?? fileURLToPath(new URL('../data/hub.db', import.meta.url));
+  const dbPath = dbPathOf(env);
   const licenseMode = (env.HUB_LICENSE?.trim().toLowerCase() || 'enforce') as 'enforce' | 'off';
   if (licenseMode !== 'enforce' && licenseMode !== 'off') throw new Error(`HUB_LICENSE must be enforce or off, got "${env.HUB_LICENSE}"`);
   return {
@@ -146,5 +157,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
       ...PLATFORM_LICENSE_PUBLIC_KEYS,
       ...(flag(env.HUB_LICENSE_DEV_KEY, false) ? { [DEV_LICENSE_KEY.kid]: DEV_LICENSE_KEY.publicKey } : {}),
     },
+    setupEnabled: flag(env.HUB_SETUP, true),
   };
 }

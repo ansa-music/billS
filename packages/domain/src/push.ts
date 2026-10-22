@@ -77,9 +77,10 @@ export function pushKindOfAlert(alertKind: string): PushKind {
 
 /**
  * How a device gets pushes:
- * - `android` / `ios` / `web`: FCM registration token (self-hosted apps/cloud with a Firebase key);
  * - `webpush`: Web Push with VAPID (cabinet PWA); token = JSON of the browser's PushSubscription;
- * - `ntfy`: ntfy topic (Android app without Google services); token = topic URL `https://ntfy.sh/ts-…`.
+ * - `ntfy`: ntfy topic (the phone app, no Google services); token = topic URL `https://ntfy.sh/ts-…`;
+ * - `android` / `ios` / `web`: legacy FCM tokens. FCM is gone, nothing is sent to them; the values
+ *   stay valid because databases still hold such rows (the cabinet shows them with an error).
  */
 export type DevicePlatform = 'android' | 'ios' | 'web' | 'webpush' | 'ntfy';
 
@@ -137,7 +138,7 @@ export interface WebPushPayload {
 }
 
 export interface RegisterDeviceRequest {
-  /** FCM registration token, PushSubscription JSON (`webpush`) or ntfy topic URL (`ntfy`). */
+  /** PushSubscription JSON (`webpush`) or ntfy topic URL (`ntfy`); a legacy FCM token for the old platforms. */
   token: string;
   platform: DevicePlatform;
   /** "Pixel 8", shown in the device list. */
@@ -162,7 +163,7 @@ export interface PushRule {
 }
 
 export interface PushSettingsView {
-  /** False when the cloud has no FCM key: rules are kept, nothing is sent. */
+  /** False when the cloud has no push channel configured: rules are kept, nothing is sent. */
   pushEnabled: boolean;
   kinds: PushKindInfo[];
   /** Only the rules the owner set; everything else falls back to `defaultOn`. */

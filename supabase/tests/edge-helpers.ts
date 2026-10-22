@@ -53,7 +53,7 @@ export async function edgeTest(t: { after(fn: () => Promise<void>): void }, opti
   const sent: Array<PushMessage & { channel: string }> = [];
   const sender =
     options.sender ??
-    new RoutingSender({ webpush: recordingSender('webpush', sent), ntfy: recordingSender('ntfy', sent), fcm: recordingSender('fcm', sent) });
+    new RoutingSender({ webpush: recordingSender('webpush', sent), ntfy: recordingSender('ntfy', sent) });
   const ctx = edgeContext(s.db, { NOTIFY_SECRET }, { now: () => clock.now, log: (m) => log.push(m), sender });
   return {
     s,

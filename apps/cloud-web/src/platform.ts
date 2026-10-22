@@ -3,8 +3,8 @@
  * requests, HttpOnly cookie. Inside the phone app (apps/mobile, Capacitor) the shell
  * registers a NativeBridge before the first render: requests go to the cloud address
  * from the app settings with `Authorization: Bearer <token>` and `x-ts-app: 1`, and the
- * shell adds what a browser cannot do — QR scanner and the FCM token for pushes.
- * Notification taps are handled by the shell itself (it sets `location.hash`).
+ * shell adds what a browser cannot do — the QR scanner. Alerts reach the phone through the
+ * ntfy app (NtfySection), not through the shell.
  *
  * The cabinet never imports Capacitor: everything native is behind this interface.
  * Getters are synchronous: the shell loads the stored values before the first render.
@@ -22,7 +22,10 @@ export interface NativeBridge {
   setDeviceId(id: string | null): Promise<void>;
   /** Opens the camera; resolves with the scanned text, null when cancelled. */
   scanQr(): Promise<string | null>;
-  /** Asks for the notification permission and returns the FCM registration token. */
+  /**
+   * A push token of the shell's own push service. There is none since FCM was removed: the
+   * shell answers `unavailable` with a hint about ntfy. Kept so a future native channel fits in.
+   */
   pushToken(): Promise<PushTokenResult>;
   /** "Pixel 8" — shown in the device list. */
   deviceName(): string;

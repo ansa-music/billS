@@ -15,7 +15,6 @@ const config: CapacitorConfig = {
     // Native HTTP: no CORS preflight from the WebView and http:// clouds work in debug builds.
     CapacitorHttp: { enabled: true },
     SplashScreen: { launchShowDuration: 600, backgroundColor: '#14211b', showSpinner: false },
-    FirebaseMessaging: { presentationOptions: ['alert', 'sound', 'badge'] },
   },
 };
 

@@ -11,8 +11,11 @@ export interface AuthHookOptions {
   trustActorHeader?: boolean;
 }
 
-/** Endpoints that work without a session: health and metrics for monitoring, login itself. */
-const PUBLIC = new Set(['/api/health', '/metrics', '/api/auth/login', '/api/demo']);
+/**
+ * Endpoints that work without a session: health and metrics for monitoring, login itself, and the
+ * first-boot wizard (nobody has a key yet; LAN only and closed once set up — see routes/setup.ts).
+ */
+const PUBLIC = new Set(['/api/health', '/metrics', '/api/auth/login', '/api/demo', '/api/setup', '/api/setup/status']);
 /** Endpoints a browser cannot send headers to (SSE) or that exist only with the simulator. */
 const PUBLIC_PREFIXES = ['/api/events', '/api/dev/'];
 

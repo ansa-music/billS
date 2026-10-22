@@ -1,5 +1,6 @@
 www/
-# Firebase app configs and signing material stay out of git (see docs/MOBILE_RELEASE_RU.md).
+# Signing material stays out of git (see docs/MOBILE_RELEASE_RU.md); the Firebase configs are
+# from the old push path, still ignored so a stray copy is never committed.
 android/app/google-services.json
 ios/App/App/GoogleService-Info.plist
 android/keystore.properties

@@ -8,7 +8,9 @@ import {
   concatBytes,
   encryptWebPush,
   hkdf,
+  LEGACY_DEVICE_ERROR,
   p256Jwk,
+  pushSenderFromEnv,
   RoutingSender,
   vapidJwt,
   WebPushSender,
@@ -148,7 +150,7 @@ test('WebPushSender rejects bad VAPID keys up front', () => {
   assert.throws(() => new WebPushSender({ publicKey: 'abc', privateKey: 'def', subject: 'mailto:x@y.z' }), /VAPID_PUBLIC_KEY/);
 });
 
-test('RoutingSender: platform picks the channel, a missing channel is skipped', async () => {
+test('RoutingSender: platform picks the channel, a missing channel and old FCM phones are skipped', async () => {
   const seen: string[] = [];
   const fake = (name: string) => ({
     enabled: true,
@@ -158,15 +160,32 @@ test('RoutingSender: platform picks the channel, a missing channel is skipped', 
     },
   });
   const log: string[] = [];
-  const router = new RoutingSender({ webpush: fake('webpush'), ntfy: fake('ntfy'), fcm: null }, (m) => log.push(m));
+  const router = new RoutingSender({ webpush: fake('webpush'), ntfy: fake('ntfy') }, (m) => log.push(m));
   assert.equal(router.enabled, true);
   assert.deepEqual(router.channels, ['webpush', 'ntfy']);
   const base = { token: 't', title: 'T', body: 'B', data: { kind: 'OTHER' as PushKind, clubId: 'c' } };
   assert.deepEqual(await router.send({ ...base, platform: 'webpush' }), { ok: true });
   assert.deepEqual(await router.send({ ...base, platform: 'ntfy' }), { ok: true });
-  const android = await router.send({ ...base, platform: 'android' });
-  assert.equal(android.ok, false);
+  // Rows from the FCM days ('android', 'ios', 'web') stay in the database: kept, explained, not sent.
+  for (const platform of ['android', 'ios', 'web'] as const) {
+    assert.deepEqual(await router.send({ ...base, platform }), { ok: false, error: LEGACY_DEVICE_ERROR, unregistered: false });
+  }
   assert.deepEqual(seen, ['webpush', 'ntfy']);
-  assert.equal(log.length, 1);
+  assert.equal(log.length, 3);
+  const noNtfy = new RoutingSender({ webpush: fake('webpush') });
+  const skipped = await noNtfy.send({ ...base, platform: 'ntfy' });
+  assert.equal(!skipped.ok && skipped.error.startsWith('PUSH_DISABLED'), true);
   assert.equal(new RoutingSender({}).enabled, false);
+});
+
+test('pushSenderFromEnv: ntfy unless NTFY_DISABLED=1, Web Push with VAPID keys, FCM settings ignored', async () => {
+  const keys = await vapidKeys();
+  assert.deepEqual(pushSenderFromEnv({}).channels, ['ntfy']);
+  assert.deepEqual(pushSenderFromEnv({ CLOUD_FCM_SERVICE_ACCOUNT_JSON: '{"project_id":"p"}' }).channels, ['ntfy']);
+  const both = pushSenderFromEnv({ VAPID_PUBLIC_KEY: keys.publicKey, VAPID_PRIVATE_KEY: keys.privateKey, TS_CABINET_URL: 'https://ts.example.pages.dev' });
+  assert.deepEqual(both.channels, ['webpush', 'ntfy']);
+  const log: string[] = [];
+  const off = pushSenderFromEnv({ NTFY_DISABLED: '1', VAPID_PUBLIC_KEY: 'bad', VAPID_PRIVATE_KEY: 'bad' }, (m) => log.push(m));
+  assert.equal(off.enabled, false);
+  assert.match(log.join('\n'), /Web Push выключен/);
 });

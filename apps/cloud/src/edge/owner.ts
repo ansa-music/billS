@@ -15,12 +15,12 @@ import { bearerToken, errorResponse, json, notFound, readJson, readOptionalJson,
 /**
  * Edge Function `owner` (verify_jwt = true): what the cabinet cannot do through
  * PostgREST/RLS alone — tariff edits (validated by the domain), the test push and
- * device registration (FCM/Web Push/ntfy tokens), push rules. Paths are accepted as
+ * device registration (Web Push/ntfy tokens), push rules. Paths are accepted as
  * `/owner/...` and `/owner/owner/...` (cabinet base `/functions/v1/owner` + `/owner/...`).
  *
  *   PUT    /owner/clubs/:id/tariffs   UpdateTariffsRequest → UpdateTariffsResponse
  *   POST   /owner/push/test           → TestPushResponse
- *   GET    /owner/push                → PushSettingsView + channels: ['webpush' when VAPID set, 'ntfy', 'fcm']
+ *   GET    /owner/push                → PushSettingsView + channels: ['webpush' when VAPID set, 'ntfy']
  *   PUT    /owner/push/rules          UpdatePushRulesRequest → PushSettingsView
  *   POST   /owner/devices             RegisterDeviceRequest → DeviceView
  *   DELETE /owner/devices/:id         → { ok: true }

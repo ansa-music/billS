@@ -472,7 +472,7 @@ npm run start:hub
 
 - **Выкладка сама.** При пуше в `main` workflow `.github/workflows/deploy.yml` прогоняет typecheck и тесты, затем `supabase db push` и `supabase functions deploy`, собирает сайты и выкладывает их через `wrangler pages deploy`. Для PR создаются preview-копии сайтов со ссылкой в PR. Запасной workflow `pages.yml` выкладывает на GitHub Pages: там нельзя задать HTTP-заголовки (`_headers` не работает), поэтому обновление PWA приходит до 10 минут позже.
 - **HUB клуба** шлёт события в Supabase без изменений кода: `CLOUD_URL=https://<ID>.supabase.co/functions/v1`. Компании, клубы и ключи создаёт `node scripts/supabase-sql.ts` — он печатает SQL для SQL Editor.
-- **Push без Firebase.** Кабинет, установленный как PWA, получает Web Push (VAPID, ключи — `npm run vapid`). Приложение на Android получает уведомления через ntfy. FCM остаётся только в самостоятельном облаке `apps/cloud` и в мобильном приложении для него — будет заменён на Web Push.
+- **Push без Firebase.** Кабинет, установленный как PWA, получает Web Push (VAPID, ключи — `npm run vapid`). Приложение на Android получает уведомления через ntfy.
 - **Проверено** на PostgreSQL (PGlite) с заглушками Supabase (`npm run test:supabase`). На живом проекте Supabase, Cloudflare и GitHub Pages **не проверялось**.
 - **Ограничения.** Supabase ставит бесплатный проект на паузу после 7 дней тишины (`keepalive.yml` будит его раз в 3 дня). Все сервисы находятся **вне Казахстана**, поэтому это для демо и кабинета без персональных данных. Пилот с реальными гостями хранит данные в клубе (`docs/FREE_SETUP_RU.md`), пока облако не переедет на KZ-хостинг.
 

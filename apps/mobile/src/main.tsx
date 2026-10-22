@@ -6,7 +6,6 @@ import { Capacitor } from '@capacitor/core';
 import { Device } from '@capacitor/device';
 import { Preferences } from '@capacitor/preferences';
 import { SplashScreen } from '@capacitor/splash-screen';
-import { FirebaseMessaging, Importance } from '@capacitor-firebase/messaging';
 import { App } from '../../cloud-web/src/App.tsx';
 import { SUPABASE_MODE } from '../../cloud-web/src/config.ts';
 import type { NativeBridge, PushTokenResult } from '../../cloud-web/src/platform.ts';
@@ -30,41 +29,19 @@ async function write(key: string, value: string | null): Promise<void> {
   else await Preferences.set({ key, value });
 }
 
-/** A push tap carries `data.clubId` (see PushData): open that club. */
-function openFromPush(data: unknown): void {
-  if (typeof data !== 'object' || data === null) return;
-  const clubId = (data as Record<string, unknown>).clubId;
-  if (typeof clubId === 'string' && clubId) location.hash = `#/clubs/${encodeURIComponent(clubId)}`;
-}
-
-async function setUpPush(): Promise<void> {
-  // Registered before anything else, so a tap that launched the app is not lost.
-  await FirebaseMessaging.addListener('notificationActionPerformed', (e) => openFromPush(e.notification.data));
-  if (Capacitor.getPlatform() === 'android') {
-    // Same id the cloud sends in android.notification.channel_id.
-    await FirebaseMessaging.createChannel({
-      id: 'alerts',
-      name: 'Тревоги клуба',
-      description: 'Свет без игры, нет электричества, HUB не на связи, смена не закрыта',
-      importance: Importance.High,
-      vibration: true,
-    }).catch(() => {});
-  }
-}
-
+/**
+ * No push service of our own (no Firebase/Google account needed): alerts come through the free
+ * ntfy app, connected on the cabinet page «Телефон и уведомления». A tap on an ntfy notification
+ * opens the cabinet link the cloud put in it. The self-hosted cloud has no ntfy channel yet.
+ */
 async function pushToken(): Promise<PushTokenResult> {
-  // Supabase build: no Firebase at all — alerts come through the ntfy app (cabinet → «Телефон и уведомления»).
-  if (SUPABASE_MODE) return { ok: false, reason: 'unavailable', message: 'в этой сборке уведомления приходят через ntfy' };
-  try {
-    let perm = await FirebaseMessaging.checkPermissions();
-    if (perm.receive === 'prompt' || perm.receive === 'prompt-with-rationale') perm = await FirebaseMessaging.requestPermissions();
-    if (perm.receive !== 'granted') return { ok: false, reason: 'denied' };
-    const { token } = await FirebaseMessaging.getToken();
-    return { ok: true, token };
-  } catch (e) {
-    // Typically a build without google-services.json / GoogleService-Info.plist: Firebase is not configured.
-    return { ok: false, reason: 'unavailable', message: (e as Error).message || 'Firebase не настроен в этой сборке' };
-  }
+  return {
+    ok: false,
+    reason: 'unavailable',
+    message: SUPABASE_MODE
+      ? 'тревоги приходят через бесплатное приложение ntfy — включите его в разделе «Уведомления через ntfy»'
+      : 'в сборке для своего облака уведомлений на телефон нет, тревоги видны в кабинете',
+  };
 }
 
 async function scanQr(): Promise<string | null> {
@@ -115,8 +92,6 @@ async function main(): Promise<void> {
     appVersion: () => `${info.version} (${info.build})`,
   };
   setNativeBridge(bridge);
-  // FCM is the legacy path of the self-hosted cloud (apps/cloud); a Supabase build never registers it.
-  if (!SUPABASE_MODE) await setUpPush().catch(() => {});
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>

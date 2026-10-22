@@ -39,8 +39,7 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Push about club alerts (Android 13+ asks the owner). -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- No POST_NOTIFICATIONS: the app shows no notifications itself, club alerts come through the ntfy app. -->
     <!-- Sign-in by QR from the cabinet. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />

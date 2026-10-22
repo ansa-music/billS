@@ -1,11 +1,57 @@
 apply plugin: 'com.android.application'
 
-// Release signing: android/keystore.properties (not in git), see docs/MOBILE_RELEASE_RU.md.
-def keystorePropertiesFile = rootProject.file('keystore.properties')
-def keystoreProperties = new Properties()
-if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+// A -P property or an environment variable (CI); blank counts as not set.
+def setting = { String property, String envName ->
+    def value = (project.findProperty(property) ?: System.getenv(envName))?.toString()?.trim()
+    return value ? value : null
 }
+
+// Version: -PtsVersionName=1.2.3 [-PtsVersionCode=10203] (CI passes both from the tag mobile-v1.2.3),
+// else the "version" of apps/mobile/package.json. versionCode = major*10000 + minor*100 + patch, so a
+// newer version always has a bigger code (Android refuses to install a smaller one over a bigger one).
+def versionCodeOf = { String name ->
+    def parts = name.tokenize('.-+')
+    if (parts.size() < 3 || !parts[0..2].every { it.isInteger() }) return 1
+    return parts[0].toInteger() * 10000 + parts[1].toInteger() * 100 + parts[2].toInteger()
+}
+def packageVersion = new groovy.json.JsonSlurper().parse(rootProject.file('../package.json')).version.toString()
+def tsVersionName = setting('tsVersionName', 'TS_VERSION_NAME') ?: packageVersion
+def tsVersionCode = (setting('tsVersionCode', 'TS_VERSION_CODE') ?: versionCodeOf(tsVersionName).toString()).toInteger()
+
+// Release signing key, first match wins:
+//  1. CI / command line: ANDROID_KEYSTORE_FILE, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+//     (or -PtsKeystoreFile, -PtsKeystorePassword, -PtsKeyAlias, -PtsKeyPassword);
+//  2. android/keystore.properties (not in git), see docs/MOBILE_RELEASE_RU.md;
+//  3. neither: release is signed with the debug key. Such an APK installs, but an APK signed with the
+//     real key cannot be installed over it (Android keeps the signature of an installed app), so users
+//     uninstall it once. Google Play rejects debug-signed uploads by itself.
+def releaseKey = null
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+def ciKeystore = setting('tsKeystoreFile', 'ANDROID_KEYSTORE_FILE')
+if (ciKeystore) {
+    releaseKey = [
+        storeFile    : file(ciKeystore),
+        storePassword: setting('tsKeystorePassword', 'ANDROID_KEYSTORE_PASSWORD'),
+        keyAlias     : setting('tsKeyAlias', 'ANDROID_KEY_ALIAS'),
+        keyPassword  : setting('tsKeyPassword', 'ANDROID_KEY_PASSWORD'),
+    ]
+} else if (keystorePropertiesFile.exists()) {
+    def props = new Properties()
+    keystorePropertiesFile.withInputStream { props.load(it) }
+    releaseKey = [
+        storeFile    : props['storeFile'] ? rootProject.file(props['storeFile']) : null,
+        storePassword: props['storePassword'],
+        keyAlias     : props['keyAlias'],
+        keyPassword  : props['keyPassword'],
+    ]
+}
+if (releaseKey) {
+    // Fail loudly instead of silently falling back to the debug key: a half-configured key is a mistake.
+    def missing = releaseKey.findAll { k, v -> !v }.keySet()
+    if (missing) throw new GradleException("Подпись APK: не заданы ${missing.join(', ')}")
+    if (!releaseKey.storeFile.exists()) throw new GradleException("Подпись APK: нет файла ключа ${releaseKey.storeFile}")
+}
+logger.lifecycle("TS ${tsVersionName} (versionCode ${tsVersionCode}), подпись release: ${releaseKey ? 'ключ TS' : 'отладочный ключ'}")
 
 android {
     namespace = "kz.ts.owner"
@@ -14,8 +60,8 @@ android {
         applicationId "kz.ts.owner"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "0.1.0"
+        versionCode tsVersionCode
+        versionName tsVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -24,20 +70,18 @@ android {
         }
     }
     signingConfigs {
-        release {
-            if (keystorePropertiesFile.exists()) {
-                storeFile rootProject.file(keystoreProperties['storeFile'])
-                storePassword keystoreProperties['storePassword']
-                keyAlias keystoreProperties['keyAlias']
-                keyPassword keystoreProperties['keyPassword']
+        if (releaseKey) {
+            release {
+                storeFile releaseKey.storeFile
+                storePassword releaseKey.storePassword
+                keyAlias releaseKey.keyAlias
+                keyPassword releaseKey.keyPassword
             }
         }
     }
     buildTypes {
         release {
-            if (keystorePropertiesFile.exists()) {
-                signingConfig signingConfigs.release
-            }
+            signingConfig releaseKey ? signingConfigs.release : signingConfigs.debug
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
@@ -64,11 +108,3 @@ dependencies {
 
 apply from: 'capacitor.build.gradle'
 
-try {
-    def servicesJSON = file('google-services.json')
-    if (servicesJSON.text) {
-        apply plugin: 'com.google.gms.google-services'
-    }
-} catch(Exception e) {
-    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
-}

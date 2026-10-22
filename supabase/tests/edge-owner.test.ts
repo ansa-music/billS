@@ -95,7 +95,7 @@ test('owner: with SUPABASE_JWT_SECRET an HS256 signature is checked', async (t) 
   assert.equal((await e.call(handleOwner, 'GET', '/owner/push', { headers: { authorization: `Bearer ${unsigned}` } })).status, 401);
   const ok = await e.call(handleOwner, 'GET', '/owner/push', { headers: { authorization: `Bearer ${h}.${p}.${sig}` } });
   assert.equal(ok.status, 200);
-  assert.deepEqual(ok.body.channels, ['webpush', 'ntfy', 'fcm']);
+  assert.deepEqual(ok.body.channels, ['webpush', 'ntfy']);
 });
 
 test('owner: devices (webpush, ntfy) register idempotently, delete, test push, CORS', async (t) => {

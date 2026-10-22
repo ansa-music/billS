@@ -1,6 +1,5 @@
-import { createSign, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type { webcrypto } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import type {
   DeviceView,
   DevicePlatform,
@@ -23,8 +22,10 @@ import type { SqlDriver } from './db/driver.ts';
  *
  * The queue is durable: a crash between commit and send leaves PENDING rows that
  * the next flush sends. `dedupe_key` keeps a redelivered event or a second watchdog
- * pass from notifying twice. Without an FCM key the sender is disabled: rows are
- * marked DISABLED and logged, rules and devices are still kept.
+ * pass from notifying twice. With no channel configured (no Web Push keys and ntfy
+ * turned off) the sender is disabled: rows are marked DISABLED and logged, rules and
+ * devices are still kept. No Firebase (FCM): it needs a Google project and a service
+ * key; phones get alerts through the free ntfy app instead.
  */
 
 // ---------------------------------------------------------------------------
@@ -36,7 +37,7 @@ export interface PushMessage {
   title: string;
   body: string;
   data: PushData;
-  /** Platform of the device the token belongs to; RoutingSender picks the channel by it (FCM when absent). */
+  /** Platform of the device the token belongs to; RoutingSender picks the channel by it. */
   platform?: DevicePlatform;
 }
 
@@ -49,7 +50,7 @@ export interface PushSender {
 
 export type Log = (message: string) => void;
 
-/** No FCM key: nothing leaves the cloud, every would-be push is written to the log. */
+/** No channel configured: nothing leaves the cloud, every would-be push is written to the log. */
 export class DisabledSender implements PushSender {
   readonly enabled = false;
   readonly #log: Log;
@@ -59,126 +60,9 @@ export class DisabledSender implements PushSender {
   }
 
   async send(message: PushMessage): Promise<SendResult> {
-    this.#log(`Push выключен (нет ключа FCM): «${message.title}» — ${message.body}`);
+    this.#log(`Push выключен: «${message.title}» — ${message.body}`);
     return { ok: false, error: 'PUSH_DISABLED', unregistered: false };
   }
-}
-
-/** The fields of a Google service account JSON key that FCM needs. */
-export interface ServiceAccount {
-  project_id: string;
-  client_email: string;
-  private_key: string;
-  token_uri?: string;
-}
-
-export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<{
-  status: number;
-  text(): Promise<string>;
-}>;
-
-const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
-const DEFAULT_TOKEN_URI = 'https://oauth2.googleapis.com/token';
-
-const base64url = (input: string | Buffer): string => Buffer.from(input).toString('base64url');
-
-/**
- * FCM HTTP v1 (`projects/{id}/messages:send`). The access token comes from the
- * service account by the OAuth 2.0 JWT-bearer flow (RS256 signed by node:crypto,
- * no Google SDK) and is cached until a minute before it expires.
- */
-export class FcmSender implements PushSender {
-  readonly enabled = true;
-  readonly #account: ServiceAccount;
-  readonly #fetch: FetchLike;
-  readonly #now: () => number;
-  readonly #endpoint: string;
-  #accessToken: { value: string; expiresAt: number } | null = null;
-
-  constructor(account: ServiceAccount, options: { fetch?: FetchLike; now?: () => number; endpoint?: string } = {}) {
-    this.#account = account;
-    this.#fetch = options.fetch ?? (globalThis.fetch as unknown as FetchLike);
-    this.#now = options.now ?? Date.now;
-    this.#endpoint = options.endpoint ?? 'https://fcm.googleapis.com';
-  }
-
-  async #token(): Promise<string> {
-    const now = this.#now();
-    if (this.#accessToken && this.#accessToken.expiresAt - 60_000 > now) return this.#accessToken.value;
-    const tokenUri = this.#account.token_uri ?? DEFAULT_TOKEN_URI;
-    const iat = Math.floor(now / 1000);
-    const header = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-    const claims = base64url(
-      JSON.stringify({ iss: this.#account.client_email, scope: FCM_SCOPE, aud: tokenUri, iat, exp: iat + 3600 }),
-    );
-    const signature = createSign('RSA-SHA256').update(`${header}.${claims}`).sign(this.#account.private_key);
-    const assertion = `${header}.${claims}.${base64url(signature)}`;
-    const res = await this.#fetch(tokenUri, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }).toString(),
-    });
-    const text = await res.text();
-    if (res.status !== 200) throw new Error(`OAuth ${res.status}: ${text.slice(0, 200)}`);
-    const body = JSON.parse(text) as { access_token?: string; expires_in?: number };
-    if (!body.access_token) throw new Error('OAuth: нет access_token в ответе');
-    this.#accessToken = { value: body.access_token, expiresAt: now + (body.expires_in ?? 3600) * 1000 };
-    return body.access_token;
-  }
-
-  async send(message: PushMessage): Promise<SendResult> {
-    let accessToken: string;
-    try {
-      accessToken = await this.#token();
-    } catch (e) {
-      return { ok: false, error: (e as Error).message, unregistered: false };
-    }
-    const data: Record<string, string> = { kind: message.data.kind, clubId: message.data.clubId };
-    if (message.data.alertId) data.alertId = message.data.alertId;
-    const payload = {
-      message: {
-        token: message.token,
-        notification: { title: message.title, body: message.body },
-        data,
-        android: { priority: 'HIGH', notification: { channel_id: 'alerts', sound: 'default' } },
-        apns: { headers: { 'apns-priority': '10' }, payload: { aps: { sound: 'default' } } },
-      },
-    };
-    let res: { status: number; text(): Promise<string> };
-    try {
-      res = await this.#fetch(`${this.#endpoint}/v1/projects/${encodeURIComponent(this.#account.project_id)}/messages:send`, {
-        method: 'POST',
-        headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-    } catch (e) {
-      return { ok: false, error: `FCM недоступен: ${(e as Error).message}`, unregistered: false };
-    }
-    if (res.status === 200) return { ok: true };
-    const text = await res.text();
-    if (res.status === 401) this.#accessToken = null;
-    // FCM says a token is gone with 404 NOT_FOUND / errorCode UNREGISTERED.
-    const unregistered = res.status === 404 || text.includes('UNREGISTERED');
-    return { ok: false, error: `FCM ${res.status}: ${text.slice(0, 200)}`, unregistered };
-  }
-}
-
-/** Reads the service account from CLOUD_FCM_SERVICE_ACCOUNT_JSON or the file CLOUD_FCM_SERVICE_ACCOUNT. */
-export function loadServiceAccount(env: NodeJS.ProcessEnv = process.env): ServiceAccount | null {
-  const inline = env.CLOUD_FCM_SERVICE_ACCOUNT_JSON?.trim();
-  const file = env.CLOUD_FCM_SERVICE_ACCOUNT?.trim();
-  const raw = inline || (file ? readFileSync(file, 'utf8') : '');
-  if (!raw) return null;
-  const parsed = JSON.parse(raw) as Partial<ServiceAccount>;
-  if (!parsed.project_id || !parsed.client_email || !parsed.private_key) {
-    throw new Error('Ключ сервисного аккаунта FCM: нужны project_id, client_email и private_key');
-  }
-  return {
-    project_id: parsed.project_id,
-    client_email: parsed.client_email,
-    private_key: parsed.private_key,
-    ...(parsed.token_uri ? { token_uri: parsed.token_uri } : {}),
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -386,7 +270,7 @@ export class PushDispatcher {
         continue;
       }
       if (!this.#sender.enabled) {
-        this.#log(`Push выключен (нет ключа FCM), не отправлено: «${row.title}» — ${row.body}`);
+        this.#log(`Push выключен, не отправлено: «${row.title}» — ${row.body}`);
         await this.#finish(row.id, 'DISABLED', now, 0, 0);
         continue;
       }
@@ -456,7 +340,7 @@ export class PushDispatcher {
   async test(ownerId: string, clubId: string): Promise<TestPushResponse> {
     const devices = await this.#db.all<DeviceRow>('SELECT * FROM owner_devices WHERE owner_id = ? ORDER BY created_at', [ownerId]);
     if (!this.#sender.enabled) {
-      this.#log('Push выключен (нет ключа FCM): тестовое уведомление не отправлено');
+      this.#log('Push выключен: тестовое уведомление не отправлено');
       return { pushEnabled: false, sent: 0, failed: 0 };
     }
     let sent = 0;
@@ -572,7 +456,7 @@ export async function hubBackOnline(
 }
 
 // ---------------------------------------------------------------------------
-// Senders without Firebase: Web Push (cabinet PWA) and ntfy (Android app)
+// Senders: Web Push (cabinet PWA) and ntfy (the phone app, no Google services needed)
 // ---------------------------------------------------------------------------
 //
 // Both use only `fetch` and WebCrypto (`globalThis.crypto.subtle`), so they run
@@ -916,18 +800,25 @@ export class NtfySender implements PushSender {
   }
 }
 
-type Channel = 'webpush' | 'ntfy' | 'fcm';
+type Channel = 'webpush' | 'ntfy';
+
+/** Shown on the device in the cabinet («Последняя ошибка»): a phone registered for the removed FCM push. */
+export const LEGACY_DEVICE_ERROR =
+  'Этот телефон подключён по старой схеме, уведомления на него больше не отправляются. Подключите уведомления через ntfy и удалите его из списка.';
 
 /**
- * Picks the channel by the device platform: `webpush` → Web Push, `ntfy` → ntfy,
- * `android`/`ios`/`web` → FCM. A channel that is not configured is skipped and logged.
+ * Picks the channel by the device platform: `webpush` → Web Push, `ntfy` → ntfy.
+ * `android`/`ios`/`web` are FCM tokens from before FCM was removed: nothing can reach them,
+ * the row is kept with LEGACY_DEVICE_ERROR so the owner sees why and removes it.
+ * A channel that is not configured is skipped and logged.
  */
 export class RoutingSender implements PushSender {
   readonly #routes: Partial<Record<Channel, PushSender>> = {};
   readonly #log: Log;
 
   constructor(routes: Partial<Record<Channel, PushSender | null>>, log: Log = () => {}) {
-    for (const [name, sender] of Object.entries(routes) as Array<[Channel, PushSender | null | undefined]>) {
+    for (const name of ['webpush', 'ntfy'] as const) {
+      const sender = routes[name];
       if (sender) this.#routes[name] = sender;
     }
     this.#log = log;
@@ -943,12 +834,15 @@ export class RoutingSender implements PushSender {
   }
 
   async send(message: PushMessage): Promise<SendResult> {
-    const platform = message.platform ?? 'android';
-    const channel: Channel = platform === 'webpush' ? 'webpush' : platform === 'ntfy' ? 'ntfy' : 'fcm';
-    const sender = this.#routes[channel];
+    const platform = message.platform;
+    if (platform !== 'webpush' && platform !== 'ntfy') {
+      this.#log(`Push на устройство ${platform ?? 'без платформы'} не отправлен: старая схема без ntfy («${message.title}»)`);
+      return { ok: false, error: LEGACY_DEVICE_ERROR, unregistered: false };
+    }
+    const sender = this.#routes[platform];
     if (!sender || !sender.enabled) {
-      this.#log(`Push на устройство ${platform} не настроен (${channel}): «${message.title}» не отправлено`);
-      return { ok: false, error: `PUSH_DISABLED: канал ${channel} не настроен`, unregistered: false };
+      this.#log(`Push на устройство ${platform} не настроен: «${message.title}» не отправлено`);
+      return { ok: false, error: `PUSH_DISABLED: канал ${platform} не настроен`, unregistered: false };
     }
     return sender.send(message);
   }
@@ -957,8 +851,7 @@ export class RoutingSender implements PushSender {
 /**
  * Senders from environment variables (Supabase secrets or .env):
  * VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY (+ VAPID_SUBJECT, else TS_CABINET_URL) → Web Push;
- * ntfy is always on unless NTFY_DISABLED=1 (NTFY_TOKEN optional);
- * CLOUD_FCM_SERVICE_ACCOUNT_JSON → FCM. TS_CABINET_URL is where a tap leads.
+ * ntfy is always on unless NTFY_DISABLED=1 (NTFY_TOKEN optional). TS_CABINET_URL is where a tap leads.
  */
 export function pushSenderFromEnv(env: Record<string, string | undefined>, log: Log = () => {}): RoutingSender {
   const cabinetUrl = env.TS_CABINET_URL?.trim() || null;
@@ -974,12 +867,5 @@ export function pushSenderFromEnv(env: Record<string, string | undefined>, log: 
     }
   }
   const ntfy = env.NTFY_DISABLED === '1' ? null : new NtfySender({ token: env.NTFY_TOKEN ?? null, cabinetUrl });
-  let fcm: PushSender | null = null;
-  try {
-    const account = env.CLOUD_FCM_SERVICE_ACCOUNT_JSON?.trim() ? loadServiceAccount(env) : null;
-    if (account) fcm = new FcmSender(account);
-  } catch (e) {
-    log(`FCM выключен: ${(e as Error).message}`);
-  }
-  return new RoutingSender({ webpush, ntfy, fcm }, log);
+  return new RoutingSender({ webpush, ntfy }, log);
 }

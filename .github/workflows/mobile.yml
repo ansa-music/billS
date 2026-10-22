@@ -1,0 +1,246 @@
+# TS для Android (apps/mobile, Capacitor): APK приложения владельца (docs/MOBILE_RELEASE_RU.md).
+#
+# - метка mobile-v<версия> (например mobile-v0.1.0): сборка и выпуск на GitHub «TS для Android <версия>»
+#   с файлом TS-<версия>.apk — его находит страница «Скачать приложение»;
+# - ручной запуск (Actions → mobile → Run workflow): пробная сборка, APK — в артефактах запуска, без выпуска;
+# - pull request: только проверка, что APK собирается.
+#
+# Настройки облака вшиваются в приложение из тех же переменных/секретов, что у deploy.yml:
+#   SUPABASE_PROJECT_REF, SUPABASE_ANON_KEY (обязательны для метки), VAPID_PUBLIC_KEY.
+# Подпись: секреты ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+#   (создаёт `npm run android:keystore`). Без них APK подписан отладочным ключом — см. шаг «Ключ подписи».
+name: mobile
+
+on:
+  push:
+    tags: ['mobile-v*']
+  pull_request:
+    paths:
+      - 'apps/mobile/**'
+      - 'apps/cloud-web/**'
+      - 'packages/domain/**'
+      - '.github/workflows/mobile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    env:
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF }}
+      SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY || secrets.SUPABASE_ANON_KEY }}
+      IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/mobile-v') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            apps/mobile/android/**/*.gradle
+            apps/mobile/android/gradle/wrapper/gradle-wrapper.properties
+
+      # ubuntu-latest already has an Android SDK (ANDROID_HOME); this accepts the licenses and makes
+      # sure the platform and build tools the project compiles against are there.
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;35.0.0 build-tools;36.0.0'
+          log-accepted-android-sdk-licenses: false
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # mobile-v1.2.3 → versionName 1.2.3, versionCode 10203: a newer version always gets a bigger code,
+      # which Android requires to install it over the old one. Trial builds: the version from
+      # apps/mobile/package.json plus «-test.<run>», with the code of that version.
+      - name: Version
+        id: version
+        run: |
+          code_of() {
+            [[ "$1" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]] || return 1
+            local major=$((10#${BASH_REMATCH[1]})) minor=$((10#${BASH_REMATCH[2]})) patch=$((10#${BASH_REMATCH[3]}))
+            (( minor <= 99 && patch <= 99 )) || return 1
+            echo $(( major * 10000 + minor * 100 + patch ))
+          }
+          if [ "$IS_RELEASE" = true ]; then
+            name="${GITHUB_REF_NAME#mobile-v}"
+            if [[ ! "$name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || ! code=$(code_of "$name"); then
+              echo "::error::Метка должна быть вида mobile-v1.2.3 (три числа через точку, второе и третье — до 99), а не «$GITHUB_REF_NAME»"
+              exit 1
+            fi
+          else
+            base=$(node -p "require('./apps/mobile/package.json').version")
+            code=$(code_of "$base") || code=1
+            name="$base-test.$GITHUB_RUN_NUMBER"
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "Версия: $name (versionCode $code)"
+
+      # An APK without the cloud address cannot sign in to the cabinet: a release refuses to build.
+      - name: Cloud settings
+        run: |
+          if [ -n "$SUPABASE_PROJECT_REF" ] && [ -n "$SUPABASE_ANON_KEY" ]; then
+            echo "Настройки облака Supabase вшиваются в приложение"
+          elif [ "$IS_RELEASE" = true ]; then
+            echo "::error::Нет настроек облака: задайте SUPABASE_PROJECT_REF и SUPABASE_ANON_KEY (Settings → Secrets and variables → Actions), как для deploy.yml. Без них приложение не сможет войти в кабинет."
+            exit 1
+          else
+            echo "::warning::Нет SUPABASE_PROJECT_REF / SUPABASE_ANON_KEY — пробная сборка для своего облака (адрес облака вводится в приложении)."
+          fi
+
+      - name: Type-check
+        run: npx tsc -p apps/mobile
+
+      - name: Build web part
+        env:
+          VITE_SUPABASE_URL: ${{ (vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF) != '' && format('https://{0}.supabase.co', (vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF)) || '' }}
+          VITE_SUPABASE_ANON_KEY: ${{ (vars.SUPABASE_ANON_KEY || secrets.SUPABASE_ANON_KEY) }}
+          VITE_VAPID_PUBLIC_KEY: ${{ vars.VAPID_PUBLIC_KEY || secrets.VAPID_PUBLIC_KEY }}
+        run: npm run build -w @bills/mobile
+
+      - name: Capacitor sync
+        working-directory: apps/mobile
+        run: npx cap sync android
+
+      # Signing. All four secrets → the TS key: every next version installs over the previous one.
+      # None → release build signed with the debug key of this runner: it installs fine (unlike an
+      # unsigned APK) and, unlike assembleDebug, is the same non-debuggable, HTTPS-only build as a real
+      # release. But the debug key is new on every runner, so a later APK (debug or properly signed)
+      # cannot be installed over it — users uninstall once. Pull requests never get the key.
+      - name: Signing key
+        id: signing
+        if: github.event_name != 'pull_request'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          missing=()
+          for n in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            [ -n "${!n}" ] || missing+=("$n")
+          done
+          if [ ${#missing[@]} -eq 0 ]; then
+            file="$RUNNER_TEMP/ts-release.jks"
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > "$file"
+            if ! keytool -list -keystore "$file" -alias "$ANDROID_KEY_ALIAS" -storepass:env ANDROID_KEYSTORE_PASSWORD > /dev/null; then
+              echo "::error::Ключ подписи не открывается: проверьте секреты ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD и ANDROID_KEY_ALIAS (значения — в github-secrets.txt рядом с ключом)."
+              exit 1
+            fi
+            echo "file=$file" >> "$GITHUB_OUTPUT"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "Подпись: ключ TS из секретов"
+          elif [ ${#missing[@]} -lt 4 ] && [ "$IS_RELEASE" = true ]; then
+            echo "::error::Заданы не все секреты подписи, нет: ${missing[*]}. Добавьте их или удалите остальные (docs/MOBILE_RELEASE_RU.md)."
+            exit 1
+          else
+            [ ${#missing[@]} -lt 4 ] && echo "::warning::Заданы не все секреты подписи, нет: ${missing[*]}."
+            echo "::warning::APK подписан отладочным ключом: следующую версию нельзя будет поставить поверх этой. Постоянный ключ — npm run android:keystore (docs/MOBILE_RELEASE_RU.md)."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build APK
+        working-directory: apps/mobile/android
+        env:
+          TS_VERSION_NAME: ${{ steps.version.outputs.name }}
+          TS_VERSION_CODE: ${{ steps.version.outputs.code }}
+          # Read by app/build.gradle; empty when not signing → the debug key.
+          ANDROID_KEYSTORE_FILE: ${{ steps.signing.outputs.file }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ steps.signing.outputs.signed == 'true' && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
+          ANDROID_KEY_ALIAS: ${{ steps.signing.outputs.signed == 'true' && secrets.ANDROID_KEY_ALIAS || '' }}
+          ANDROID_KEY_PASSWORD: ${{ steps.signing.outputs.signed == 'true' && secrets.ANDROID_KEY_PASSWORD || '' }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Collect APK
+        id: apk
+        env:
+          VERSION: ${{ steps.version.outputs.name }}
+        run: |
+          src=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          if [ ! -f "$src" ]; then
+            echo "::error::Gradle не создал $src"
+            find apps/mobile/android/app/build/outputs -name '*.apk' || true
+            exit 1
+          fi
+          mkdir -p dist
+          cp "$src" "dist/TS-$VERSION.apk"
+          (cd dist && sha256sum "TS-$VERSION.apk" > "TS-$VERSION.apk.sha256")
+          # Who signed it (the certificate is public): compare with the fingerprint npm run android:keystore printed.
+          tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          certs=$("$tools/apksigner" verify --print-certs "dist/TS-$VERSION.apk")
+          echo "$certs" | grep -m1 'certificate DN' || true
+          digest=$(echo "$certs" | sed -n 's/.*certificate SHA-256 digest: //p' | head -1 | tr 'a-f' 'A-F' | sed 's/../&:/g; s/:$//')
+          echo "Отпечаток сертификата SHA-256: $digest"
+          echo "Готово: dist/TS-$VERSION.apk ($(du -h "dist/TS-$VERSION.apk" | cut -f1))"
+
+      - name: APK to artifacts
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: TS-${{ steps.version.outputs.name }}
+          path: dist/TS-${{ steps.version.outputs.name }}.apk
+          if-no-files-found: error
+
+      - name: Release notes
+        if: env.IS_RELEASE == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.name }}
+          SIGNED: ${{ steps.signing.outputs.signed }}
+        run: |
+          {
+            echo "Приложение TS для владельца на телефон с Android 8 и новее."
+            echo
+            echo "**Как установить**"
+            echo "1. Откройте эту страницу на телефоне и скачайте файл TS-$VERSION.apk."
+            echo "2. Откройте скачанный файл. Если телефон спросит — разрешите установку из этого источника."
+            echo "3. Войдите той же почтой и паролем, что и в кабинете на сайте."
+            echo
+            echo "**Уведомления о тревогах** приходят через бесплатное приложение ntfy: в TS откройте «Телефон и уведомления» → «Получать уведомления через ntfy» и следуйте подсказкам."
+            if [ "$SIGNED" != true ]; then
+              echo
+              echo "**Внимание:** эта версия собрана с временной подписью. Следующая версия не установится поверх неё: перед обновлением удалите приложение TS с телефона, затем установите новое."
+            fi
+          } > "$RUNNER_TEMP/release-notes.md"
+
+      # make_latest: false — «latest» stays with the PC app: its auto-update reads releases/latest (desktop.yml).
+      - name: GitHub release
+        if: env.IS_RELEASE == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: TS для Android ${{ steps.version.outputs.name }}
+          body_path: ${{ runner.temp }}/release-notes.md
+          draft: false
+          prerelease: false
+          make_latest: 'false'
+          files: |
+            dist/TS-${{ steps.version.outputs.name }}.apk
+            dist/TS-${{ steps.version.outputs.name }}.apk.sha256
+          fail_on_unmatched_files: true
+
+      - name: Remove signing key
+        if: always() && steps.signing.outputs.file != ''
+        run: rm -f "${{ steps.signing.outputs.file }}"
