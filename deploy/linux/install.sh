@@ -4,7 +4,10 @@
 #   curl -fsSL https://raw.githubusercontent.com/ansa-music/billS/main/deploy/linux/install.sh | sudo bash
 #   или из клона репозитория:
 #   sudo bash deploy/linux/install.sh [--ref <tag|branch>] [--host 0.0.0.0] [--port 4310] [--node-from nodesource|tarball]
-#                                     [--with-cloud [--cloud-port 4320]]
+#                                     [--with-cloud [--cloud-port 4320]] [--mdns-name hub]
+#
+# Работает и на Debian 12/13 (так ставит HUB образ «TS для мини-ПК», deploy/minipc): вопросов не задаёт,
+# поэтому годится для запуска из systemd без терминала.
 #
 # Повторный запуск безопасен (идемпотентен): существующий /etc/bills/hub.env и база не трогаются,
 # релиз пересоздаётся только если изменился целевой коммит.
@@ -30,6 +33,9 @@ die() { printf '[TS] ОШИБКА: %s\n' "$*" >&2; exit 1; }
 trap 'rc=$?; printf "[TS] ОШИБКА: установка прервана (строка %s, код %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2; exit $rc' ERR
 
 export DEBIAN_FRONTEND=noninteractive
+# Debian: через «su» без «-» в PATH нет /usr/sbin (useradd и т.п.).
+case ":${PATH:-}:" in *:/usr/sbin:*) ;; *) PATH="${PATH:+$PATH:}/usr/local/sbin:/usr/sbin:/sbin" ;; esac
+export PATH
 
 # ---------- Аргументы ----------
 REF="main"
@@ -41,6 +47,8 @@ NODE_FROM="auto"
 WITH_CLOUD=0
 CLOUD_PORT_OPT="4320"
 CLOUD_PORT_SET=0
+MDNS_NAME=""
+MDNS_SET=0
 REPO_URL="${BILLS_REPO:-https://github.com/ansa-music/billS.git}"
 ORIG_ARGS=("$@")
 
@@ -57,6 +65,7 @@ usage() {
                            (bills-cloud.service, /etc/bills/cloud.env). Повторный запуск без
                            этого флага облако НЕ выключает.
   --cloud-port <порт>      CLOUD_PORT для нового cloud.env (по умолчанию 4320; вместе с --with-cloud)
+  --mdns-name <имя>        HUB_MDNS_NAME для нового hub.env: hub → HUB доступен как hub.local
 USAGE
 }
 
@@ -75,6 +84,8 @@ while [ $# -gt 0 ]; do
     --with-cloud) WITH_CLOUD=1; shift ;;
     --cloud-port) [ $# -ge 2 ] || die "--cloud-port требует значение"; CLOUD_PORT_OPT="$2"; CLOUD_PORT_SET=1; shift 2 ;;
     --cloud-port=*) CLOUD_PORT_OPT="${1#--cloud-port=}"; CLOUD_PORT_SET=1; shift ;;
+    --mdns-name) [ $# -ge 2 ] || die "--mdns-name требует значение"; MDNS_NAME="$2"; MDNS_SET=1; shift 2 ;;
+    --mdns-name=*) MDNS_NAME="${1#--mdns-name=}"; MDNS_SET=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "неизвестный параметр: $1 (см. --help)" ;;
   esac
@@ -82,6 +93,7 @@ done
 case "$NODE_FROM" in auto|nodesource|tarball) ;; *) die "--node-from: допустимо auto, nodesource или tarball" ;; esac
 case "$PORT" in ''|*[!0-9]*) die "--port должен быть числом" ;; esac
 case "$CLOUD_PORT_OPT" in ''|*[!0-9]*) die "--cloud-port должен быть числом" ;; esac
+case "$MDNS_NAME" in *[!A-Za-z0-9.-]*) die "--mdns-name: только латинские буквы, цифры, точка и дефис" ;; esac
 [ "$CLOUD_PORT_OPT" != "$PORT" ] || die "--cloud-port не должен совпадать с портом HUB ($PORT)"
 
 [ "$(id -u)" -eq 0 ] || die "запустите от root: sudo bash install.sh ${ORIG_ARGS[*]:-}"
@@ -237,8 +249,8 @@ install_scripts() {
 ensure_env_file() {
   if [ -f "$ENV_FILE" ]; then
     log "Файл настроек $ENV_FILE уже есть — не трогаю."
-    if [ "$HOST_SET" -eq 1 ] || [ "$PORT_SET" -eq 1 ]; then
-      warn "--host/--port применяются только при создании нового hub.env; отредактируйте $ENV_FILE вручную и выполните: sudo systemctl restart $HUB_SERVICE"
+    if [ "$HOST_SET" -eq 1 ] || [ "$PORT_SET" -eq 1 ] || [ "$MDNS_SET" -eq 1 ]; then
+      warn "--host/--port/--mdns-name применяются только при создании нового hub.env; отредактируйте $ENV_FILE вручную и выполните: sudo systemctl restart $HUB_SERVICE"
     fi
   else
     log "Создаю $ENV_FILE из шаблона (HUB_HOST=$HOST, HUB_PORT=$PORT)"
@@ -247,6 +259,10 @@ ensure_env_file() {
         -e "s|^HUB_DB_PATH=.*|HUB_DB_PATH=$STATE_DIR/hub.db|" \
         -e "s|^BACKUP_DIR=.*|BACKUP_DIR=$STATE_DIR/backups|" \
         "$SRC_DIR/hub.env.example" >"$ENV_FILE"
+    if [ -n "$MDNS_NAME" ]; then
+      log "Имя в сети клуба: ${MDNS_NAME%.local}.local (HUB_MDNS_NAME)"
+      set_env_value "$ENV_FILE" HUB_MDNS_NAME "$MDNS_NAME"
+    fi
   fi
   chown root:"$BILLS_USER" "$ENV_FILE"
   chmod 640 "$ENV_FILE"
@@ -428,7 +444,8 @@ main() {
   fi
   command -v systemctl >/dev/null 2>&1 || die "нужен systemd (systemctl не найден)"
 
-  apt_install git curl ca-certificates gzip
+  # sudo нужен as_bills (lib.sh); в минимальном Debian его нет.
+  apt_install git curl ca-certificates gzip sudo
   ensure_node
   ensure_user_and_dirs
   install_scripts

@@ -1,0 +1,110 @@
+# TS для мини-ПК: образ флешки TS-minipc-<версия>.iso (Debian netinst + автоматическая установка TS).
+#
+# - pull request (deploy/minipc/**, этот файл) и ручной запуск: сборка, образ — в артефактах запуска
+#   (хранится 3 дня, чтобы не тратить место);
+# - тег minipc-v<версия> (например minipc-v0.1.0): выпуск на GitHub «TS для мини-ПК <версия>»
+#   с TS-minipc-<версия>.iso и .sha256 — его показывает страница «Скачать приложение».
+#
+# Образ ставит TS ровно того коммита, из которого собран (--ref github.sha); дальше — bills update.
+# Версия Debian: ручной запуск (поле debian) или переменная репозитория MINIPC_DEBIAN_VERSION,
+# по умолчанию current. Подробно — deploy/minipc/README.md.
+name: minipc
+
+on:
+  push:
+    tags: ['minipc-v*']
+  pull_request:
+    paths:
+      - 'deploy/minipc/**'
+      - 'deploy/linux/**'
+      - '.github/workflows/minipc.yml'
+  workflow_dispatch:
+    inputs:
+      debian:
+        description: 'Версия Debian netinst: current или номер, например 13.1.0'
+        required: false
+        default: current
+
+permissions:
+  contents: read
+
+concurrency:
+  group: minipc-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  iso:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      DEBIAN_VERSION: ${{ inputs.debian || vars.MINIPC_DEBIAN_VERSION || 'current' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Инструменты
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xorriso cpio gzip gnupg grub-common shellcheck
+
+      - name: Проверка скриптов
+        run: |
+          for f in deploy/linux/*.sh deploy/minipc/*.sh deploy/minipc/target/opt/ts-minipc/*.sh; do bash -n "$f"; done
+          for f in deploy/minipc/d-i/*.sh; do sh -n "$f"; done
+          shellcheck -S warning deploy/minipc/*.sh deploy/minipc/d-i/*.sh deploy/minipc/target/opt/ts-minipc/*.sh
+
+      - name: Версия
+        id: v
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/minipc-v* ]]; then
+            v="${GITHUB_REF_NAME#minipc-v}"
+          else
+            v="dev-${GITHUB_SHA::7}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Сборка образа
+        run: |
+          deploy/minipc/build-iso.sh \
+            --version "${{ steps.v.outputs.version }}" \
+            --ref "$GITHUB_SHA" \
+            --debian "$DEBIAN_VERSION" \
+            --gpg auto \
+            --out dist/minipc \
+            --work "$RUNNER_TEMP/minipc"
+
+      - name: Образ в артефакты
+        if: ${{ !startsWith(github.ref, 'refs/tags/minipc-v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: TS-minipc-${{ steps.v.outputs.version }}
+          path: dist/minipc/TS-minipc-*
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Выпуск на GitHub
+        if: ${{ startsWith(github.ref, 'refs/tags/minipc-v') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.v.outputs.version }}
+        run: |
+          cat > "$RUNNER_TEMP/notes.md" <<EOF
+          Образ флешки для мини-ПК клуба: TS ставится сам, без программиста.
+
+          **ВНИМАНИЕ: установка полностью стирает диск мини-ПК.** Не загружайте с этой флешки компьютер с нужными данными.
+
+          1. Скачайте файл \`TS-minipc-${V}.iso\`.
+          2. Запишите его на флешку от 2 ГБ программой balenaEtcher или Rufus (в Rufus на вопрос о режиме выберите «DD-образ»).
+          3. Подключите к мини-ПК кабель интернета от роутера, вставьте флешку и включите. Если мини-ПК не загрузился с флешки — при включении нажимайте F7, F11, F12 или Esc и выберите флешку.
+          4. Через 15–30 минут на экране мини-ПК появятся адрес настройки и QR-код. Откройте его на телефоне в сети клуба и следуйте шагам (понадобится код подключения из кабинета TS).
+
+          Подробная инструкция: https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/docs/MINIPC_RU.md
+          Контрольная сумма — в файле \`TS-minipc-${V}.iso.sha256\`.
+          EOF
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/minipc/TS-minipc-${V}.iso" "dist/minipc/TS-minipc-${V}.iso.sha256" \
+            --title "TS для мини-ПК ${V}" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --verify-tag
