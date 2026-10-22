@@ -206,6 +206,7 @@ TS можно запустить для всей сети клубов **без 
 |---|---|
 | Бесплатный режим: облако на мини-ПК клуба, Tailscale / Cloudflare Tunnel / DuckDNS, приложения без магазинов | [docs/FREE_SETUP_RU.md](docs/FREE_SETUP_RU.md) |
 | Linux (Ubuntu Server LTS, основной вариант): установка одной командой, служба systemd, ночные бэкапы, обновление с автооткатом, восстановление | [deploy/linux/README.md](deploy/linux/README.md) |
+| Мини-ПК «вставил флешку — работает»: образ Debian с TS, запись на флешку, мастер `http://<ip>:4310/setup` | [docs/MINIPC_RU.md](docs/MINIPC_RU.md) |
 | Windows (запасной вариант): Планировщик вместо службы, бэкапы, обновление, вариант с NSSM | [deploy/windows/README.md](deploy/windows/README.md) |
 | Удалённая поддержка без открытия HUB в интернет: Tailscale или WireGuard, что открыть, регламент | [deploy/linux/remote-support.md](deploy/linux/remote-support.md) |
 | Регламент для управляющего: чек-лист перед сменой, отключение света, HUB не отвечает, восстановление за час, обновления, мониторинг | [docs/OPERATIONS_RU.md](docs/OPERATIONS_RU.md) |

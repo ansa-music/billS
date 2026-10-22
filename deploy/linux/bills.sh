@@ -128,10 +128,12 @@ case "$cmd" in
     else
       echo "Health: HUB не отвечает на $(hub_url)/api/health"
     fi
-    if [ -n "${CLOUD_URL:-}" ]; then
+    if [ -n "${CLOUD_URL:-}" ] && [ -n "${HUB_ID:-}" ]; then
       echo "HUB подключён к облаку: $CLOUD_URL (HUB_ID=${HUB_ID:-?})"
+    elif [ -f "$(dirname "${HUB_DB_PATH:-/var/lib/bills/hub.db}")/setup.json" ]; then
+      echo "HUB подключён к облаку через мастер настройки (setup.json)"
     else
-      echo "HUB к облаку не подключён (CLOUD_URL в $ENV_FILE пуст)"
+      echo "HUB к облаку не подключён — мастер настройки: http://<адрес этого ПК>:4310/setup"
     fi
     if cloud_enabled; then
       cport="$(cloud_port)"

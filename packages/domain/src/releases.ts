@@ -70,7 +70,7 @@ export interface GithubRelease {
   assets: GithubReleaseAsset[];
 }
 
-/** Where a file goes; «minipc» is the USB image that installs the whole mini-PC (HUB on Ubuntu). */
+/** Where a file goes; «minipc» is the USB image that installs the whole mini-PC (HUB on Debian). */
 export type ReleasePlatform = 'android' | 'windows' | 'linux' | 'mac' | 'minipc';
 
 /** Which app a file installs, guessed from its name; null when the name does not say. */
