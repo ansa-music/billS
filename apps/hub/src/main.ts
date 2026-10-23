@@ -26,7 +26,8 @@ const { config, setupPath, setupError } = loadHubConfig();
 // and the wizard at /setup asks for HUB_ID and the key.
 const cloudReady = Boolean(config.cloudUrl && config.cloudApiKey && config.hubId);
 const db = openDb(config.dbPath);
-const seeded = seedDemo(db, Date.now(), config.demoTimezone);
+// HUB_DEMO_BUSINESS=cafe: an empty database becomes a demo coffee shop instead of a billiard club.
+const seeded = seedDemo(db, Date.now(), config.demoTimezone, config.demoBusiness);
 
 // The relay controller comes from HUB_LAMP_DRIVER: simulator, esp32-http or modbus-tcp.
 const lamps = createLampDriver(config);

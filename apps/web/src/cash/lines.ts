@@ -52,12 +52,17 @@ export function barOf(items: readonly CheckItemView[]): Minor {
 /** «Стол 1, Стол 2 · бар 1 800 ₸» — for lists of checks. */
 export function checkSummary(check: CheckView, names: ReadonlyMap<string, string>, money: (a: Minor) => string): string {
   const places = [
-    ...new Set(groupLines(check.items).map((g) => g.game?.title ?? (g.tableId != null ? names.get(g.tableId) : undefined) ?? 'Бар')),
+    ...new Set(groupLines(check.items).map((g) => g.game?.title ?? (g.tableId != null ? (names.get(g.tableId) ?? 'Бар') : 'Стойка'))),
   ];
   const bar = barOf(check.items);
   const parts = [places.join(', ') || 'Без позиций'];
   if (bar > 0) parts.push(`бар ${money(bar)}`);
   return parts.join(' · ');
+}
+
+/** Where an order was made: the table's name, or «Стойка» for a coffee shop counter order (no table). */
+export function placeName(names: ReadonlyMap<string, string>, tableId: string | null | undefined): string {
+  return tableId == null ? 'Стойка' : (names.get(tableId) ?? 'Стол');
 }
 
 /** What a stopped game not on a check costs: time plus its open bar orders. */
@@ -75,16 +80,18 @@ export function orderSummary(order: OrderView): string {
  * (paid upfront, voided, …) — neither on a table nor waiting for payment. Oldest first.
  */
 export function unbilledOrders(state: HubState): OrderView[] {
-  const live = new Set(state.tables.map((t) => t.session?.id));
-  const unpaid = new Set(state.unpaid.map((s) => s.id));
+  const live = new Set<string | null | undefined>(state.tables.map((t) => t.session?.id));
+  const unpaid = new Set<string | null | undefined>(state.unpaid.map((s) => s.id));
+  // Counter orders (coffee shop) have no game: sessionId is null, so they count as «after the game».
   return state.orders
     .filter((o) => o.status === 'OPEN' && o.checkId == null && !live.has(o.sessionId) && !unpaid.has(o.sessionId))
     .sort((a, b) => a.createdAt - b.createdAt);
 }
 
 /** Unbilled orders by table, in the order of each table's oldest order. */
-export function ordersByTable(orders: readonly OrderView[]): Array<{ tableId: string; orders: OrderView[] }> {
-  const byTable = new Map<string, OrderView[]>();
+export function ordersByTable(orders: readonly OrderView[]): Array<{ tableId: string | null; orders: OrderView[] }> {
+  // A counter order has no table (null): those group together under «Стойка».
+  const byTable = new Map<string | null, OrderView[]>();
   for (const o of orders) {
     const list = byTable.get(o.tableId);
     if (list) list.push(o);

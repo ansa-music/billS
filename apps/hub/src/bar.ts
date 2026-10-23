@@ -6,11 +6,12 @@ import type {
   CreateOrderRequest,
   CreateProductRequest,
   OrderView,
+  ProductOptionGroup,
   ProductView,
   UpdateCategoryRequest,
   UpdateProductRequest,
 } from '@bills/domain';
-import { CANCEL_REASON_MIN, ORDER_NOTE_MAX, orderItemAmount, orderTotal, validateOrderItems } from '@bills/domain';
+import { CANCEL_REASON_MIN, normalizeOptionGroups, ORDER_NOTE_MAX, orderTotal, validateOptionGroups } from '@bills/domain';
 import { attachOrder, detachOrder, netPaidOn, openCheckOfGame, voidCheckIfEmpty } from './check-orders.ts';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
@@ -18,6 +19,8 @@ import { afterCommit, all, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import type { HubEvents } from './events.ts';
 import { record } from './journal.ts';
+import type { ProductRow } from './order-lines.ts';
+import { auditLines, insertOrderLines, parseOptions, priceOrderLines, returnOrderStock } from './order-lines.ts';
 import type { OrderRow, SessionRow } from './views.ts';
 import { clubId, loadCheck, loadOrder, toOrderViews } from './views.ts';
 
@@ -38,17 +41,6 @@ interface CategoryRow {
   is_active: number;
 }
 
-interface ProductRow {
-  id: string;
-  club_id: string;
-  category_id: string;
-  name: string;
-  price: number;
-  is_active: number;
-  stock: number | null;
-  sort_order: number;
-}
-
 function toCategoryView(r: CategoryRow): CategoryView {
   return { id: r.id, name: r.name, sortOrder: r.sort_order, isActive: r.is_active === 1 };
 }
@@ -62,6 +54,7 @@ function toProductView(r: ProductRow): ProductView {
     isActive: r.is_active === 1,
     stock: r.stock,
     sortOrder: r.sort_order,
+    options: parseOptions(r.options),
   };
 }
 
@@ -77,6 +70,13 @@ function checkPrice(price: unknown): number {
     throw new HubError(422, 'PRICE_INVALID', 'Цена должна быть целым числом не меньше нуля');
   }
   return price as number;
+}
+
+/** Option groups from the menu editor, as stored (JSON); 422 OPTIONS_INVALID names every problem. */
+function checkOptions(options: unknown): ProductOptionGroup[] {
+  const problems = validateOptionGroups(options);
+  if (problems.length) throw new HubError(422, 'OPTIONS_INVALID', problems.join('; '));
+  return normalizeOptionGroups((options ?? []) as ProductOptionGroup[]);
 }
 
 function checkStock(stock: unknown): number | null {
@@ -190,14 +190,15 @@ export class BarService {
       const name = cleanName(input.name, PRODUCT_NAME_MAX, 'товара');
       const price = checkPrice(input.price);
       const stock = checkStock(input.stock);
+      const options = checkOptions(input.options);
       const max =
         one<{ m: number | null }>(db, 'SELECT MAX(sort_order) AS m FROM products WHERE category_id = ?', category.id)?.m ??
         0;
       const id = randomUUID();
       run(
         db,
-        `INSERT INTO products (id, club_id, category_id, name, price, is_active, stock, sort_order, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+        `INSERT INTO products (id, club_id, category_id, name, price, is_active, stock, sort_order, created_at, updated_at, options)
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
         id,
         club,
         category.id,
@@ -207,13 +208,14 @@ export class BarService {
         max + 1,
         now,
         now,
+        JSON.stringify(options),
       );
       record(db, now, {
         actor: input.actor,
         action: 'product.created',
         entityType: 'product',
         entityId: id,
-        data: { categoryId: category.id, name, price, stock, sortOrder: max + 1 },
+        data: { categoryId: category.id, name, price, stock, sortOrder: max + 1, ...(options.length ? { options } : {}) },
       });
       afterCommit(db, () => this.deps.events.changed({ kind: 'catalog' }));
       return this.#product(club, id);
@@ -233,9 +235,11 @@ export class BarService {
       const sortOrder = input.sortOrder ?? current.sort_order;
       if (!Number.isInteger(sortOrder)) throw new HubError(422, 'SORT_INVALID', 'Порядок должен быть целым числом');
       const isActive = input.isActive ?? current.is_active === 1;
+      const options = input.options === undefined ? parseOptions(current.options) : checkOptions(input.options);
       run(
         db,
-        `UPDATE products SET category_id = ?, name = ?, price = ?, stock = ?, sort_order = ?, is_active = ?, updated_at = ?
+        `UPDATE products SET category_id = ?, name = ?, price = ?, stock = ?, sort_order = ?, is_active = ?, options = ?,
+           updated_at = ?
          WHERE id = ?`,
         categoryId,
         name,
@@ -243,6 +247,7 @@ export class BarService {
         stock,
         sortOrder,
         isActive ? 1 : 0,
+        JSON.stringify(options),
         now,
         current.id,
       );
@@ -251,7 +256,7 @@ export class BarService {
         action: 'product.updated',
         entityType: 'product',
         entityId: current.id,
-        data: { categoryId, name, price, stock, sortOrder, isActive, was: toProductView(current) },
+        data: { categoryId, name, price, stock, sortOrder, isActive, options, was: toProductView(current) },
       });
       afterCommit(db, () => this.deps.events.changed({ kind: 'catalog' }));
       return this.#product(club, current.id);
@@ -293,32 +298,11 @@ export class BarService {
         throw new HubError(409, 'SESSION_NOT_ORDERABLE', 'На эту игру нельзя добавить заказ');
       }
 
-      const problems = validateOrderItems(input.items);
-      if (problems.length) throw new HubError(422, 'ORDER_INVALID', problems.join('; '));
-
       const note = (input.note ?? '').trim();
       if (note.length > ORDER_NOTE_MAX) {
         throw new HubError(422, 'NOTE_TOO_LONG', `Комментарий — не длиннее ${ORDER_NOTE_MAX} символов`);
       }
-
-      const lines = input.items.map((it) => {
-        const p = one<ProductRow & { category_active: number }>(
-          db,
-          `SELECT p.*, c.is_active AS category_active FROM products p
-           JOIN product_categories c ON c.id = p.category_id
-           WHERE p.id = ? AND p.club_id = ?`,
-          it.productId,
-          club,
-        );
-        if (!p) throw new HubError(422, 'PRODUCT_NOT_AVAILABLE', 'Товар не найден в меню');
-        if (!p.is_active || !p.category_active) {
-          throw new HubError(422, 'PRODUCT_NOT_AVAILABLE', `Товар недоступен: ${p.name}`);
-        }
-        if (p.stock !== null && it.qty > p.stock) {
-          throw new HubError(409, 'OUT_OF_STOCK', `Нет в наличии: ${p.name} (осталось ${p.stock})`);
-        }
-        return { product: p, qty: it.qty, price: p.price, amount: orderItemAmount(p.price, it.qty) };
-      });
+      const lines = priceOrderLines(db, club, input.items);
 
       const total = orderTotal(lines);
       const id = randomUUID();
@@ -336,43 +320,13 @@ export class BarService {
         input.actor,
         now,
       );
-      lines.forEach((line, i) => {
-        // Line ids carry the line number so the lines keep the waiter's order (views sort by created_at, id).
-        run(
-          db,
-          `INSERT INTO bar_order_items (id, order_id, product_id, title, price, qty, amount, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          `${id}-${String(i + 1).padStart(2, '0')}`,
-          id,
-          line.product.id,
-          line.product.name,
-          line.price,
-          line.qty,
-          line.amount,
-          now,
-        );
-        if (line.product.stock !== null) {
-          run(
-            db,
-            'UPDATE products SET stock = stock - ?, updated_at = ? WHERE id = ? AND stock IS NOT NULL',
-            line.qty,
-            now,
-            line.product.id,
-          );
-        }
-      });
+      insertOrderLines(db, id, lines, now);
       record(db, now, {
         actor: input.actor,
         action: 'order.created',
         entityType: 'order',
         entityId: id,
-        data: {
-          sessionId: session.id,
-          tableId: session.table_id,
-          total,
-          note: note || null,
-          items: lines.map((l) => ({ productId: l.product.id, title: l.product.name, price: l.price, qty: l.qty, amount: l.amount })),
-        },
+        data: { sessionId: session.id, tableId: session.table_id, total, note: note || null, items: auditLines(lines) },
       });
       const checkId = openCheckOfGame(db, session.id);
       if (checkId) {
@@ -396,6 +350,9 @@ export class BarService {
       const club = clubId(db);
       const order = one<OrderRow>(db, 'SELECT * FROM bar_orders WHERE id = ? AND club_id = ?', input.orderId, club);
       if (!order) throw new HubError(404, 'ORDER_NOT_FOUND', 'Заказ не найден');
+      if (order.counter_number !== null) {
+        throw new HubError(409, 'COUNTER_ORDER', 'Это заказ у стойки — отмените его на экране стойки');
+      }
       const reason = (input.reason ?? '').trim();
       if (reason.length < CANCEL_REASON_MIN) throw new HubError(422, 'REASON_REQUIRED', 'Укажите причину');
       if (order.status !== 'OPEN') {
@@ -409,20 +366,7 @@ export class BarService {
         throw new HubError(409, 'CHECK_HAS_PAYMENTS', 'По счёту с этим заказом уже есть оплата — заказ нельзя отменить');
       }
 
-      const items = all<{ product_id: string; qty: number }>(
-        db,
-        'SELECT product_id, qty FROM bar_order_items WHERE order_id = ?',
-        order.id,
-      );
-      for (const it of items) {
-        run(
-          db,
-          'UPDATE products SET stock = stock + ?, updated_at = ? WHERE id = ? AND stock IS NOT NULL',
-          it.qty,
-          now,
-          it.product_id,
-        );
-      }
+      returnOrderStock(db, order.id, now);
       run(
         db,
         `UPDATE bar_orders SET status = 'CANCELLED', cancelled_at = ?, cancelled_by = ?, cancel_reason = ?, updated_at = ?
@@ -445,7 +389,7 @@ export class BarService {
         if (!voidCheckIfEmpty(db, order.check_id, input.actor, now)) loadCheck(db, order.check_id);
         afterCommit(db, () => this.deps.events.changed({ kind: 'check' }));
       }
-      afterCommit(db, () => this.deps.events.changed({ kind: 'order', tableId: order.table_id }));
+      afterCommit(db, () => this.deps.events.changed({ kind: 'order', tableId: order.table_id ?? undefined }));
       return loadOrder(db, order.id);
     });
   }

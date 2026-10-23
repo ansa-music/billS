@@ -5,7 +5,7 @@ import { formatClock, formatMinutes } from '../format.ts';
 import { CancelDialog } from './CancelDialog.tsx';
 import type { DeskProps } from './desk.ts';
 import { toActionError, useDesk } from './desk.ts';
-import { checkSummary, gameDue, orderSummary, ordersByTable, owedTotal, unbilledOrders } from './lines.ts';
+import { checkSummary, gameDue, orderSummary, ordersByTable, owedTotal, placeName, unbilledOrders } from './lines.ts';
 import { PayDialog } from './PayDialog.tsx';
 
 /** Open checks first, then stopped games that are not on a check yet, then bar orders left after their game. */
@@ -134,10 +134,10 @@ export function UnpaidPanel(props: DeskProps) {
               <p className="hint">Игра уже окончена, а заказы бара ещё не оплачены.</p>
               <ul className="unpaid" aria-labelledby="unbilled-title">
                 {ordersByTable(unbilled).map(({ tableId, orders }) => {
-                  const tableName = names.get(tableId) ?? 'Стол';
-                  const allKey = `table:${tableId}`;
+                  const tableName = placeName(names, tableId);
+                  const allKey = `table:${tableId ?? 'counter'}`;
                   return (
-                    <Fragment key={tableId}>
+                    <Fragment key={tableId ?? 'counter'}>
                       {orders.map((o) => (
                         <li key={o.id}>
                           <div className="due-info">

@@ -18,8 +18,10 @@ export function printReceipt(
   club: Club,
   names?: ReadonlyMap<string, string>,
   now: number = Date.now(),
+  /** Coffee shop: the guest's order number, printed large («Заказ 17»). */
+  orderNumber?: number,
 ): void {
-  printForm(<Receipt check={check} club={club} names={names} now={now} />);
+  printForm(<Receipt check={check} club={club} names={names} now={now} orderNumber={orderNumber} />);
 }
 
 /** A settled check is dated by its last payment; anything else by the moment it is printed. */
@@ -40,11 +42,13 @@ export function Receipt({
   club,
   names,
   now,
+  orderNumber,
 }: {
   check: CheckView;
   club: Club;
   names?: ReadonlyMap<string, string> | undefined;
   now: number;
+  orderNumber?: number | undefined;
 }) {
   const money = (a: Minor) => formatMoney(a, club.currency);
   const tz = club.timezone;
@@ -54,6 +58,8 @@ export function Receipt({
   // Paid in several goes: the time tells the payments apart.
   const timed = new Set(payments.map((p) => p.operationId)).size > 1;
   const discounted = check.discount != null || check.discountAmount > 0;
+  // A coffee shop check has only bar lines; tables are thanked for the game.
+  const game = check.items.some((i) => i.kind === 'GAME');
 
   return (
     <div className="pf">
@@ -63,6 +69,7 @@ export function Receipt({
         <p className={pre ? 'pf-strong' : 'pf-title'}>Счёт №{check.number}</p>
         {check.status === 'VOID' && <p className="pf-strong">Аннулирован</p>}
         <p>{formatStamp(receiptTime(check, now), tz)}</p>
+        {orderNumber != null && <p className="pf-title">Заказ {orderNumber}</p>}
       </header>
       <Info label="Кассир">{cashiers(check)}</Info>
 
@@ -79,7 +86,9 @@ export function Receipt({
               )}
             </div>
           ) : (
-            <p className="pf-item pf-strong">Бар{tableId != null && names?.get(tableId) ? ` · ${names.get(tableId)}` : ''}</p>
+            game || tableId != null ? (
+              <p className="pf-item pf-strong">Бар{tableId != null && names?.get(tableId) ? ` · ${names.get(tableId)}` : ''}</p>
+            ) : null
           )}
           {/* Bar line: the product on its own line, «2 × 600 ₸ … 1 200 ₸» under it. */}
           {orders.map((item) => (
@@ -140,7 +149,7 @@ export function Receipt({
       {pre && <Row label="К оплате" value={money(check.due)} big />}
 
       <Sep />
-      <p className="pf-center pf-strong">Спасибо за игру!</p>
+      <p className="pf-center pf-strong">{game ? 'Спасибо за игру!' : 'Спасибо!'}</p>
       <p className="pf-center pf-notice">Не является фискальным чеком</p>
     </div>
   );

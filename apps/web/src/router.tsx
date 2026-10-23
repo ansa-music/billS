@@ -85,10 +85,10 @@ export interface RouteDef {
  */
 export const ROUTES: RouteDef[] = [
   // Coffee shop: the counter screens come first and «Касса» is the start page.
-  { path: '/pos', title: 'Касса', icon: 'pos', action: 'order.create', only: 'cafe' },
-  { path: '/barista', title: 'Бариста', icon: 'cup', action: 'order.create', only: 'cafe' },
+  { path: '/pos', title: 'Касса', icon: 'pos', action: 'counter.take', only: 'cafe' },
+  { path: '/barista', title: 'Бариста', icon: 'cup', action: 'counter.stage', only: 'cafe' },
   // Guest screen for a TV: opens without a key too (App renders it before the login check).
-  { path: '/board', title: 'Экран заказов', short: 'Экран', icon: 'tv', action: 'order.create', only: 'cafe' },
+  { path: '/board', title: 'Экран заказов', short: 'Экран', icon: 'tv', action: 'counter.stage', only: 'cafe' },
   { path: '/', title: 'Зал', icon: 'hall', action: 'hall.view', only: 'billiards' },
   { path: '/checks', title: 'Счета', icon: 'checks', action: 'checks.view' },
   { path: '/orders', title: 'Заказы', icon: 'orders', action: 'order.create', only: 'billiards' },

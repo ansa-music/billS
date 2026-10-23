@@ -19,6 +19,7 @@ import { emptyBody, guard, runCommand } from './command.ts';
 import { registerHallRoutes } from './hall-routes.ts';
 import { registerMoneyRoutes } from './money-routes.ts';
 import { registerBarRoutes } from './routes/bar.ts';
+import { registerCounterRoutes } from './routes/counter.ts';
 import { registerLicenseRoutes } from './routes/license.ts';
 import { registerReportRoutes } from './routes/reports.ts';
 import { registerSettingsRoutes } from './routes/settings.ts';
@@ -313,6 +314,7 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   registerMoneyRoutes(app, hub);
   registerSettingsRoutes(app, hub);
   registerBarRoutes(app, hub);
+  registerCounterRoutes(app, hub);
   registerStaffRoutes(app, hub);
   registerReportRoutes(app, hub);
   registerLicenseRoutes(app, hub);

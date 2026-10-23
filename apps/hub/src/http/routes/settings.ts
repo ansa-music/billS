@@ -7,8 +7,9 @@ import type {
   UpdateTableRequest,
   UpdateTariffRequest,
 } from '@bills/domain';
-import { CARD_SIZES, FREE_TABLE_RULES, THEMES, WAITER_VIEWS } from '@bills/domain';
+import { BUSINESS_TYPES, CARD_SIZES, FREE_TABLE_RULES, THEMES, WAITER_VIEWS } from '@bills/domain';
 import type { Hub } from '../../hub.ts';
+import { clubId, loadSettings } from '../../views.ts';
 import { guard, runCommand } from '../command.ts';
 
 const TABLE_KINDS = ['pool', 'russian', 'snooker'] as const;
@@ -43,6 +44,11 @@ const settingsPatchSchema = {
         defaultStepMinutes: int(1, 60),
         defaultRoundingMinor: int(1, 1_000_000),
       },
+    },
+    business: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { type: { type: 'string', enum: [...BUSINESS_TYPES] } },
     },
   },
 } as const;
@@ -103,7 +109,10 @@ export function registerSettingsRoutes(app: FastifyInstance, hub: Hub): void {
     // Name, time zone and currency belong to the owner; the hall look and
     // game rules (`settings`) may be changed by a manager too.
     const b = req.body ?? {};
-    const hasClubFields = b.name !== undefined || b.timezone !== undefined || b.currency !== undefined;
+    // Switching billiards ↔ coffee shop changes what the club is: the manager's call, like its name.
+    const businessType = b.settings?.business?.type;
+    const switchesBusiness = businessType !== undefined && businessType !== loadSettings(hub.db, clubId(hub.db)).business.type;
+    const hasClubFields = b.name !== undefined || b.timezone !== undefined || b.currency !== undefined || switchesBusiness;
     const action = hasClubFields ? 'club.edit' : 'display.edit';
     return runCommand(req, reply, hub, (actor) => ({ status: 200, body: hub.settings.updateClub({ ...req.body, actor }) }), action);
   });

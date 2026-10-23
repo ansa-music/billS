@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import type { CategoryView, CreateProductRequest, ProductView, UpdateProductRequest } from '@bills/domain';
-import { formatMoney } from '@bills/domain';
+import type { CategoryView, CreateProductRequest, ProductOptionGroup, ProductView, UpdateProductRequest } from '@bills/domain';
+import { formatMoney, normalizeOptionGroups, validateOptionGroups } from '@bills/domain';
+import { businessOf, optionsOf } from '../cafe/cafe.ts';
 import { OfflineBanner } from '../OfflineBanner.tsx';
 import { Empty, Field, Loading, Modal, Page, Section, Toast, useToast } from '../ui.tsx';
 import { useCommands, useHub } from '../useHub.tsx';
 import { parseMajor, toMajorText } from './bar/money.tsx';
+import type { GroupDraft } from './bar/OptionsEditor.tsx';
+import { OptionsEditor, toDraft, toGroups } from './bar/OptionsEditor.tsx';
 import { sortCatalog, useCatalog } from './bar/useCatalog.tsx';
 import './bar.css';
 
@@ -13,6 +16,9 @@ type Filter = 'all' | 'inactive' | string;
 
 type CategoryDraft = { mode: 'new' } | { mode: 'edit'; category: CategoryView };
 type ProductDraft = { mode: 'new'; categoryId: string } | { mode: 'edit'; product: ProductView };
+
+/** Product requests with options (the HUB of the coffee shop mode takes them; an older one drops the field). */
+type ProductBody = (CreateProductRequest | UpdateProductRequest) & { options?: ProductOptionGroup[] };
 
 /** Catalog admin (#/bar): categories, products, prices, stock. Owner and manager. */
 export function BarMenuPage() {
@@ -44,6 +50,7 @@ export function BarMenuPage() {
   }
 
   const currency = state.club.currency;
+  const cafe = businessOf(state.settings) === 'cafe';
   const categories = sorted.categories;
   const byId = new Map(categories.map((c) => [c.id, c]));
   const selectedCategory = filter !== 'all' && filter !== 'inactive' ? byId.get(filter) : undefined;
@@ -67,8 +74,12 @@ export function BarMenuPage() {
 
   return (
     <Page
-      title="Бар и меню"
-      subtitle="Категории, товары, цены и остатки. Официанты видят только активные товары активных категорий."
+      title={cafe ? 'Меню' : 'Бар и меню'}
+      subtitle={
+        cafe
+          ? 'Категории, напитки, цены, добавки (размер, молоко, сироп) и остатки. На кассе видны только активные товары активных категорий.'
+          : 'Категории, товары, цены и остатки. Официанты видят только активные товары активных категорий.'
+      }
       actions={
         <>
           <button type="button" className="btn" disabled={locked} onClick={() => setCategoryDraft({ mode: 'new' })}>
@@ -164,6 +175,9 @@ export function BarMenuPage() {
                   <tr key={p.id} data-inactive={hidden ? '' : undefined}>
                     <td className="cell-name">
                       <span className="bar-product-name">{p.name}</span>
+                      {optionsOf(p).length > 0 && (
+                        <span className="bar-product-options">{optionsOf(p).map((g) => g.name).join(' · ')}</span>
+                      )}
                     </td>
                     <td className="cell-category">
                       <span className="cell-label">Категория: </span>
@@ -348,9 +362,11 @@ function ProductModal({
   currency: string;
   busy: boolean;
   onClose: () => void;
-  onSave: (body: CreateProductRequest | UpdateProductRequest) => Promise<void>;
+  onSave: (body: ProductBody) => Promise<void>;
 }) {
   const editing = draft.mode === 'edit' ? draft.product : null;
+  const hadOptions = editing ? optionsOf(editing).length > 0 : false;
+  const [groups, setGroups] = useState<GroupDraft[]>(() => (editing ? toDraft(optionsOf(editing), currency) : []));
   const [name, setName] = useState(editing?.name ?? '');
   const [categoryId, setCategoryId] = useState(draft.mode === 'edit' ? draft.product.categoryId : draft.categoryId);
   const [price, setPrice] = useState(editing ? toMajorText(editing.price, currency) : '');
@@ -376,10 +392,16 @@ function ProductModal({
       if (!Number.isInteger(n) || n < 0) return setError('Остаток — целое число не меньше нуля');
       stockValue = n;
     }
+    const parsed = toGroups(groups, currency);
+    if ('error' in parsed) return setError(parsed.error);
+    const problems = validateOptionGroups(parsed.groups);
+    if (problems.length > 0) return setError(problems[0]!);
     setError(null);
-    const body: CreateProductRequest | UpdateProductRequest = editing
+    const body: ProductBody = editing
       ? { name: trimmed, categoryId, price: minor, stock: stockValue, isActive }
       : { name: trimmed, categoryId, price: minor, stock: stockValue };
+    // Sent when there are options or there were: a plain product stays a plain request.
+    if (parsed.groups.length > 0 || hadOptions) body.options = normalizeOptionGroups(parsed.groups);
     void onSave(body);
   };
 
@@ -441,6 +463,9 @@ function ProductModal({
             </Block>
           )}
         </div>
+        <Block label="Добавки" hint="Размер, молоко, сироп: выбираются на кассе, меняют цену строки">
+          <OptionsEditor groups={groups} onChange={setGroups} currency={currency} />
+        </Block>
         {error && <p className="field-error">{error}</p>}
         <div className="row wrap modal-actions">
           <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>

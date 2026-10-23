@@ -37,6 +37,7 @@ import type { Db, Param } from './db.ts';
 import { all, one } from './db.ts';
 import { HubError } from './errors.ts';
 import { getManualMode } from './manual-mode.ts';
+import { parseOptionNames } from './order-lines.ts';
 
 export type { AlertView, CheckView, HubState, SessionView, ShiftView, TableView };
 
@@ -263,8 +264,9 @@ export function loadSettings(db: Db, club: string): ClubSettings {
 export interface OrderRow {
   id: string;
   club_id: string;
-  session_id: string;
-  table_id: string;
+  /** NULL for a counter order (coffee shop): then the counter fields below are set. */
+  session_id: string | null;
+  table_id: string | null;
   status: OrderView['status'];
   note: string | null;
   total: number;
@@ -275,9 +277,16 @@ export interface OrderRow {
   cancel_reason: string | null;
   check_id: string | null;
   closed_at: number | null;
+  counter_number: number | null;
+  service: 'HERE' | 'TAKEAWAY' | null;
+  stage: 'NEW' | 'PREPARING' | 'READY' | 'ISSUED' | null;
+  guest_name: string | null;
+  ready_at: number | null;
+  issued_at: number | null;
+  business_day: string | null;
 }
 
-interface OrderItemRow {
+export interface OrderItemRow {
   id: string;
   order_id: string;
   product_id: string;
@@ -285,29 +294,50 @@ interface OrderItemRow {
   price: number;
   qty: number;
   amount: number;
+  option_names: string | null;
+}
+
+/** Lines of the given orders, keyed by order id, in the order they were taken. */
+export function orderItemsOf(db: Db, orderIds: readonly string[]): Map<string, OrderItemRow[]> {
+  const map = new Map<string, OrderItemRow[]>();
+  if (orderIds.length === 0) return map;
+  for (const it of all<OrderItemRow>(
+    db,
+    `SELECT id, order_id, product_id, title, price, qty, amount, option_names FROM bar_order_items
+     WHERE order_id IN (SELECT value FROM json_each(?)) ORDER BY created_at, id`,
+    JSON.stringify(orderIds),
+  )) {
+    let list = map.get(it.order_id);
+    if (!list) map.set(it.order_id, (list = []));
+    list.push(it);
+  }
+  return map;
 }
 
 export function toOrderViews(db: Db, rows: OrderRow[]): OrderView[] {
   if (rows.length === 0) return [];
-  const ids = rows.map((r) => r.id);
-  const items = new Map<string, OrderItemView[]>();
-  for (const it of all<OrderItemRow>(
+  const lines = orderItemsOf(
     db,
-    `SELECT id, order_id, product_id, title, price, qty, amount FROM bar_order_items
-     WHERE order_id IN (${ids.map(() => '?').join(',')}) ORDER BY created_at, id`,
-    ...ids,
-  )) {
-    let list = items.get(it.order_id);
-    if (!list) items.set(it.order_id, (list = []));
-    list.push({ id: it.id, productId: it.product_id, title: it.title, price: it.price, qty: it.qty, amount: it.amount });
-  }
+    rows.map((r) => r.id),
+  );
+  const items = (orderId: string): OrderItemView[] =>
+    (lines.get(orderId) ?? []).map((it) => ({
+      id: it.id,
+      productId: it.product_id,
+      title: it.title,
+      price: it.price,
+      qty: it.qty,
+      amount: it.amount,
+      optionNames: parseOptionNames(it.option_names),
+    }));
   return rows.map((r) => ({
     id: r.id,
-    sessionId: r.session_id,
-    tableId: r.table_id,
+    // Counter orders never reach these views (they have their own, see counter.ts).
+    sessionId: r.session_id ?? '',
+    tableId: r.table_id ?? '',
     status: r.status,
     note: r.note,
-    items: items.get(r.id) ?? [],
+    items: items(r.id),
     total: r.total,
     createdAt: r.created_at,
     createdBy: r.created_by,

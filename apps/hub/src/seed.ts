@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Role, TariffConfig } from '@bills/domain';
+import type { BusinessType, ProductOptionGroup, Role, TariffConfig } from '@bills/domain';
 import { primaryRole, validateTariff } from '@bills/domain';
 import { scopeOf } from './auth.ts';
 import type { Db } from './db.ts';
@@ -68,20 +68,175 @@ const DEMO_MENU: Array<[category: string, products: Array<[name: string, priceMi
   ],
 ];
 
+// ── Coffee shop demo (HUB_DEMO_BUSINESS=cafe) ───────────────────────────────
+
+const SIZE: ProductOptionGroup = {
+  id: 'size',
+  name: 'Размер',
+  required: true,
+  multiple: false,
+  choices: [
+    { id: 's', name: 'S', priceDelta: 0 },
+    { id: 'm', name: 'M', priceDelta: 200_00 },
+    { id: 'l', name: 'L', priceDelta: 400_00 },
+  ],
+};
+const MILK: ProductOptionGroup = {
+  id: 'milk',
+  name: 'Молоко',
+  required: false,
+  multiple: false,
+  choices: [
+    { id: 'regular', name: 'Обычное', priceDelta: 0 },
+    { id: 'oat', name: 'Овсяное', priceDelta: 300_00 },
+    { id: 'almond', name: 'Миндальное', priceDelta: 300_00 },
+    { id: 'lactose-free', name: 'Безлактозное', priceDelta: 200_00 },
+  ],
+};
+const SYRUP: ProductOptionGroup = {
+  id: 'syrup',
+  name: 'Сироп',
+  required: false,
+  multiple: true,
+  choices: [
+    { id: 'caramel', name: 'Карамель', priceDelta: 200_00 },
+    { id: 'vanilla', name: 'Ваниль', priceDelta: 200_00 },
+    { id: 'nut', name: 'Орех', priceDelta: 200_00 },
+  ],
+};
+const SHOT: ProductOptionGroup = {
+  id: 'shot',
+  name: 'Доп. шот',
+  required: false,
+  multiple: false,
+  choices: [{ id: 'extra-shot', name: 'Доп. шот эспрессо', priceDelta: 300_00 }],
+};
+const MILK_COFFEE = [SIZE, MILK, SYRUP, SHOT];
+
+type CafeProduct = [name: string, priceMinor: number, options: ProductOptionGroup[], stock: number | null];
+
+const CAFE_MENU: Array<[category: string, products: CafeProduct[]]> = [
+  [
+    'Кофе',
+    [
+      // Espresso has no milk; the other coffees take every option.
+      ['Эспрессо', 800_00, [SIZE, SYRUP, SHOT], null],
+      ['Американо', 900_00, MILK_COFFEE, null],
+      ['Капучино', 1200_00, MILK_COFFEE, null],
+      ['Латте', 1300_00, MILK_COFFEE, null],
+      ['Раф', 1500_00, MILK_COFFEE, null],
+      ['Флэт уайт', 1400_00, MILK_COFFEE, null],
+    ],
+  ],
+  [
+    'Чай',
+    [
+      ['Чёрный', 700_00, [], null],
+      ['Зелёный', 700_00, [], null],
+      ['Матча-латте', 1600_00, [SIZE, MILK], null],
+    ],
+  ],
+  [
+    'Еда',
+    [
+      // Baked goods are counted: the counter shows «нет в наличии» when they run out.
+      ['Круассан', 900_00, [], 12],
+      ['Сэндвич с курицей', 1800_00, [], 8],
+      ['Чизкейк', 1500_00, [], 6],
+      ['Печенье', 500_00, [], 20],
+    ],
+  ],
+];
+
+const CAFE_STAFF: Array<[name: string, roles: Role[]]> = [
+  ['Марат Управляющий', ['manager']],
+  ['Асель Администратор', ['admin']],
+  ['Айгерим Кассир', ['cashier']],
+  ['Данияр Бариста', ['bartender']],
+];
+
 /**
  * Creates a demo company, club, tariffs and six tables when the database is
  * empty, then demo staff and a bar menu when their tables are empty — so a
  * club seeded by an older HUB gets them on upgrade too.
+ *
+ * `business: 'cafe'` (HUB_DEMO_BUSINESS=cafe) seeds a coffee shop instead: the club
+ * set to `business.type = cafe`, no tables or tariffs, a barista, and a menu of
+ * coffee with options (size, milk, syrup, extra shot), tea and baked goods.
+ * The choice matters only for an empty database.
  */
-export function seedDemo(db: Db, now: number, timezone = 'Asia/Almaty'): boolean {
+export function seedDemo(db: Db, now: number, timezone = 'Asia/Almaty', business: BusinessType = 'billiards'): boolean {
   return transaction(db, () => {
-    const created = seedClub(db, now, timezone);
-    const clubId = one<{ id: string }>(db, 'SELECT id FROM clubs ORDER BY created_at LIMIT 1')?.id;
-    if (clubId) {
-      seedStaff(db, now, clubId);
-      seedMenu(db, now, clubId);
+    const created = business === 'cafe' ? seedCafeClub(db, now, timezone) : seedClub(db, now, timezone);
+    const club = one<{ id: string; settings: string | null }>(db, 'SELECT id, settings FROM clubs ORDER BY created_at LIMIT 1');
+    if (club) {
+      const cafe = isCafe(club.settings);
+      seedStaff(db, now, club.id, cafe ? CAFE_STAFF : DEMO_STAFF);
+      if (cafe) seedCafeMenu(db, now, club.id);
+      else seedMenu(db, now, club.id);
     }
     return created;
+  });
+}
+
+function isCafe(settings: string | null): boolean {
+  try {
+    return (JSON.parse(settings ?? '{}') as { business?: { type?: unknown } }).business?.type === 'cafe';
+  } catch {
+    return false;
+  }
+}
+
+function seedCafeClub(db: Db, now: number, timezone: string): boolean {
+  if (one(db, 'SELECT id FROM companies LIMIT 1')) return false;
+  const companyId = randomUUID();
+  run(db, 'INSERT INTO companies (id, name, created_at) VALUES (?, ?, ?)', companyId, 'Демо компания', now);
+  run(
+    db,
+    'INSERT INTO clubs (id, company_id, name, timezone, currency, created_at, settings) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    randomUUID(),
+    companyId,
+    'Кофейня «Демо»',
+    timezone,
+    'KZT',
+    now,
+    JSON.stringify({ business: { type: 'cafe' } }),
+  );
+  return true;
+}
+
+function seedCafeMenu(db: Db, now: number, clubId: string): void {
+  if (one(db, 'SELECT id FROM product_categories LIMIT 1')) return;
+  CAFE_MENU.forEach(([category, products], ci) => {
+    const categoryId = randomUUID();
+    run(
+      db,
+      `INSERT INTO product_categories (id, club_id, name, sort_order, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 1, ?, ?)`,
+      categoryId,
+      clubId,
+      category,
+      ci + 1,
+      now,
+      now,
+    );
+    products.forEach(([name, price, options, stock], pi) => {
+      run(
+        db,
+        `INSERT INTO products (id, club_id, category_id, name, price, is_active, stock, sort_order, created_at, updated_at, options)
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+        randomUUID(),
+        clubId,
+        categoryId,
+        name,
+        price,
+        stock,
+        pi + 1,
+        now,
+        now,
+        JSON.stringify(options),
+      );
+    });
   });
 }
 
@@ -148,10 +303,10 @@ function seedClub(db: Db, now: number, timezone: string): boolean {
   return true;
 }
 
-function seedStaff(db: Db, now: number, clubId: string): void {
+function seedStaff(db: Db, now: number, clubId: string, people: Array<[name: string, roles: Role[]]>): void {
   if (one(db, 'SELECT id FROM staff LIMIT 1')) return;
   const tables = all<{ id: string }>(db, 'SELECT id FROM billiard_tables WHERE club_id = ? ORDER BY sort_order', clubId);
-  for (const [name, roles] of DEMO_STAFF) {
+  for (const [name, roles] of people) {
     const tableIds = roles.includes('waiter') ? tables.slice(0, 3).map((t) => t.id) : [];
     run(
       db,

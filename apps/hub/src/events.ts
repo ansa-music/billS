@@ -14,7 +14,9 @@ export interface ChangeEvent {
     | 'catalog'
     | 'club'
     | 'staff'
-    | 'license';
+    | 'license'
+    /** Counter orders of a coffee shop: taken, moved to a stage, cancelled (GET /api/counter/orders, /board). */
+    | 'counter';
   tableId?: string;
 }
 

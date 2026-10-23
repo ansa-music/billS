@@ -250,7 +250,7 @@ export function PayDialog({ desk, initial, onClose }: { desk: Desk; initial: Che
             {orders.length > 0 && (
               <li className="pay-bar">
                 <span className="pay-bar-head">
-                  {game ? 'Бар' : `Бар · ${(tableId != null && names.get(tableId)) || 'без игры'}`}
+                  {game ? 'Бар' : tableId == null ? 'Заказ у стойки' : `Бар · ${names.get(tableId) || 'без игры'}`}
                 </span>
                 <ul className="pay-bar-lines">
                   {orders.map((item) => (

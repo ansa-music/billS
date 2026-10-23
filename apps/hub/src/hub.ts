@@ -20,6 +20,7 @@ import type { PowerActions, PowerOptions, PowerSettings } from './power/monitor.
 import { PowerMonitor, setPowerSettings } from './power/monitor.ts';
 import type { UpsSource } from './power/ups.ts';
 import { CheckService } from './checks.ts';
+import { CounterService } from './counter.ts';
 import { PrepaidService } from './prepaid.ts';
 import { ReportService } from './reports.ts';
 import type { StopSessionInput } from './sessions.ts';
@@ -82,6 +83,8 @@ export class Hub {
   readonly settings: SettingsService;
   /** Bar catalog and orders on games. */
   readonly bar: BarService;
+  /** Coffee shop counter: orders without a game, their stages and the guest screen. */
+  readonly counter: CounterService;
   /** Staff, roles, PINs, audit log. */
   readonly staff: StaffService;
   /** Owner summary. */
@@ -150,6 +153,7 @@ export class Hub {
     const limits = () => this.license.limits();
     this.settings = new SettingsService({ ...common, limits });
     this.bar = new BarService(common);
+    this.counter = new CounterService({ ...common, checks: this.checks });
     this.staff = new StaffService({ ...common, limits });
     this.reports = new ReportService(common);
     this.auth = new AuthService({ ...common, demo: deps.demo === true });

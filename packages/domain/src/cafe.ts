@@ -269,7 +269,8 @@ export function validateCounterLines(items: ReadonlyArray<CounterLineInput> | nu
       errors.push(`Позиция ${n}: не указан товар`);
       return;
     }
-    if (it.options !== undefined && (!Array.isArray(it.options) || it.options.some((o) => typeof o !== 'string'))) {
+    const options: unknown = it.options;
+    if (options !== undefined && (!Array.isArray(options) || options.some((o: unknown) => typeof o !== 'string'))) {
       errors.push(`Позиция ${n}: неверный список добавок`);
       return;
     }

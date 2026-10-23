@@ -4,6 +4,8 @@ import { fetchJson } from '../api.ts';
 import { navigate, useLocation } from '../router.tsx';
 import { Loading, Page, Toast, useToast } from '../ui.tsx';
 import { useCommands, useHub } from '../useHub.tsx';
+import { businessOf } from '../cafe/cafe.ts';
+import { BusinessSection } from './settings/BusinessSection.tsx';
 import { ClubSection } from './settings/ClubSection.tsx';
 import { DisplaySettings } from './settings/DisplaySettings.tsx';
 import { LicenseSection } from './settings/LicenseSection.tsx';
@@ -22,6 +24,9 @@ const TABS = [
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
 
+/** A coffee shop has no tables, tariffs or table rules. */
+const BILLIARDS_ONLY: readonly TabId[] = ['tables', 'tariffs', 'rules'];
+
 function isTab(value: string | null): value is TabId {
   return TABS.some((t) => t.id === value);
 }
@@ -29,7 +34,10 @@ function isTab(value: string | null): value is TabId {
 /** #/settings?tab=tables — club, tables, tariffs, hall screen look, house rules. */
 export function ClubSettingsPage() {
   const { state, online, version, license, canNow: can, can: roleCan } = useHub();
-  const tabs = TABS.filter((t) => t.id !== 'license' || roleCan('license.view'));
+  const cafe = businessOf(state.settings) === 'cafe';
+  const tabs = TABS.filter((t) => (t.id !== 'license' || roleCan('license.view')) && !(cafe && BILLIARDS_ONLY.includes(t.id))).map(
+    (t) => (cafe && t.id === 'display' ? { ...t, title: 'Экран' } : t),
+  );
   const { query } = useLocation();
   const asked = query.get('tab');
   const tab: TabId = isTab(asked) && tabs.some((t) => t.id === asked) ? asked : 'club';
@@ -73,7 +81,12 @@ export function ClubSettingsPage() {
     const props = { club, online, isBusy, run, onSaved, reload };
     switch (tab) {
       case 'club':
-        return <ClubSection {...props} canEdit={can('club.edit')} />;
+        return (
+          <>
+            <ClubSection {...props} canEdit={can('club.edit')} />
+            <BusinessSection {...props} canEdit={can('club.edit')} />
+          </>
+        );
       case 'tables':
         return <TablesEditor {...props} canEdit={can('tables.edit')} />;
       case 'tariffs':
@@ -88,7 +101,7 @@ export function ClubSettingsPage() {
   })();
 
   return (
-    <Page title="Настройки клуба" subtitle={club ? `${club.name} · ${club.companyName}` : undefined}>
+    <Page title={cafe ? 'Настройки' : 'Настройки клуба'} subtitle={club ? `${club.name} · ${club.companyName}` : undefined}>
       <nav className="settings-tabs" aria-label="Разделы настроек">
         {tabs.map((t) => (
           <button

@@ -9,6 +9,7 @@ import { OfflineBanner } from '../OfflineBanner.tsx';
 import { Link } from '../router.tsx';
 import { Empty, Field, Loading, Modal, Page, Section, Toast, useToast } from '../ui.tsx';
 import { useCommands, useHub, useServerNow } from '../useHub.tsx';
+import { placeName } from '../cash/lines.ts';
 import { sellable, sortCatalog, useCatalog } from './bar/useCatalog.tsx';
 import './bar.css';
 
@@ -172,7 +173,10 @@ export function OrdersPage() {
     ...state.tables.flatMap((t) => (t.session ? [t.session.id] : [])),
     ...state.unpaid.map((s) => s.id),
   ]);
-  const afterGame = state.orders.filter((o) => !onFloor.has(o.sessionId)).sort((a, b) => b.createdAt - a.createdAt);
+  // Counter orders of a coffee shop (no game, sessionId null) are paid in «Счета», not here.
+  const afterGame = state.orders
+    .filter((o) => o.sessionId != null && !onFloor.has(o.sessionId))
+    .sort((a, b) => b.createdAt - a.createdAt);
   const afterGameOwed = afterGame.reduce((sum, o) => (o.status === 'OPEN' ? sum + o.total : sum), 0);
   const canCancel = blockedReason('order.cancel') === null;
   const checksLink = can('checks.view') ? <Link to="/checks">«Счета»</Link> : '«Счета»';
@@ -371,7 +375,7 @@ export function OrdersPage() {
                 order={o}
                 currency={currency}
                 timezone={timezone}
-                tableName={tableNames.get(o.tableId) ?? 'Стол'}
+                tableName={placeName(tableNames, o.tableId)}
                 canCancel={canCancel}
                 locked={locked}
                 onCancel={() => openCancel(o)}

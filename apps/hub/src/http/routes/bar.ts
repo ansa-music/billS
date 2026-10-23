@@ -7,7 +7,7 @@ import type {
   UpdateCategoryRequest,
   UpdateProductRequest,
 } from '@bills/domain';
-import { ORDER_MAX_LINES, ORDER_NOTE_MAX } from '@bills/domain';
+import { OPTION_CHOICES_MAX, OPTION_GROUPS_MAX, ORDER_MAX_LINES, ORDER_NOTE_MAX } from '@bills/domain';
 import type { Hub } from '../../hub.ts';
 import { guard, runCommand } from '../command.ts';
 
@@ -15,6 +15,8 @@ const name = { type: 'string', maxLength: 200 } as const;
 const id = { type: 'string', minLength: 1, maxLength: 100 } as const;
 // Ranges are checked by the service so the message is a readable 422, not a schema 400.
 const stock = { type: ['number', 'null'] } as const;
+// Option groups are checked by validateOptionGroups (422 OPTIONS_INVALID with every problem named).
+const options = { type: 'array', maxItems: OPTION_GROUPS_MAX * 2, items: { type: 'object' } } as const;
 
 /** Routes for catalog and orders: see api.ts (CatalogView, CreateOrderRequest, …). */
 export function registerBarRoutes(app: FastifyInstance, hub: Hub): void {
@@ -57,7 +59,7 @@ export function registerBarRoutes(app: FastifyInstance, hub: Hub): void {
           type: 'object',
           additionalProperties: false,
           required: ['categoryId', 'name', 'price'],
-          properties: { categoryId: id, name, price: { type: 'number' }, stock },
+          properties: { categoryId: id, name, price: { type: 'number' }, stock, options },
         },
       },
     },
@@ -79,6 +81,7 @@ export function registerBarRoutes(app: FastifyInstance, hub: Hub): void {
             stock,
             sortOrder: { type: 'integer' },
             isActive: { type: 'boolean' },
+            options,
           },
         },
       },
@@ -114,7 +117,11 @@ export function registerBarRoutes(app: FastifyInstance, hub: Hub): void {
                 type: 'object',
                 additionalProperties: false,
                 required: ['productId', 'qty'],
-                properties: { productId: id, qty: { type: 'number' } },
+                properties: {
+                  productId: id,
+                  qty: { type: 'number' },
+                  options: { type: 'array', maxItems: OPTION_GROUPS_MAX * OPTION_CHOICES_MAX, items: id },
+                },
               },
             },
             note: { type: 'string', maxLength: ORDER_NOTE_MAX },

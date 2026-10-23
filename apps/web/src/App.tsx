@@ -11,7 +11,7 @@ import { LoginPage } from './Login.tsx';
 import { OfflineBanner } from './OfflineBanner.tsx';
 import { PwaBanners } from './pwa.tsx';
 import { DemoBanner } from './demo.tsx';
-import { Link, navigate, REDIRECTS, ROUTES, routeFor, sectionOf, useLocation } from './router.tsx';
+import { homeOf, Link, navigate, REDIRECTS, routeFor, routeIn, routesOf, sectionOf, useLocation } from './router.tsx';
 import { BottomNav, Sidebar, Toast, Topbar } from './Shell.tsx';
 import type { NavBadges } from './Shell.tsx';
 import { applyTheme, useTheme } from './theme.ts';
@@ -32,13 +32,22 @@ import { OwnerPage } from './pages/Owner.tsx';
 import { PlatformPage } from './pages/Platform.tsx';
 import { StaffPage } from './pages/Staff.tsx';
 import { BrandMark } from './BrandMark.tsx';
+import type { BusinessType } from '@bills/domain';
+import { businessOf } from './cafe/cafe.ts';
+import { BaristaPage } from './cafe/Barista.tsx';
+import { BoardPage } from './cafe/Board.tsx';
+import { CafeReports } from './cafe/Reports.tsx';
+import { PosPage } from './cafe/Pos.tsx';
 
 /** Route path → page. The table of routes (titles, icons, permissions) lives in router.tsx. */
-const PAGES: Record<string, (query: URLSearchParams) => ReactNode> = {
+const PAGES: Record<string, (query: URLSearchParams, business: BusinessType) => ReactNode> = {
   '/': () => <HallSection />,
+  '/pos': () => <PosPage />,
+  '/barista': () => <BaristaPage />,
   '/checks': () => <ChecksSection />,
   '/orders': () => <OrdersPage />,
-  '/stats': () => <StatsSection />,
+  // A coffee shop has no games to chart: its reports come from the cash shift and the counter.
+  '/stats': (_query, business) => (business === 'cafe' ? <CafeReports /> : <StatsSection />),
   '/tariffs': () => <TariffsSection />,
   '/bar': () => <BarMenuPage />,
   '/staff': () => <StaffPage />,
@@ -75,8 +84,16 @@ export function App() {
 
   const state = hub.state;
   const display = state?.settings.display;
-  const route = routeFor(path);
-  const title = route?.title ?? 'Страницы нет';
+  const business = businessOf(state?.settings);
+  const known = routeFor(path);
+  const route = known ? routeIn(known, business) : undefined;
+  const title = route?.title ?? known?.title ?? 'Страницы нет';
+
+  // A page of the other kind of venue (the hall in a coffee shop, «Касса» in a billiard club,
+  // bookmarks after the switch): go to this venue's start page.
+  useEffect(() => {
+    if (state && known && route === null) navigate(homeOf(business));
+  }, [state, known, route, business]);
 
   useEffect(() => {
     document.title = `${title} — ${display?.title ?? state?.club.name ?? 'TS'}`;
@@ -101,6 +118,19 @@ export function App() {
   const whyBlocked = useCallback((action: Action) => blockedReason(roles, action, license), [roles, license]);
 
   const closeToast = useCallback(() => setToast(null), []);
+
+  // The guest board for a TV in the coffee shop: read-only, full screen, works without a key.
+  if (path === '/board') {
+    const club = staff !== null && state !== null ? state : null;
+    return (
+      <BoardPage
+        title={club ? (display?.title ?? club.club.name) : null}
+        logoUrl={club ? (display?.logoUrl ?? null) : null}
+        timeZone={club ? club.club.timezone : null}
+        signedIn={staff !== null}
+      />
+    );
+  }
 
   // Without a session the HUB answers 401 to /api/state, so the login page comes
   // before the boot screen; LoginPage signs in through useAuth and stores the token.
@@ -153,7 +183,7 @@ export function App() {
     const d = decide(roles, action, licenseGateOf(license));
     return d === 'ok' || d === 'read_only';
   };
-  const visible = ROUTES.filter((r) => !r.hidden && r.action !== null && pageAllowed(r.action));
+  const visible = routesOf(business).filter((r) => !r.hidden && r.action !== null && pageAllowed(r.action));
   const lampProblems = state.tables.filter((t) => t.lamp.reported === 'UNKNOWN').length;
   const powerProblem = state.power.configured && (!state.power.reachable || state.power.onBattery) ? 1 : 0;
   const badges: NavBadges = {
@@ -163,11 +193,15 @@ export function App() {
 
   let content: ReactNode;
   const render = route ? PAGES[route.path] : undefined;
-  if (!route || !render) {
+  const homeLink = <Link to={homeOf(business)}>{business === 'cafe' ? 'На кассу' : 'На экран зала'}</Link>;
+  if (route === null) {
+    // Redirecting to the start page (effect above).
+    content = <Page title={title}><p className="empty">Этого раздела нет в режиме «{business === 'cafe' ? 'Кофейня' : 'Бильярдный клуб'}». {homeLink}</p></Page>;
+  } else if (!route || !render) {
     content = (
       <Page title="Страницы нет">
         <p>
-          Такого раздела нет. <Link to="/">На экран зала</Link>
+          Такого раздела нет. {homeLink}
         </p>
       </Page>
     );
@@ -182,12 +216,12 @@ export function App() {
         }
       >
         <p>
-          <Link to="/">На экран зала</Link> или <Link to="/login">войти под другим сотрудником</Link>.
+          {homeLink} или <Link to="/login">войти под другим сотрудником</Link>.
         </p>
       </Page>
     );
   } else {
-    content = render(query);
+    content = render(query, business);
   }
 
   return (

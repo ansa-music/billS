@@ -1,6 +1,7 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEV_LICENSE_KEY, parseOrigins, PLATFORM_LICENSE_PUBLIC_KEYS } from '@bills/domain';
+import type { BusinessType } from '@bills/domain';
+import { BUSINESS_TYPES, DEV_LICENSE_KEY, parseOrigins, PLATFORM_LICENSE_PUBLIC_KEYS } from '@bills/domain';
 
 export type LampDriverKind = 'simulator' | 'esp32-http' | 'modbus-tcp';
 export const LAMP_DRIVERS: readonly LampDriverKind[] = ['simulator', 'esp32-http', 'modbus-tcp'];
@@ -11,6 +12,8 @@ export interface HubConfig {
   dbPath: string;
   /** Time zone of the demo club created on first start. */
   demoTimezone: string;
+  /** HUB_DEMO_BUSINESS: what the demo club created on an empty database is — billiards (default) or a coffee shop (cafe). */
+  demoBusiness: BusinessType;
   /** Simulated controller response time. */
   simulatorLatencyMs: number;
   /** Built hall screen (apps/web/dist) served on `/`; skipped when the folder is missing. */
@@ -110,12 +113,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
   const dbPath = dbPathOf(env);
   const licenseMode = (env.HUB_LICENSE?.trim().toLowerCase() || 'enforce') as 'enforce' | 'off';
   if (licenseMode !== 'enforce' && licenseMode !== 'off') throw new Error(`HUB_LICENSE must be enforce or off, got "${env.HUB_LICENSE}"`);
+  const demoBusiness = (env.HUB_DEMO_BUSINESS?.trim().toLowerCase() || 'billiards') as BusinessType;
+  if (!BUSINESS_TYPES.includes(demoBusiness)) {
+    throw new Error(`HUB_DEMO_BUSINESS must be one of ${BUSINESS_TYPES.join(', ')}, got "${env.HUB_DEMO_BUSINESS}"`);
+  }
   return {
     host: env.HUB_HOST ?? '127.0.0.1',
     dbPath,
     // PORT is set by Render and similar hosts.
     port: int(env.HUB_PORT ?? env.PORT, 4310, 'HUB_PORT'),
     demoTimezone: env.HUB_DEMO_TZ ?? 'Asia/Almaty',
+    demoBusiness,
     simulatorLatencyMs: int(env.HUB_SIM_LATENCY_MS, 300, 'HUB_SIM_LATENCY_MS'),
     webDistPath: env.HUB_WEB_DIST ?? fileURLToPath(new URL('../../web/dist', import.meta.url)),
     lampDriver,

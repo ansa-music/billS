@@ -12,10 +12,19 @@ export interface AuthHookOptions {
 }
 
 /**
- * Endpoints that work without a session: health and metrics for monitoring, login itself, and the
- * first-boot wizard (nobody has a key yet; LAN only and closed once set up — see routes/setup.ts).
+ * Endpoints that work without a session: health and metrics for monitoring, login itself, the guest
+ * screen of a coffee shop, and the first-boot wizard (nobody has a key yet; LAN only and closed once set up — see routes/setup.ts).
  */
-const PUBLIC = new Set(['/api/health', '/metrics', '/api/auth/login', '/api/demo', '/api/setup', '/api/setup/status']);
+const PUBLIC = new Set([
+  '/api/health',
+  '/metrics',
+  '/api/auth/login',
+  '/api/demo',
+  '/api/setup',
+  '/api/setup/status',
+  // The coffee shop's guest screen: order numbers and first names, nothing else.
+  '/api/counter/board',
+]);
 /** Endpoints a browser cannot send headers to (SSE) or that exist only with the simulator. */
 const PUBLIC_PREFIXES = ['/api/events', '/api/dev/'];
 

@@ -3,13 +3,14 @@ import type { OrderView, SessionStatus, SessionView, ShiftReport } from '@bills/
 import { calculateChargeWithPauses, formatMoney, unpaidSpans } from '@bills/domain';
 import { amountOf, isLive, playedMsOf } from '../hall.ts';
 import { fetchSessions, getJson } from '../api.ts';
-import { gameDue, orderSummary, owedTotal, unbilledOrders } from '../cash/lines.ts';
+import { gameDue, orderSummary, owedTotal, placeName, unbilledOrders } from '../cash/lines.ts';
 import { ShiftPanel } from '../cash/ShiftPanel.tsx';
 import { UnpaidPanel } from '../cash/UnpaidPanel.tsx';
 import { EmptyState, SectionCard, StatTile, StatusBadge } from '../components.tsx';
 import { DAY_MS, formatClock, formatSpan, plural, workdayStart } from '../format.ts';
 import { Icon } from '../icons.tsx';
 import { useHub, useLive } from '../useHub.tsx';
+import { businessOf } from '../cafe/cafe.ts';
 
 type HistoryFilter = 'all' | 'live' | 'unpaid' | 'paid' | 'cancelled' | 'failed';
 
@@ -169,6 +170,8 @@ export function ChecksSection() {
     .filter(Boolean)
     .join(' · ');
   const cashDesk = hub.can('payment.take') || hub.can('shift.open');
+  // A coffee shop has no games: only the shift and what is owed.
+  const cafe = businessOf(state.settings) === 'cafe';
   const desk = { state, actor: hub.actor, refresh: hub.refresh, notify: hub.notify };
   const played = inDay.filter((s) => isLive(s) || s.status === 'AWAITING_PAYMENT' || s.status === 'CLOSED');
   const charged = played.reduce((sum, s) => sum + liveAmount(s, serverNow), 0);
@@ -187,7 +190,7 @@ export function ChecksSection() {
           detail={owing ? owingDetail : 'всё оплачено'}
           tone={owing ? 'info' : undefined}
         />
-        <StatTile label="Начислено за день" value={formatMoney(charged, currency)} detail={`время · ${played.length} ${plural(played.length, ['игра', 'игры', 'игр'])} с 06:00`} />
+        {!cafe && <StatTile label="Начислено за день" value={formatMoney(charged, currency)} detail={`время · ${played.length} ${plural(played.length, ['игра', 'игры', 'игр'])} с 06:00`} />}
         <StatTile
           label="Оплачено за смену"
           value={report ? formatMoney(report.net.total, currency) : '—'}
@@ -199,12 +202,14 @@ export function ChecksSection() {
                 : 'смена закрыта'
           }
         />
-        <StatTile
-          label="Отмены и сбои света"
-          value={troubles.length}
-          detail={troubles.length ? 'без оплаты, видно в журнале' : 'не было'}
-          tone={troubles.some((s) => s.status === 'FAILED') ? 'danger' : undefined}
-        />
+        {!cafe && (
+          <StatTile
+            label="Отмены и сбои света"
+            value={troubles.length}
+            detail={troubles.length ? 'без оплаты, видно в журнале' : 'не было'}
+            tone={troubles.some((s) => s.status === 'FAILED') ? 'danger' : undefined}
+          />
+        )}
       </div>
 
       {cashDesk ? (
@@ -224,14 +229,14 @@ export function ChecksSection() {
                 <UnpaidCard key={s.id} s={s} name={names.get(s.tableId) ?? 'Стол'} orders={ordersOf(s.id)} currency={currency} />
               ))}
               {unbilled.map((o) => (
-                <UnbilledOrderCard key={o.id} o={o} name={names.get(o.tableId) ?? 'Стол'} timezone={timezone} currency={currency} />
+                <UnbilledOrderCard key={o.id} o={o} name={placeName(names, o.tableId)} timezone={timezone} currency={currency} />
               ))}
             </div>
           )}
         </SectionCard>
       )}
 
-      <div className="two-col">
+      {!cafe && <div className="two-col">
         {cashDesk && state.unpaid.length > 0 && (
           <SectionCard title="Как посчитаны неоплаченные игры">
             <div className="check-list">
@@ -288,7 +293,7 @@ export function ChecksSection() {
             </ul>
           )}
         </SectionCard>
-      </div>
+      </div>}
     </div>
   );
 }

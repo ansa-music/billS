@@ -131,7 +131,8 @@ export function ShiftPanel(props: DeskProps) {
   );
 }
 
-function OpenShiftForm({ desk }: { desk: Desk }) {
+/** Also used by the coffee shop counter («Смена не открыта» → open it right there). */
+export function OpenShiftForm({ desk, onOpened }: { desk: Desk; onOpened?: (shift: ShiftView) => void }) {
   const currency = desk.state.club.currency;
   const [float, setFloat] = useState('');
   const action = useAction();
@@ -142,8 +143,9 @@ function OpenShiftForm({ desk }: { desk: Desk }) {
       const openingFloat = float.trim() === '' ? 0 : parseMoney(float, currency);
       if (openingFloat === null) throw new Error('Проверьте сумму размена');
       const body: OpenShiftRequest = { openingFloat };
-      await desk.send<ShiftView>('/api/shifts/open', body);
+      const shift = await desk.send<ShiftView>('/api/shifts/open', body);
       setFloat('');
+      onOpened?.(shift);
     });
   };
 
