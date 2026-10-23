@@ -618,6 +618,45 @@ test('migration 014 keeps bar orders of an older database, with their checks and
   assert.equal(all(hub.db, 'PRAGMA foreign_key_check').length, 0);
 });
 
+test('a database from before 012 with bar orders upgrades all the way (012 rebuilds order lines too)', (t) => {
+  const h = harness(t);
+  const dir = join(h.dir, 'migrations-011');
+  mkdirSync(dir);
+  for (const f of readdirSync(MIGRATIONS_DIR).filter((f) => Number.parseInt(f, 10) < 12)) {
+    copyFileSync(new URL(f, MIGRATIONS_DIR), join(dir, f));
+  }
+  const path = join(h.dir, 'old-011.db');
+  // The rows an 011 build had written: a game with a bar order and its line.
+  const old = openDb(path, 1, { migrationsDir: pathToFileURL(dir + '/') });
+  old.exec(`
+    INSERT INTO companies (id, name, created_at) VALUES ('co', 'Компания', 1);
+    INSERT INTO clubs (id, company_id, name, timezone, currency, created_at) VALUES ('cl', 'co', 'Клуб', 'Asia/Almaty', 'KZT', 1);
+    INSERT INTO tariffs (id, club_id, name, config, created_at, updated_at) VALUES ('tf', 'cl', 'Тариф', '{}', 1, 1);
+    INSERT INTO billiard_tables (id, club_id, name, kind, lamp_channel, default_tariff_id) VALUES ('tb', 'cl', 'Стол 1', 'pool', 'sim:1', 'tf');
+    INSERT INTO table_sessions (id, club_id, table_id, tariff_id, tariff_name, tariff_snapshot, timezone, status, requested_at, opened_by, updated_at)
+      VALUES ('ss', 'cl', 'tb', 'tf', 'Тариф', '{}', 'Asia/Almaty', 'AWAITING_PAYMENT', 1, 'Админ', 1);
+    INSERT INTO product_categories (id, club_id, name, created_at, updated_at) VALUES ('pc', 'cl', 'Бар', 1, 1);
+    INSERT INTO products (id, club_id, category_id, name, price, created_at, updated_at) VALUES ('pr', 'cl', 'pc', 'Чипсы', 700, 1, 1);
+    INSERT INTO bar_orders (id, club_id, session_id, table_id, status, total, created_at, created_by, updated_at)
+      VALUES ('o-011', 'cl', 'ss', 'tb', 'OPEN', 700, 1, 'Официант', 1);
+    INSERT INTO bar_order_items (id, order_id, product_id, title, price, qty, amount, created_at)
+      VALUES ('o-011-01', 'o-011', 'pr', 'Чипсы', 700, 1, 700, 1);
+  `);
+  old.close();
+
+  const db = openDb(path, 2);
+  try {
+    const rows = all<{ id: string; title: string; status: string }>(
+      db,
+      'SELECT o.id, i.title, o.status FROM bar_orders o JOIN bar_order_items i ON i.order_id = o.id',
+    );
+    assert.deepEqual(rows.map((r) => ({ ...r })), [{ id: 'o-011', title: 'Чипсы', status: 'OPEN' }]);
+    assert.equal(all(db, 'PRAGMA foreign_key_check').length, 0);
+  } finally {
+    db.close();
+  }
+});
+
 test('HUB_DEMO_BUSINESS=cafe picks the coffee shop demo; anything else is refused', async () => {
   const { loadConfig } = await import('../src/config.ts');
   assert.equal(loadConfig({ HUB_DEMO_BUSINESS: 'cafe' }).demoBusiness, 'cafe');
