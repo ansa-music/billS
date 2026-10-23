@@ -141,10 +141,14 @@ function baseVersion() {
   return JSON.parse(readFileSync(TAURI_CONF, 'utf8')).version;
 }
 
-const INSTALLER = /\.(msi|deb)$/i;
+const INSTALLER = /\.(exe|msi|deb)$/i;
 
+/** Installers in a folder and its subfolders (merged artifacts keep bundle/nsis, bundle/msi…). */
 function installersIn(dir) {
-  return existsSync(dir) ? readdirSync(dir).filter((f) => INSTALLER.test(f)).map((f) => join(dir, f)) : [];
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? installersIn(join(dir, e.name)) : INSTALLER.test(e.name) ? [join(dir, e.name)] : [],
+  );
 }
 
 function signatures(dirs) {
@@ -172,8 +176,13 @@ function signatures(dirs) {
 
 /** Readable file name of an installer in the release and the updater platforms it serves. */
 export function releaseAsset(file, version) {
+  // The setup .exe (NSIS, per-user: no admin rights, no UAC) is the main Windows installer and
+  // the default the updater takes; the .msi stays for IT departments that deploy MSI packages.
+  if (/\.exe$/i.test(file)) {
+    return { name: `TS-${version}-windows-x64-setup.exe`, platforms: ['windows-x86_64', 'windows-x86_64-nsis'] };
+  }
   if (/\.msi$/i.test(file)) {
-    return { name: `TS-${version}-windows-x64.msi`, platforms: ['windows-x86_64', 'windows-x86_64-msi'] };
+    return { name: `TS-${version}-windows-x64.msi`, platforms: ['windows-x86_64-msi'] };
   }
   if (/\.deb$/i.test(file)) {
     return { name: `TS-${version}-linux-amd64.deb`, platforms: ['linux-x86_64', 'linux-x86_64-deb'] };
@@ -207,7 +216,7 @@ function release(inDir, outDir) {
   mkdirSync(outDir, { recursive: true });
   const files = installersIn(inDir);
   const kinds = new Set(files.map((f) => f.slice(-3).toLowerCase()));
-  if (!kinds.has('msi') || !kinds.has('deb')) fail(`Нужны оба установщика (.msi и .deb), найдено: ${files.map((f) => basename(f)).join(', ') || 'ничего'}`);
+  if (!kinds.has('exe') || !kinds.has('deb')) fail(`Нужны установщики для Windows (.exe) и Linux (.deb), найдено: ${files.map((f) => basename(f)).join(', ') || 'ничего'}`);
 
   const entries = [];
   for (const file of files) {

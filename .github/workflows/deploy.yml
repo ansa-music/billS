@@ -185,7 +185,9 @@ jobs:
           wranglerVersion: "4"
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy apps/cloud-web/dist --project-name=${{ env.CF_PAGES_CABINET }} --branch=${{ env.LIVE == 'true' && 'main' || github.head_ref }} --commit-dirty=true
+          # From apps/cloud-web so wrangler picks up functions/ (short links /download/<kind>).
+          workingDirectory: apps/cloud-web
+          command: pages deploy dist --project-name=${{ env.CF_PAGES_CABINET }} --branch=${{ env.LIVE == 'true' && 'main' || github.head_ref }} --commit-dirty=true
 
       - name: Deploy demo
         id: demo

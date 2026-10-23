@@ -1,6 +1,6 @@
 import { Fragment, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { ClassifiedRelease, DownloadCard, DownloadStep, ReleaseAsset, VisitorPlatform } from '@bills/domain';
+import type { ClassifiedRelease, DownloadCard, DownloadKind, DownloadStep, ReleaseAsset, VisitorPlatform } from '@bills/domain';
 import {
   ANDROID_STEPS,
   DOWNLOAD_TEXT,
@@ -11,6 +11,7 @@ import {
   assetFileText,
   assetLinkText,
   computerDownload,
+  downloadPath,
   computerSteps,
   detectPlatform,
   downloadCards,
@@ -185,6 +186,7 @@ function Download({
   label,
   soon,
   extra,
+  share,
 }: {
   state: ReleaseState;
   asset: ReleaseAsset | null | undefined;
@@ -192,6 +194,8 @@ function Download({
   label: string;
   soon: string;
   extra?: ReactNode;
+  /** Short link /download/<kind> that always gives the latest file; null where the site has none. */
+  share?: string | null;
 }) {
   if (state.status === 'loading') return <p className="dl-wait">{DOWNLOAD_TEXT.loading}</p>;
   if (!asset) {
@@ -218,6 +222,14 @@ function Download({
         {assetFileText(asset)}
         {extra}
       </p>
+      {share && (
+        <p className="dl-file">
+          Ссылка, чтобы отправить в WhatsApp или Telegram:{' '}
+          <a className="dl-inline-link" href={share}>
+            {share.replace(/^https?:\/\//, '')}
+          </a>
+        </p>
+      )}
     </div>
   );
 }
@@ -293,6 +305,9 @@ export function AppsPage({ signedIn }: { signedIn: boolean }) {
   const isWide = (card: DownloadCard, i: number) => card === current || (i === order.length - 1 && rest % 2 === 1);
 
   const computer = computerDownload(catalog, platform);
+  // Short links /download/<kind> are a Cloudflare Pages Function: not on the GitHub Pages copy.
+  const shortLink = (kind: DownloadKind) =>
+    location.hostname.endsWith('github.io') || location.hostname === 'localhost' ? null : `${location.origin}${downloadPath(kind)}`;
   const system = computer.primary?.platform ?? 'windows';
   const apk = catalog?.android[0];
   const image = catalog?.minipc[0];
@@ -317,6 +332,7 @@ export function AppsPage({ signedIn }: { signedIn: boolean }) {
               release={catalog?.desktopRelease ?? null}
               label={`Скачать для ${PLATFORM_NAME[system]}`}
               soon={DOWNLOAD_TEXT.computer.soon}
+              share={computer.primary ? shortLink(computer.primary.platform === 'linux' ? 'linux' : 'windows') : null}
             />
             <OtherFiles assets={computer.others} />
           </>
@@ -341,10 +357,11 @@ export function AppsPage({ signedIn }: { signedIn: boolean }) {
               release={catalog?.androidRelease ?? null}
               label={DOWNLOAD_TEXT.android.button}
               soon={DOWNLOAD_TEXT.android.soon}
+              share={shortLink('android')}
             />
             {apk && onComputer && (
               <div className="dl-qr">
-                <QrImage text={apk.url} alt="QR-код: скачать приложение на телефон" />
+                <QrImage text={shortLink('android') ?? apk.url} alt="QR-код: скачать приложение на телефон" />
                 <p>{DOWNLOAD_TEXT.android.qr}</p>
               </div>
             )}
@@ -375,6 +392,7 @@ export function AppsPage({ signedIn }: { signedIn: boolean }) {
               release={catalog?.minipcRelease ?? null}
               label={DOWNLOAD_TEXT.minipc.button}
               soon={DOWNLOAD_TEXT.minipc.soon}
+              share={shortLink('minipc')}
               extra={
                 image?.checksumUrl && (
                   <>

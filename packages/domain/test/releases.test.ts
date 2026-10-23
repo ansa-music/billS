@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  downloadAssetFor,
+  downloadPath,
   ANDROID_STEPS,
   assetApp,
   assetFileText,
@@ -349,4 +351,27 @@ test('download steps cover what the owner has to press on each device', () => {
   for (const text of [DOWNLOAD_TEXT.computer.soon, DOWNLOAD_TEXT.android.soon, DOWNLOAD_TEXT.minipc.soon, DOWNLOAD_TEXT.error]) {
     assert.doesNotMatch(text, /GitHub|релиз|API|APK/i);
   }
+});
+
+test('downloadAssetFor: one file per short link, setup .exe before .msi', () => {
+  const asset = (name: string) => ({ name, size: 1, browser_download_url: `https://x/${name}` });
+  const catalog = buildReleaseCatalog([
+    {
+      tag_name: 'desktop-v0.2.0',
+      html_url: 'https://x/d',
+      published_at: '2026-10-23T10:00:00Z',
+      assets: [asset('TS-0.2.0-windows-x64.msi'), asset('TS-0.2.0-windows-x64-setup.exe'), asset('TS-0.2.0-linux-amd64.deb'), asset('latest.json')],
+    },
+    { tag_name: 'mobile-v0.1.0', html_url: 'https://x/m', published_at: '2026-10-22T10:00:00Z', assets: [asset('TS-0.1.0.apk'), asset('TS-0.1.0.apk.sha256')] },
+    { tag_name: 'minipc-v0.1.0', html_url: 'https://x/i', published_at: '2026-10-22T10:00:00Z', assets: [asset('TS-minipc-0.1.0.iso')] },
+    { tag_name: 'desktop-v0.1.0', html_url: 'https://x/old', published_at: '2026-10-01T10:00:00Z', assets: [] },
+  ]);
+  assert.equal(downloadAssetFor(catalog, 'windows')?.name, 'TS-0.2.0-windows-x64-setup.exe');
+  assert.equal(downloadAssetFor(catalog, 'linux')?.name, 'TS-0.2.0-linux-amd64.deb');
+  assert.equal(downloadAssetFor(catalog, 'android')?.name, 'TS-0.1.0.apk');
+  assert.equal(downloadAssetFor(catalog, 'minipc')?.name, 'TS-minipc-0.1.0.iso');
+  assert.equal(downloadAssetFor(catalog, 'mac'), null);
+  assert.equal(downloadAssetFor(null, 'windows'), null);
+  assert.equal(downloadAssetFor(buildReleaseCatalog([]), 'android'), null);
+  assert.equal(downloadPath('android'), '/download/android');
 });

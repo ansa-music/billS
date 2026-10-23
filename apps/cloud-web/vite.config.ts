@@ -29,7 +29,7 @@ export default defineConfig(({ mode }) => {
         workbox: {
           globPatterns: ['**/*.{js,css,html,svg,png,woff2,webmanifest}'],
           navigateFallback: 'index.html',
-          navigateFallbackDenylist: [/^\/api\//],
+          navigateFallbackDenylist: [/^\/api\//, /^\/download\//],
           cleanupOutdatedCaches: true,
           importScripts: ['push-sw.js'],
           runtimeCaching: [

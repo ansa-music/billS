@@ -39,9 +39,11 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            bundles: msi
+            bundles: nsis,msi
+            dirs: nsis msi
           - os: ubuntu-22.04
             bundles: deb
+            dirs: deb
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -102,13 +104,18 @@ jobs:
           TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: node apps/desktop/scripts/ci.mjs signatures apps/desktop/src-tauri/target/release/bundle/${{ matrix.bundles }}
+        shell: bash
+        run: |
+          set -- ${{ matrix.dirs }}
+          node apps/desktop/scripts/ci.mjs signatures "${@/#/apps/desktop/src-tauri/target/release/bundle/}"
 
       - name: Установщик в артефакты
         uses: actions/upload-artifact@v4
         with:
-          name: ts-desktop-${{ matrix.bundles }}
+          name: ts-desktop-${{ matrix.os }}
           path: |
+            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe.sig
             apps/desktop/src-tauri/target/release/bundle/msi/*.msi
             apps/desktop/src-tauri/target/release/bundle/msi/*.msi.sig
             apps/desktop/src-tauri/target/release/bundle/deb/*.deb
@@ -144,11 +151,12 @@ jobs:
           VERSION: ${{ steps.files.outputs.version }}
           CHANNEL: ${{ steps.files.outputs.channel }}
         run: |
-          notes="Установщики TS для ПК кассы: .msi — Windows 10/11, .deb — Ubuntu 22.04 и новее.
+          notes="TS для ПК кассы. Windows 10/11: скачайте TS-${VERSION}-windows-x64-setup.exe и откройте — права администратора не нужны, TS запустится сам. Linux (Ubuntu 22.04 и новее): .deb. Файл .msi — для установки через системного администратора.
           Windows может показать окно SmartScreen: нажмите «Подробнее» → «Выполнить в любом случае».
           Инструкция: https://github.com/${GITHUB_REPOSITORY}/blob/main/apps/desktop/README.md"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" out/* --clobber
+            gh release edit "$TAG" --notes "$notes"
           else
             gh release create "$TAG" out/* --verify-tag --title "TS для ПК $VERSION" --notes "$notes"
           fi

@@ -342,7 +342,9 @@ export function computerDownload(
   catalog: Pick<ReleaseCatalog, 'windows' | 'linux' | 'mac'> | null,
   platform: VisitorPlatform,
 ): ComputerDownload {
-  const all = [...(catalog?.windows ?? []), ...(catalog?.linux ?? []), ...(catalog?.mac ?? [])];
+  // Windows: the setup .exe (no admin rights) before the .msi.
+  const windows = [...(catalog?.windows ?? [])].sort((a, b) => Number(b.format === 'exe') - Number(a.format === 'exe'));
+  const all = [...windows, ...(catalog?.linux ?? []), ...(catalog?.mac ?? [])];
   const own = platform === 'linux' || platform === 'mac' ? all.find((a) => a.platform === platform) : undefined;
   const primary = own ?? all[0] ?? null;
   return { primary, others: all.filter((a) => a !== primary) };
@@ -460,8 +462,7 @@ export function computerSteps(system: ReleasePlatform = 'windows'): DownloadStep
       { strong: '«Выполнить в любом случае»' },
       '. Так Windows встречает новые программы без платной подписи.',
     ],
-    ['В установщике нажимайте ', { strong: '«Далее»' }, ' и ', { strong: '«Установить»' }, '.'],
-    ['Запустите TS со значка на рабочем столе.'],
+    ['Нажмите ', { strong: '«Установить»' }, ', затем ', { strong: '«Готово»' }, ' — права администратора не нужны, TS откроется сам и найдёт HUB клуба.'],
   ];
 }
 
@@ -508,3 +509,34 @@ export const MINIPC_COMMAND_STEPS: readonly DownloadStep[] = [
   ['Когда установка закончится, откройте на телефоне или компьютере в сети клуба адрес ', { strong: MINIPC_SETUP_ADDRESS }, '.'],
   CONNECTION_CODE,
 ];
+
+/** Short download links of the cabinet site: /download/<kind> redirects to the latest file. */
+export type DownloadKind = 'windows' | 'linux' | 'android' | 'minipc';
+export const DOWNLOAD_KINDS: readonly DownloadKind[] = ['windows', 'linux', 'android', 'minipc'];
+
+/** Path of the short link on the cabinet site, e.g. «/download/android». */
+export function downloadPath(kind: DownloadKind): string {
+  return `/download/${kind}`;
+}
+
+/**
+ * The one file a short link hands out. Windows: the setup .exe (per-user, no admin rights) before
+ * the .msi; Linux: the .deb; Android: the APK; mini-PC: the USB image. Null when there is none yet.
+ */
+export function downloadAssetFor(catalog: ReleaseCatalog | null, kind: string): ReleaseAsset | null {
+  if (!catalog) return null;
+  const byFormat = (list: ReleaseAsset[], formats: string[]): ReleaseAsset | null =>
+    formats.map((f) => list.find((a) => a.format === f)).find((a) => a !== undefined) ?? list[0] ?? null;
+  switch (kind) {
+    case 'windows':
+      return byFormat(catalog.windows, ['exe', 'msi']);
+    case 'linux':
+      return byFormat(catalog.linux, ['deb', 'AppImage']);
+    case 'android':
+      return byFormat(catalog.android, ['apk']);
+    case 'minipc':
+      return byFormat(catalog.minipc, ['iso']);
+    default:
+      return null;
+  }
+}

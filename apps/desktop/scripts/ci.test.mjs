@@ -51,8 +51,11 @@ test('release assets and latest.json', () => {
       { url: 'https://x/deb', signature: 'S2', platforms: deb.platforms },
     ],
   });
-  assert.deepEqual(Object.keys(json.platforms).sort(), ['linux-x86_64', 'linux-x86_64-deb', 'windows-x86_64', 'windows-x86_64-msi']);
+  assert.deepEqual(Object.keys(json.platforms).sort(), ['linux-x86_64', 'linux-x86_64-deb', 'windows-x86_64-msi']);
   assert.deepEqual(json.platforms['windows-x86_64-msi'], { signature: 'S1', url: 'https://x/msi' });
+  const exe = releaseAsset('TS_0.1.2_x64-setup.exe', '0.1.2');
+  assert.equal(exe.name, 'TS-0.1.2-windows-x64-setup.exe');
+  assert.deepEqual(exe.platforms, ['windows-x86_64', 'windows-x86_64-nsis']);
   assert.equal(json.pub_date, '2026-10-21T00:00:00Z');
 });
 

@@ -15,31 +15,59 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["msi", "deb"],
+    "targets": [
+      "nsis",
+      "msi",
+      "deb"
+    ],
     "publisher": "TS",
     "category": "Business",
     "shortDescription": "TS для ПК кассы и мини-ПК",
     "createUpdaterArtifacts": true,
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "resources": {
       "../../../deploy/windows/": "deploy/windows/",
       "../../../deploy/linux/": "deploy/linux/"
     },
     "windows": {
-      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
-      "wix": { "language": "ru-RU" }
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "wix": {
+        "language": "ru-RU"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "Russian"
+        ],
+        "displayLanguageSelector": false
+      }
     },
     "linux": {
       "deb": {
-        "depends": ["policykit-1 | pkexec"]
+        "depends": [
+          "policykit-1 | pkexec"
+        ]
       }
     }
   },
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDBEQTNFREY2OTk3N0JGRDUKUldUVnYzZVo5dTJqRFNmN0VEYkRrMWlJeWpoeUo5Ri80UW84TG5USEppSitwSU9ISXpUbVdHZDgK",
-      "endpoints": ["https://github.com/ansa-music/billS/releases/download/desktop-latest/latest.json"],
-      "windows": { "installMode": "passive" }
+      "endpoints": [
+        "https://github.com/ansa-music/billS/releases/download/desktop-latest/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }
