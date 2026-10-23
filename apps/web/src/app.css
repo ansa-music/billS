@@ -50,23 +50,6 @@
   font-size: 13px;
 }
 
-/* Twelve sections do not fit six fixed columns: the phone tab bar scrolls sideways. */
-@media (max-width: 767px) {
-  .bottom-nav {
-    display: flex;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .bottom-nav::-webkit-scrollbar {
-    display: none;
-  }
-
-  .bottom-nav .nav-link {
-    flex: 1 0 64px;
-  }
-}
-
 /* Login: the only screen outside the shell. */
 
 .login-shell {
@@ -144,22 +127,7 @@
 
 .field input,
 .field select,
-.field textarea {
-  width: 100%;
-  min-height: 44px;
-}
-
-textarea {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 8px 10px;
-  font: inherit;
-  color: inherit;
-  resize: vertical;
-}
-
-.field-error {
+.field .field-error {
   color: var(--danger);
   font-size: 13px;
 }
@@ -295,50 +263,6 @@ textarea {
   color: var(--muted);
 }
 
-/* Dialogs */
-
-.modal {
-  border: none;
-  padding: 0;
-  background: transparent;
-  max-width: min(560px, calc(100vw - 32px));
-  width: 100%;
-}
-
-.modal::backdrop {
-  background: rgb(0 0 0 / 0.55);
-}
-
-.modal-body {
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 16px;
-  display: grid;
-  gap: 12px;
-}
-
-.modal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.modal-head h2 {
-  font-size: 18px;
-}
-
-.modal-actions {
-  justify-content: flex-end;
-}
-
-.modal-actions .btn {
-  flex: none;
-}
-
 /* Login */
 
 .login-groups {
@@ -379,23 +303,6 @@ textarea {
   font-size: 13px;
   font-weight: 700;
   flex: none;
-}
-
-/* Tags */
-
-.tag-ok {
-  background: color-mix(in oklab, var(--accent) 20%, transparent);
-  color: var(--accent);
-}
-
-.tag-muted {
-  background: var(--surface-2);
-  color: var(--muted);
-}
-
-.tag-warn {
-  background: color-mix(in oklab, var(--warn) 20%, transparent);
-  color: var(--warn);
 }
 
 /* Login by access key */

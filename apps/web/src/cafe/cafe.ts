@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   BusinessType,
+  CatalogView,
   ClubSettings,
   CounterBoardView,
   CounterOrdersView,
@@ -11,7 +12,7 @@ import type {
   ProductOptionGroup,
   ProductView,
 } from '@bills/domain';
-import { command, fetchJson } from '../api.ts';
+import { command, fetchJson, HUB_URL, hubUrl } from '../api.ts';
 
 /**
  * Coffee shop screens (settings.business.type === 'cafe'): the counter («Касса»),
@@ -106,6 +107,116 @@ export function usePolling<T>(load: () => Promise<T>, intervalMs: number, trigge
 
   return { data, error, reload };
 }
+
+/**
+ * The menu for the counter, instant on load: the last copy kept on this device
+ * is shown at once and the HUB's answer replaces it in the background. It is
+ * re-read on HUB change events (`trigger`), but the screen re-renders only
+ * when the menu really changed (stock after a sale, an edit in «Меню»).
+ */
+export function useCachedCatalog(trigger: unknown): { catalog: CatalogView | null; error: string | null } {
+  const key = `bills.cafe.catalog.v1:${HUB_URL}`;
+  const raw = useRef<string | null>(null);
+  const [catalog, setCatalog] = useState<CatalogView | null>(() => {
+    try {
+      const text = localStorage.getItem(key);
+      if (!text) return null;
+      raw.current = text;
+      return JSON.parse(text) as CatalogView;
+    } catch {
+      return null;
+    }
+  });
+  const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
+  const again = useRef(false);
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      if (inFlight.current) {
+        again.current = true;
+        return;
+      }
+      inFlight.current = true;
+      try {
+        do {
+          again.current = false;
+          const fresh = await fetchJson<CatalogView>('/api/bar/catalog');
+          const text = JSON.stringify(fresh);
+          if (!alive) return;
+          setError(null);
+          if (text !== raw.current) {
+            raw.current = text;
+            setCatalog(fresh);
+            try {
+              localStorage.setItem(key, text);
+            } catch {
+              // Full or private storage: the cache just does not survive a reload.
+            }
+          }
+        } while (again.current && alive);
+      } catch (e) {
+        if (alive) setError((e as Error).message);
+      } finally {
+        inFlight.current = false;
+      }
+    };
+    // Bursts of change events (a sale raises several) become one request.
+    const t = setTimeout(() => void load(), raw.current === null ? 0 : 120);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [key, trigger]);
+
+  return { catalog, error };
+}
+
+/**
+ * Bumps when the HUB reports a counter change over SSE (`changed`, kind
+ * `counter`): for the guest board, which runs without the app's connection.
+ * Polling stays as the fallback.
+ */
+export function useCounterEvents(): number {
+  const [version, setVersion] = useState(0);
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') return;
+    let events: EventSource | null = null;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const connect = () => {
+      events = new EventSource(hubUrl('/api/events'));
+      events.onopen = () => setVersion((v) => v + 1);
+      events.addEventListener('changed', (e) => {
+        try {
+          const kind = (JSON.parse((e as MessageEvent<string>).data) as { kind?: string }).kind;
+          if (kind === 'counter' || kind === undefined) setVersion((v) => v + 1);
+        } catch {
+          setVersion((v) => v + 1);
+        }
+      });
+      events.onerror = () => {
+        if (events?.readyState === EventSource.CLOSED) {
+          clearTimeout(retry);
+          retry = setTimeout(connect, 3000);
+        }
+      };
+    };
+    connect();
+    return () => {
+      events?.close();
+      clearTimeout(retry);
+    };
+  }, []);
+  return version;
+}
+
+/**
+ * Options the barista must not miss: plant or lactose-free milk, decaf, no
+ * sugar. The most common mistake at the bar is the wrong milk.
+ */
+const RISKY = /(овсян|миндал|кокос|соев|рисов|фундук|растит|безлакт|без лакт|декаф|без кофеин|без сахар)/i;
+export const isRiskyOption = (name: string) => RISKY.test(name);
 
 // ── Sound ───────────────────────────────────────────────────────────────────
 

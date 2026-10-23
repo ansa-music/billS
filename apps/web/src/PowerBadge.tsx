@@ -33,7 +33,7 @@ export function PowerBadge({ power }: { power: PowerView }) {
       <span className="power-icon" aria-hidden="true">
         {state === 'mains' ? '⚡' : '🔋'}
       </span>
-      {text}
+      <span className="power-text">{text}</span>
     </span>
   );
 }

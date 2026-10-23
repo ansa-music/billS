@@ -40,14 +40,16 @@ export function useDemo(): { demo: boolean; keys: DemoInfo['keys'] } {
 }
 
 /** Strip under the top bar on every page of the demo. */
-export function DemoBanner() {
+export function DemoBanner({ cafe = false }: { cafe?: boolean }) {
   const { demo } = useDemo();
   if (!demo) return null;
   return (
     <div className="pwa-banner demo-banner" role="note">
       <p className="pwa-banner-text">
-        <strong>Демо</strong> — данные сбрасываются каждую ночь. Лампы и ИБП здесь симулируются: попробуйте раздел
-        «Оборудование».
+        <strong>Демо</strong> — данные сбрасываются каждую ночь.{' '}
+        {cafe
+          ? 'Примите заказ на «Кассе», отметьте его готовым у бариста и посмотрите номер на «Экране заказов».'
+          : 'Лампы и ИБП здесь симулируются: попробуйте раздел «Оборудование».'}
       </p>
       {DEMO_LOCAL && (
         <div className="pwa-banner-actions">

@@ -118,6 +118,10 @@ export function App() {
   const whyBlocked = useCallback((action: Action) => blockedReason(roles, action, license), [roles, license]);
 
   const closeToast = useCallback(() => setToast(null), []);
+  // Drops the session on the HUB (best effort), then shows the login page.
+  const signOut = useCallback(() => {
+    void logout().finally(() => navigate('/login'));
+  }, [logout]);
 
   // The guest board for a TV in the coffee shop: read-only, full screen, works without a key.
   if (path === '/board') {
@@ -242,10 +246,7 @@ export function App() {
             serverNow={ctx.serverNow}
             online={hub.online}
             staff={staff}
-            onLogout={() => {
-              // Drops the session on the HUB (best effort), then shows the login page.
-              void logout().finally(() => navigate('/login'));
-            }}
+            onLogout={signOut}
             theme={theme}
             onTheme={cycle}
             onResolveAlert={(id) => void commands.resolveAlert(id)}
@@ -253,7 +254,7 @@ export function App() {
             busy={commands.anyBusy}
           />
           <LicenseBanner license={license} />
-          <DemoBanner />
+          <DemoBanner cafe={business === 'cafe'} />
           <OfflineBanner online={hub.online} />
           <PwaBanners />
           <ManualModeBanner
@@ -267,7 +268,7 @@ export function App() {
             {content}
           </main>
         </div>
-        <BottomNav routes={visible} active={path} badges={badges} />
+        <BottomNav routes={visible} active={path} badges={badges} staff={staff} onLogout={signOut} />
         {toast && <Toast message={toast} onClose={closeToast} />}
       </div>
     </HubContext.Provider>

@@ -787,19 +787,6 @@
   gap: 8px;
 }
 
-.btn-large {
-  min-height: 56px;
-  font-size: 17px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-}
-
-.btn-flex-none {
-  flex: none;
-}
-
 .drawer-opening {
   justify-items: center;
   text-align: center;
@@ -865,15 +852,6 @@
 .tariff-option-meta {
   font-size: 13px;
   color: var(--muted);
-}
-
-.tag {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--surface-3);
-  color: var(--text-2);
 }
 
 .mini-history {

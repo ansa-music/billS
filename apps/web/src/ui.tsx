@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 /**
@@ -63,8 +63,28 @@ export function Empty({ children }: { children: ReactNode }) {
   return <p className="empty">{children}</p>;
 }
 
+/** Placeholder rows the size of a list: the page does not jump when the data arrives. */
+export function SkeletonList({ rows = 3, label = 'Загрузка…' }: { rows?: number; label?: string }) {
+  return (
+    <div className="skeleton-list" role="status" aria-busy="true">
+      <span className="sr-only">{label}</span>
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="skeleton-row" aria-hidden="true">
+          <span className="skeleton" />
+          <div>
+            <span className="skeleton skeleton-line" style={{ width: `${70 - i * 12}%` }} />
+            <span className="skeleton skeleton-line" style={{ width: `${45 - i * 6}%` }} />
+          </div>
+          <span className="skeleton skeleton-line" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function Loading({ online = true }: { online?: boolean }) {
-  return <p className="empty">{online ? 'Загрузка…' : 'Нет связи с HUB — ждём…'}</p>;
+  if (!online) return <p className="empty">Нет связи с HUB — ждём, данные появятся сами.</p>;
+  return <SkeletonList />;
 }
 
 /** Labelled form control. */
@@ -154,6 +174,7 @@ export function Modal({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
@@ -164,20 +185,20 @@ export function Modal({
     <dialog
       ref={ref}
       className="modal"
+      aria-labelledby={titleId}
       onClose={onClose}
       onClick={(e) => {
+        // Only a click on the backdrop lands on the <dialog> itself.
         if (e.target === ref.current) onClose();
       }}
     >
-      <div className="modal-body" onClick={(e) => e.stopPropagation()}>
-        <header className="modal-head">
-          <h2>{title}</h2>
-          <button type="button" className="btn btn-small btn-ghost" onClick={onClose} aria-label="Закрыть">
-            ✕
-          </button>
-        </header>
-        {children}
-      </div>
+      <header className="modal-head">
+        <h2 id={titleId}>{title}</h2>
+        <button type="button" className="modal-close" onClick={onClose} aria-label="Закрыть">
+          ×
+        </button>
+      </header>
+      <div className="modal-body">{children}</div>
     </dialog>
   );
 }
