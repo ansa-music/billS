@@ -103,8 +103,16 @@ jobs:
           Подробная инструкция: https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/docs/MINIPC_RU.md
           Контрольная сумма — в файле \`TS-minipc-${V}.iso.sha256\`.
           EOF
-          gh release create "$GITHUB_REF_NAME" \
-            "dist/minipc/TS-minipc-${V}.iso" "dist/minipc/TS-minipc-${V}.iso.sha256" \
-            --title "TS для мини-ПК ${V}" \
-            --notes-file "$RUNNER_TEMP/notes.md" \
-            --verify-tag
+          # The release may already exist when it was created by hand on GitHub (Releases → new tag):
+          # then the files and notes are added to it instead of failing.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" \
+              "dist/minipc/TS-minipc-${V}.iso" "dist/minipc/TS-minipc-${V}.iso.sha256" --clobber
+            gh release edit "$GITHUB_REF_NAME" --title "TS для мини-ПК ${V}" --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              "dist/minipc/TS-minipc-${V}.iso" "dist/minipc/TS-minipc-${V}.iso.sha256" \
+              --title "TS для мини-ПК ${V}" \
+              --notes-file "$RUNNER_TEMP/notes.md" \
+              --verify-tag
+          fi
