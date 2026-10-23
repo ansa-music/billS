@@ -44,6 +44,12 @@ const PATHS = {
   platform: 'M2 12a10 10 0 1 0 20 0 10 10 0 0 0-20 0zM2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z',
   download: 'M12 3v12M7 10l5 5 5-5M4 17v3h16v-3',
   logout:'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
+  pos: 'M4 10h16v10H4zM7 10V4h10v6M8 14h2M12 14h2M16 14h0M8 17h8',
+  cup: 'M5 8h12v6a5 5 0 0 1-5 5h-2a5 5 0 0 1-5-5zM17 10h1.5a2.5 2.5 0 0 1 0 5H17M8 2v3M12 2v3M5 22h12',
+  tv: 'M3 5h18v12H3zM8 21h8M12 17v4',
+  volume: 'M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14',
+  mute: 'M11 5 6 9H2v6h4l5 4zM22 9l-6 6M16 9l6 6',
+  back: 'M15 18l-6-6 6-6',
 } as const;
 
 export type IconName = keyof typeof PATHS;

@@ -1,4 +1,5 @@
 import type { DiscountKind, PaymentMethod } from './billing.ts';
+import type { ProductOptionGroup } from './cafe.ts';
 import type { SyncStatus } from './cloud.ts';
 import type { Minor } from './money.ts';
 import type { PauseSpan } from './pause.ts';
@@ -503,6 +504,8 @@ export interface ProductView {
   /** null = stock is not tracked. */
   stock: number | null;
   sortOrder: number;
+  /** Option groups (size, milk, syrup — cafe.ts); empty for a plain product. */
+  options: ProductOptionGroup[];
 }
 
 /** GET /api/bar/catalog — inactive rows included (the admin page shows them). */
@@ -527,6 +530,8 @@ export interface CreateProductRequest {
   price: Minor;
   /** null or omitted = not tracked. */
   stock?: number | null;
+  /** Checked by validateOptionGroups (422 OPTIONS_INVALID); omitted = none. */
+  options?: ProductOptionGroup[];
 }
 
 export interface UpdateProductRequest {
@@ -536,6 +541,8 @@ export interface UpdateProductRequest {
   stock?: number | null;
   sortOrder?: number;
   isActive?: boolean;
+  /** Replaces all groups; [] removes them. Orders already taken keep their snapshot. */
+  options?: ProductOptionGroup[];
 }
 
 /** OPEN — not paid yet (maybe already on a check); CLOSED — its check is paid; CANCELLED — with a reason. */
@@ -550,6 +557,8 @@ export interface OrderItemView {
   qty: number;
   /** price × qty. */
   amount: Minor;
+  /** Chosen options as names (snapshot, also part of `title`); [] for a plain product. */
+  optionNames: string[];
 }
 
 export interface OrderView {
@@ -573,7 +582,8 @@ export interface OrderView {
 
 /** POST /api/sessions/:sessionId/orders (201 → OrderView). The game must be ACTIVE or AWAITING_PAYMENT. */
 export interface CreateOrderRequest {
-  items: Array<{ productId: string; qty: number }>;
+  /** `options` — chosen choice ids as for counter lines (priceLine); a product may repeat with other options. */
+  items: Array<{ productId: string; qty: number; options?: string[] }>;
   note?: string;
 }
 

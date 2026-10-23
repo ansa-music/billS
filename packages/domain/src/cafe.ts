@@ -1,5 +1,6 @@
 import type { CheckView, OrderStatus, PayRequest, PayResponse } from './api.ts';
 import type { Minor } from './money.ts';
+import { ORDER_MAX_LINES, ORDER_MAX_QTY } from './orders.ts';
 
 /**
  * Coffee shop mode: the same HUB, money, shifts and reports as a billiard club,
@@ -187,6 +188,36 @@ export const COUNTER_STAGE_LABEL: Record<CounterStage, string> = {
 export const COUNTER_NUMBER_MAX = 999;
 export const GUEST_NAME_MAX = 30;
 
+/** The club's working day starts at this local hour: an order at 01:30 belongs to the day before. */
+export const WORKDAY_START_HOUR = 6;
+
+const dayFormatters = new Map<string, Intl.DateTimeFormat>();
+
+/**
+ * The working day an instant belongs to, YYYY-MM-DD in the club's time zone, the day
+ * starting at WORKDAY_START_HOUR. Counter numbers restart with it.
+ */
+export function workingDay(at: number, timeZone: string): string {
+  let f = dayFormatters.get(timeZone);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      hourCycle: 'h23',
+    });
+    dayFormatters.set(timeZone, f);
+  }
+  const p: Record<string, number> = {};
+  for (const part of f.formatToParts(new Date(at))) p[part.type] = Number(part.value);
+  // Before the start hour it is still yesterday's working day: step back on the calendar.
+  const d = new Date(Date.UTC(p.year!, p.month! - 1, p.day! - (p.hour! < WORKDAY_START_HOUR ? 1 : 0)));
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
 /** The next order number after `last` (null = first of the day). */
 export function nextCounterNumber(last: number | null | undefined): number {
   if (!last || !Number.isInteger(last) || last < 1 || last >= COUNTER_NUMBER_MAX) return 1;
@@ -219,6 +250,37 @@ export interface CounterLineInput {
   qty: number;
   /** Chosen option choice ids (see priceLine). */
   options?: string[];
+}
+
+/**
+ * Problems with the lines of an order as a screen sends them (counter orders and
+ * orders on a game alike); empty = fine. Unlike validateOrderItems a product may
+ * repeat with different options (one cappuccino S, one L); the very same product
+ * with the same options is one line with a larger quantity.
+ */
+export function validateCounterLines(items: ReadonlyArray<CounterLineInput> | null | undefined): string[] {
+  if (!Array.isArray(items) || items.length === 0) return ['В заказе нет позиций'];
+  const errors: string[] = [];
+  if (items.length > ORDER_MAX_LINES) errors.push(`Не больше ${ORDER_MAX_LINES} позиций в одном заказе`);
+  const seen = new Set<string>();
+  items.forEach((it, i) => {
+    const n = i + 1;
+    if (!it || typeof it.productId !== 'string' || it.productId.length === 0) {
+      errors.push(`Позиция ${n}: не указан товар`);
+      return;
+    }
+    if (it.options !== undefined && (!Array.isArray(it.options) || it.options.some((o) => typeof o !== 'string'))) {
+      errors.push(`Позиция ${n}: неверный список добавок`);
+      return;
+    }
+    const key = `${it.productId}\n${[...(it.options ?? [])].sort().join('\n')}`;
+    if (seen.has(key)) errors.push(`Позиция ${n}: товар повторяется — увеличьте количество`);
+    seen.add(key);
+    if (!Number.isInteger(it.qty) || it.qty < 1 || it.qty > ORDER_MAX_QTY) {
+      errors.push(`Позиция ${n}: количество должно быть от 1 до ${ORDER_MAX_QTY}`);
+    }
+  });
+  return errors;
 }
 
 /** POST /api/counter/orders */
@@ -277,6 +339,15 @@ export interface CounterOrdersView {
 /** POST /api/counter/orders/:id/stage */
 export interface CounterStageRequest {
   stage: CounterStage;
+}
+
+/**
+ * POST /api/counter/orders/:id/cancel — reason of at least CANCEL_REASON_MIN characters.
+ * An unpaid order: its check is voided (or loses the lines), stock comes back. A paid
+ * one is refused (409 ORDER_PAID) until the money is refunded in «Счета».
+ */
+export interface CounterCancelRequest {
+  reason: string;
 }
 
 /** GET /api/counter/board — public, numbers only: for the guest screen. */

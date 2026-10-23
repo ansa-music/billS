@@ -93,7 +93,7 @@ function notifyUnauthorized(sentWith: string | null): void {
 }
 
 /** crypto.randomUUID needs a secure context; tablets reach the HUB over plain http on the LAN. */
-function newKey(): string {
+export function newKey(): string {
   if (typeof crypto.randomUUID === 'function' && window.isSecureContext) return crypto.randomUUID();
   const b = crypto.getRandomValues(new Uint8Array(16));
   b[6] = (b[6]! & 0x0f) | 0x40;
@@ -148,8 +148,15 @@ export async function fetchState(): Promise<HubState> {
  * The session token names the actor on the HUB; `actor` is sent as X-Actor
  * only for logs and the test server (the HUB ignores it otherwise).
  */
-export async function command<T>(path: string, actor: string, body: object = {}, method = 'POST'): Promise<T> {
-  const key = newKey();
+export async function command<T>(
+  path: string,
+  actor: string,
+  body: object = {},
+  method = 'POST',
+  /** A key kept by the caller: a screen that lets the person retry by hand (the counter) reuses it. */
+  idempotencyKey?: string,
+): Promise<T> {
+  const key = idempotencyKey ?? newKey();
   const token = authToken;
   let lastError: Error = new HubRequestError(0, 'OFFLINE', 'Нет связи с HUB');
   for (let attempt = 0; attempt < 3; attempt++) {

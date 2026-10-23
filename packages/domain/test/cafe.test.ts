@@ -2,13 +2,17 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CafeError,
+  can,
   canMoveStage,
+  decide,
   defaultChoices,
   nextCounterNumber,
   nextStage,
   normalizeClubSettings,
   priceLine,
+  validateCounterLines,
   validateOptionGroups,
+  workingDay,
 } from '../src/index.ts';
 import type { ProductOptionGroup } from '../src/index.ts';
 
@@ -117,4 +121,46 @@ test('club settings: business type defaults to billiards, cafe is kept, garbage 
   assert.equal(normalizeClubSettings({}).business.type, 'billiards');
   assert.equal(normalizeClubSettings({ business: { type: 'cafe' } }).business.type, 'cafe');
   assert.equal(normalizeClubSettings({ business: { type: 'bar' } }).business.type, 'billiards');
+});
+
+test('workingDay: the club day starts at 06:00 club time', () => {
+  // Almaty is UTC+5: 2026-10-13 05:59 local still belongs to the 12th, 06:00 starts the 13th.
+  assert.equal(workingDay(Date.UTC(2026, 9, 12, 7, 0), 'Asia/Almaty'), '2026-10-12');
+  assert.equal(workingDay(Date.UTC(2026, 9, 13, 0, 59), 'Asia/Almaty'), '2026-10-12');
+  assert.equal(workingDay(Date.UTC(2026, 9, 13, 1, 0), 'Asia/Almaty'), '2026-10-13');
+  // Month and year boundaries step back on the calendar.
+  assert.equal(workingDay(Date.UTC(2027, 0, 1, 0, 0), 'Asia/Almaty'), '2026-12-31');
+});
+
+test('validateCounterLines: the same product may repeat with other options, not with the same ones', () => {
+  assert.deepEqual(
+    validateCounterLines([
+      { productId: 'cap', qty: 1, options: ['s'] },
+      { productId: 'cap', qty: 2, options: ['l', 'oat'] },
+      { productId: 'croissant', qty: 1 },
+    ]),
+    [],
+  );
+  assert.ok(
+    validateCounterLines([
+      { productId: 'cap', qty: 1, options: ['oat', 'l'] },
+      { productId: 'cap', qty: 1, options: ['l', 'oat'] },
+    ])[0]!.includes('повторяется'),
+  );
+  assert.deepEqual(validateCounterLines([]), ['В заказе нет позиций']);
+  assert.ok(validateCounterLines([{ productId: 'cap', qty: 0 }])[0]!.includes('количество'));
+  assert.ok(validateCounterLines([{ productId: 'cap', qty: 1, options: [1 as never] }])[0]!.includes('добавок'));
+});
+
+test('counter rights: cashier and barista take orders and move stages; a waiter does not', () => {
+  for (const role of ['cashier', 'bartender', 'senior', 'admin', 'manager'] as const) {
+    assert.ok(can(role, 'counter.take'), role);
+    assert.ok(can(role, 'counter.stage'), role);
+  }
+  assert.ok(!can('waiter', 'counter.take'));
+  assert.ok(!can('bartender', 'payment.take'));
+  const ro = { readOnly: true, modules: { bar: true, cloud: true, hardware: true } };
+  assert.equal(decide('bartender', 'counter.take', ro), 'read_only');
+  assert.equal(decide('bartender', 'counter.stage', ro), 'ok');
+  assert.equal(decide('cashier', 'counter.take', { readOnly: false, modules: { bar: false, cloud: true, hardware: true } }), 'module_off');
 });

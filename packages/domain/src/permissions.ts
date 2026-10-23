@@ -132,6 +132,8 @@ const SENIOR: readonly Role[] = [...M, 'admin', 'senior'];
 const ADMIN: readonly Role[] = [...M, 'admin'];
 const BAR: readonly Role[] = [...M, 'admin', 'senior', 'cashier', 'bartender', 'waiter'];
 const BAR_EDIT: readonly Role[] = [...M, 'admin', 'bartender'];
+/** The counter of a coffee shop: the cashier and the barista take orders, payment included. */
+const COUNTER: readonly Role[] = [...CASH, 'bartender'];
 
 /**
  * action → roles allowed to do it. The platform roles (owner, tech) may do
@@ -154,6 +156,9 @@ export const ACTIONS = {
   'order.cancel': [...CASH, 'bartender'],
   'catalog.view': STAFF,
   'catalog.edit': BAR_EDIT,
+  // Coffee shop counter (cafe.ts)
+  'counter.take': COUNTER, // take an order at the counter and its payment (POST /api/counter/orders)
+  'counter.stage': COUNTER, // move an order NEW → PREPARING → READY → ISSUED
   // Club settings
   'settings.view': ADMIN,
   'club.edit': M, // name, time zone, currency
@@ -232,6 +237,8 @@ export const ACTION_MODULE: Partial<Record<Action, LicenseModule>> = {
   'order.cancel': 'bar',
   'catalog.view': 'bar',
   'catalog.edit': 'bar',
+  'counter.take': 'bar',
+  'counter.stage': 'bar',
   'equipment.view': 'hardware',
   'lamp.blink': 'hardware',
   'power.edit': 'hardware',
@@ -253,6 +260,7 @@ export const READ_ONLY_ACTIONS: ReadonlySet<Action> = new Set<Action>([
   'table.stop',
   'alert.resolve',
   'catalog.view',
+  'counter.stage',
   'settings.view',
   'staff.view',
   'audit.view',
