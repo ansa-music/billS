@@ -1,3 +1,6 @@
+import type { BusinessType } from './cafe.ts';
+import { BUSINESS_TYPES } from './cafe.ts';
+
 /**
  * Club settings beyond name, time zone and currency: how the hall screen looks
  * and the club's house rules. Stored as JSON on the club row; always read
@@ -38,9 +41,15 @@ export interface RuleSettings {
   defaultRoundingMinor: number;
 }
 
+export interface BusinessSettings {
+  /** billiards — tables, time and lamps; cafe — counter orders, barista and guest screens. */
+  type: BusinessType;
+}
+
 export interface ClubSettings {
   display: DisplaySettings;
   rules: RuleSettings;
+  business: BusinessSettings;
 }
 
 export const DEFAULT_CLUB_SETTINGS: ClubSettings = {
@@ -52,12 +61,14 @@ export const DEFAULT_CLUB_SETTINGS: ClubSettings = {
     defaultStepMinutes: 1,
     defaultRoundingMinor: 1000,
   },
+  business: { type: 'billiards' },
 };
 
 /** What a screen may send: any subset; null clears a nullable text. */
 export interface ClubSettingsPatch {
   display?: Partial<DisplaySettings>;
   rules?: Partial<RuleSettings>;
+  business?: Partial<BusinessSettings>;
 }
 
 function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
@@ -94,6 +105,7 @@ export function normalizeClubSettings(input: unknown, base: ClubSettings = DEFAU
   const src = obj(input);
   const d = obj(src.display);
   const r = obj(src.rules);
+  const b = obj(src.business);
   const has = (o: Record<string, unknown>, k: string) => Object.hasOwn(o, k);
   return {
     display: {
@@ -110,6 +122,7 @@ export function normalizeClubSettings(input: unknown, base: ClubSettings = DEFAU
       defaultStepMinutes: int(r.defaultStepMinutes, base.rules.defaultStepMinutes, 1, 60),
       defaultRoundingMinor: int(r.defaultRoundingMinor, base.rules.defaultRoundingMinor, 1, 1_000_000),
     },
+    business: { type: pick(b.type, BUSINESS_TYPES, base.business.type) },
   };
 }
 

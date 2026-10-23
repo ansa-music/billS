@@ -20,3 +20,4 @@ export type * from './cloud.ts';
 export * from './push.ts';
 export * from './tls.ts';
 export * from './hub-setup.ts';
+export * from './cafe.ts';
