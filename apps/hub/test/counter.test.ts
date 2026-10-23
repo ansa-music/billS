@@ -374,6 +374,7 @@ test('board and list: making (oldest first), ready, issued gone from the board; 
   ]);
   assert.deepEqual(board.body.ready, [{ number: 3, guestName: 'Борис' }]);
   assert.equal(board.body.now, h.clock.now());
+  assert.deepEqual([board.body.title, board.body.logoUrl, board.body.timezone], ['Кофейня «Демо»', null, 'Asia/Almaty']);
 
   const list = (await get<CounterOrdersView>(hub, '/api/counter/orders')).body.orders;
   assert.deepEqual(
@@ -396,7 +397,7 @@ test('the board is public; the order list and taking orders need a key', async (
   const hub = await cafe(h, { secure: true });
   const board = await hub.app.inject({ method: 'GET', url: '/api/counter/board' });
   assert.equal(board.statusCode, 200);
-  assert.deepEqual(Object.keys(board.json()).sort(), ['now', 'preparing', 'ready']);
+  assert.deepEqual(Object.keys(board.json()).sort(), ['logoUrl', 'now', 'preparing', 'ready', 'timezone', 'title']);
   assert.equal((await hub.app.inject({ method: 'GET', url: '/api/counter/orders' })).statusCode, 401);
   const res = await hub.app.inject({
     method: 'POST',

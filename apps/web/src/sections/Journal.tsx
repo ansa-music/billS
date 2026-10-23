@@ -97,10 +97,18 @@ function describe(e: JournalEntry, state: HubState): Described {
     case 'order.created': {
       const items = Array.isArray(d.items) ? (d.items as Array<{ title?: unknown; qty?: unknown }>) : [];
       const list = items.map((i) => `${str(i.title)} ×${num(i.qty)}`).join(', ');
-      return { title: `${table}: заказ из бара`, detail: `${list}${list ? ' · ' : ''}${money(d.total)}`, icon: 'orders', cat: 'bar' };
+      // Counter orders (coffee shop) have a number instead of a table.
+      const who = d.counterNumber !== undefined && d.counterNumber !== null ? `Заказ ${num(d.counterNumber)}` : `${table}: заказ из бара`;
+      return { title: who, detail: `${list}${list ? ' · ' : ''}${money(d.total)}`, icon: 'orders', cat: 'bar' };
     }
-    case 'order.cancelled':
-      return { title: `${table}: заказ отменён`, detail: `${money(d.total)}${str(d.reason) ? ` · ${str(d.reason)}` : ''}`, icon: 'close', cat: 'bar' };
+    case 'order.cancelled': {
+      const who = d.counterNumber !== undefined && d.counterNumber !== null ? `Заказ ${num(d.counterNumber)}` : `${table}: заказ`;
+      return { title: `${who} отменён`, detail: `${money(d.total)}${str(d.reason) ? ` · ${str(d.reason)}` : ''}`, icon: 'close', cat: 'bar' };
+    }
+    case 'counter.stage': {
+      const stage: Record<string, string> = { NEW: 'снова новый', PREPARING: 'готовится', READY: 'готов', ISSUED: 'выдан' };
+      return { title: `Заказ ${num(d.counterNumber ?? d.number)}: ${stage[str(d.stage ?? d.to)] ?? str(d.stage ?? d.to)}`, icon: 'orders', cat: 'bar' };
+    }
     case 'product.created':
       return { title: `Меню: добавлен товар «${str(d.name)}»`, detail: d.price !== undefined ? money(d.price) : undefined, icon: 'bar', cat: 'bar' };
     case 'product.updated':

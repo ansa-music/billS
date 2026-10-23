@@ -33,7 +33,7 @@ import { auditLines, insertOrderLines, parseOptionNames, priceOrderLines, return
 import { addDays } from './reports.ts';
 import { requireOpenShift } from './shifts.ts';
 import type { OrderRow } from './views.ts';
-import { loadCheck, orderItemsOf } from './views.ts';
+import { loadCheck, loadSettings, orderItemsOf } from './views.ts';
 
 export interface CounterServiceDeps {
   db: Db;
@@ -191,10 +191,14 @@ export class CounterService {
       addDays(day, -1),
     );
     const entry = (r: (typeof rows)[number]) => ({ number: r.counter_number!, guestName: r.guest_name });
+    const display = loadSettings(db, club.id).display;
     return {
       preparing: rows.filter((r) => r.stage !== 'READY').map(entry),
       ready: rows.filter((r) => r.stage === 'READY').map(entry),
       now,
+      title: display.title ?? club.name,
+      logoUrl: display.logoUrl,
+      timezone: club.timezone,
     };
   }
 
@@ -298,8 +302,11 @@ export class CounterService {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  #club(): { id: string; timezone: string } {
-    const club = one<{ id: string; timezone: string }>(this.#db, 'SELECT id, timezone FROM clubs ORDER BY created_at LIMIT 1');
+  #club(): { id: string; name: string; timezone: string } {
+    const club = one<{ id: string; name: string; timezone: string }>(
+      this.#db,
+      'SELECT id, name, timezone FROM clubs ORDER BY created_at LIMIT 1',
+    );
     if (!club) throw new HubError(503, 'CLUB_NOT_CONFIGURED', 'Клуб не настроен');
     return club;
   }

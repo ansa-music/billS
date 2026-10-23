@@ -357,4 +357,10 @@ export interface CounterBoardView {
   ready: Array<{ number: number; guestName: string | null }>;
   /** HUB time, for the screen's clock. */
   now: number;
+  /** Shown on top: settings.display.title, else the club name. */
+  title?: string | null;
+  /** settings.display.logoUrl; null = none. */
+  logoUrl?: string | null;
+  /** Club time zone, for the clock on the screen. */
+  timezone?: string;
 }
