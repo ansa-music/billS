@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Action } from '@bills/domain';
-import { canNow, decide, licenseGateOf } from '@bills/domain';
+import { ACTION_MODULE, canNow, decide, licenseGateOf } from '@bills/domain';
 import { LicenseBanner, blockedReason } from './license.tsx';
 import type { ReactNode } from 'react';
 import { setManualMode } from './api.ts';
@@ -38,6 +38,9 @@ import { BaristaPage } from './cafe/Barista.tsx';
 import { BoardPage } from './cafe/Board.tsx';
 import { CafeReports } from './cafe/Reports.tsx';
 import { PosPage } from './cafe/Pos.tsx';
+import { ConnectPage } from './onboarding/Connect.tsx';
+import { CafeNeedsCounterModule } from './onboarding/CafeLicense.tsx';
+import { useSetupGate } from './onboarding/setup.ts';
 
 /** Route path → page. The table of routes (titles, icons, permissions) lives in router.tsx. */
 const PAGES: Record<string, (query: URLSearchParams, business: BusinessType) => ReactNode> = {
@@ -75,12 +78,19 @@ export function App() {
   const actor = staff?.name ?? 'unknown';
   const commands = useHallCommands(actor, hub.refresh, setToast);
   useWakeLock();
+  // A fresh club HUB, not connected to the cabinet yet: «Подключите кассу к кабинету» comes before the login.
+  const setup = useSetupGate(!staff && path !== '/board');
 
   // Old addresses from bookmarks and notes.
   useEffect(() => {
     const to = REDIRECTS[path];
     if (to) navigate(to, Object.fromEntries(query));
   }, [path, query]);
+
+  // A connection link (#code=…) opened on a HUB that is already connected: nothing to connect, go on.
+  useEffect(() => {
+    if (setup.gate === 'login' && path.startsWith('/code=')) navigate(staff ? '/' : '/login');
+  }, [setup.gate, path, staff]);
 
   const state = hub.state;
   const display = state?.settings.display;
@@ -138,8 +148,32 @@ export function App() {
 
   // Without a session the HUB answers 401 to /api/state, so the login page comes
   // before the boot screen; LoginPage signs in through useAuth and stores the token.
+  if (!staff && setup.gate === 'checking') {
+    return (
+      <main className="boot">
+        <BrandMark className="boot-mark" />
+        <p>Загрузка…</p>
+      </main>
+    );
+  }
+  if (!staff && setup.gate === 'connect') {
+    return (
+      <div className="login-shell">
+        <ConnectPage
+          onDone={() => {
+            setup.dismiss();
+            navigate('/login');
+          }}
+          onSkip={() => {
+            setup.dismiss();
+            navigate('/login');
+          }}
+        />
+      </div>
+    );
+  }
   if (path === '/login' || !staff) {
-    const next = path === '/login' ? (query.get('next') ?? '/') : path;
+    const next = path === '/login' ? (query.get('next') ?? '/') : path.startsWith('/code=') ? '/' : path;
     return (
       <div className="login-shell">
         <LoginPage next={next} />
@@ -209,6 +243,14 @@ export function App() {
         </p>
       </Page>
     );
+  } else if (
+    route.action &&
+    business === 'cafe' &&
+    ACTION_MODULE[route.action] === 'bar' &&
+    decide(roles, route.action, licenseGateOf(license)) === 'module_off'
+  ) {
+    // A coffee shop is its counter: say once and plainly why it is closed instead of «Нет доступа».
+    content = <CafeNeedsCounterModule canSeeLicense={can('license.view')} />;
   } else if (route.action && !pageAllowed(route.action)) {
     content = (
       <Page

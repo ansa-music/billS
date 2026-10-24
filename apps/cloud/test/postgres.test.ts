@@ -101,9 +101,9 @@ test('a failing transaction rolls back and still releases the client', async () 
 test('migrations are portable SQL and migrate() applies every statement through the fake client', async () => {
   const forbidden = /\b(AUTOINCREMENT|SERIAL|PRAGMA|WITHOUT ROWID|ILIKE|datetime\(|now\(|IF EXISTS|RENAME COLUMN|DROP COLUMN)|::/i;
   // Statement shapes both engines run unchanged.
-  const allowed = /^(CREATE (TABLE|INDEX|UNIQUE INDEX) IF NOT EXISTS |ALTER TABLE \w+ (ADD COLUMN \w+ (BIGINT|INTEGER|TEXT)( NOT NULL DEFAULT \d+)?|RENAME TO \w+)$|INSERT INTO \w+ \(|DROP TABLE \w+$)/;
+  const allowed = /^(CREATE (TABLE|INDEX|UNIQUE INDEX) IF NOT EXISTS |ALTER TABLE \w+ (ADD COLUMN \w+ (BIGINT|INTEGER|TEXT)( NOT NULL DEFAULT (\d+|'[a-z_]+'))?|RENAME TO \w+)$|INSERT INTO \w+ \(|DROP TABLE \w+$)/;
   const migrations = listMigrations();
-  assert.deepEqual(migrations.map((m) => [m.version, m.file]), [[1, '001_init.sql'], [2, '002_money.sql'], [3, '003_push.sql'], [4, '004_roles_license.sql']]);
+  assert.deepEqual(migrations.map((m) => [m.version, m.file]), [[1, '001_init.sql'], [2, '002_money.sql'], [3, '003_push.sql'], [4, '004_roles_license.sql'], [5, '005_business_type.sql']]);
   for (const m of migrations) {
     assert.doesNotMatch(m.sql, forbidden, m.file);
     for (const s of splitStatements(m.sql)) assert.match(s, allowed, `${m.file}: ${s.slice(0, 60)}`);

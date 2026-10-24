@@ -6,6 +6,8 @@ import { fetchJson } from '../../api.ts';
 import { hrefFor } from '../../router.tsx';
 import { Confirm, Empty, Field, Loading, Modal, formatDate, formatDateTime } from '../../ui.tsx';
 import { useCommands } from '../../useHub.tsx';
+import { printForm } from '../../cash/print/printForm.tsx';
+import { QrCode } from '../../QrCode.tsx';
 
 const EXPIRY_OPTIONS: Array<{ value: string; label: string }> = [
   { value: '', label: 'Бессрочно' },
@@ -128,9 +130,9 @@ export function KeysModal({
   const issuing = canIssue && staff.isActive && !issueBlocked;
 
   return (
-    <Modal open title={`Ключи доступа — ${staff.name}`} onClose={onClose}>
+    <Modal open title={`Ключ входа — ${staff.name}`} onClose={onClose}>
       <div className="keys-modal">
-        {issued && <IssuedKey issued={issued} onDone={() => setIssued(null)} />}
+        {issued && <IssuedKey issued={issued} name={staff.name} onDone={() => setIssued(null)} />}
 
         {loadError && <p className="field-error">{loadError}</p>}
         {!sorted && !loadError && <Loading />}
@@ -298,7 +300,7 @@ function IssueForm({
       <h3>{title}</h3>
       {replacing && <p className="hint">Старый ключ отзовётся сразу после выдачи нового.</p>}
       {long ? (
-        <p className="hint">Управляющий входит длинным ключом вида MGR-XXXX-XXXX-XXXX-XXXX — он работает во всех филиалах.</p>
+        <p className="hint">Управляющему выдаётся длинный ключ — он работает во всех филиалах.</p>
       ) : (
         <>
           <p className="hint">Простой ключ — 6 цифр, работает только в этом филиале. Удобно вводить на планшете.</p>
@@ -359,27 +361,77 @@ function IssueForm({
   );
 }
 
-/** The one-time reveal of a new key, with copy buttons for the key and a login link. */
-function IssuedKey({ issued, onDone }: { issued: IssueKeyResponse; onDone: () => void }) {
+/**
+ * The one-time reveal of a new key: the digits big, «Скопировать», a QR code
+ * that opens the login page with the key filled in, and a printed slip for
+ * the receipt printer. Also shown right after a person is added (Staff.tsx).
+ */
+export function IssuedKey({
+  issued,
+  name,
+  onDone,
+  doneLabel = 'Скрыть',
+  title = 'Новый ключ выдан',
+}: {
+  issued: IssueKeyResponse;
+  /** Whose key it is: printed on the slip. */
+  name?: string;
+  onDone: () => void;
+  doneLabel?: string;
+  title?: string;
+}) {
   const link = loginLinkFor(issued.key);
   const short = isShortKeyShape(issued.key);
   return (
     <section className="key-issued" aria-live="polite">
-      <h3>Новый ключ выдан</h3>
+      <h3>{title}</h3>
       {short && (
         <p className="short-key-reveal" aria-label={`Ключ ${issued.key.split('').join(' ')}`}>
           {spacedShortKey(issued.key)}
         </p>
       )}
-      <CopyBox value={issued.key} label="Ключ доступа" big={!short} />
-      <p className="key-warning">Ключ показывается один раз. Передайте его сотруднику лично.</p>
-      <CopyBox value={link} label="Ссылка для входа (ключ уже подставлен)" />
+      <CopyBox value={issued.key} label={short ? 'Ключ входа — 6 цифр' : 'Ключ входа'} big={!short} />
+      <p className="key-warning">Ключ показывается один раз. Передайте его сотруднику лично или распечатайте.</p>
+      <div className="key-qr">
+        <QrCode value={link} size={148} label="QR-код для входа" />
+        <p className="hint">
+          Сотрудник наводит камеру телефона или планшета на этот код — откроется вход в кассу с уже подставленным ключом.
+        </p>
+      </div>
+      <details className="support-details">
+        <summary>Ссылка для входа</summary>
+        <CopyBox value={link} label="Ссылка (ключ уже подставлен)" />
+      </details>
       <div className="form-actions">
-        <button type="button" className="btn btn-small" onClick={onDone}>
-          Скрыть
+        <button type="button" className="btn" onClick={() => printKeySlip(issued.key, link, name)}>
+          Распечатать
+        </button>
+        <button type="button" className="btn btn-primary" onClick={onDone}>
+          {doneLabel}
         </button>
       </div>
     </section>
+  );
+}
+
+/** A slip for the receipt printer: name, the key, the QR code to log in. */
+function printKeySlip(key: string, link: string, name?: string) {
+  printForm(
+    <div className="pf-center">
+      <div className="pf-head">
+        <div className="pf-title">Ключ входа в кассу TS</div>
+        {name && <div className="pf-club">{name}</div>}
+      </div>
+      <div className="pf-sep" />
+      <div className="pf-title" style={{ fontSize: '2.2em', letterSpacing: '0.1em' }}>
+        {spacedShortKey(key)}
+      </div>
+      <div className="pf-sep" />
+      <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <QrCode value={link} size={150} label="QR-код для входа" />
+      </div>
+      <div className="pf-notice">Никому не показывайте этот ключ</div>
+    </div>,
   );
 }
 

@@ -1,6 +1,7 @@
 import type { TableKind } from './api.ts';
 import type { KeyKind } from './auth.ts';
 import type { PaymentMethod } from './billing.ts';
+import type { BusinessType } from './cafe.ts';
 import type { LicensePayload, LicenseStatus, LicenseTerm } from './license.ts';
 import type { LicenseModule, PlatformRole, Role } from './permissions.ts';
 import type { Minor } from './money.ts';
@@ -117,7 +118,15 @@ export interface SyncSnapshotResponse {
 /** DOWN: GET /sync/settings?since=<version>. */
 export type { PaymentMethod };
 
-export type SyncSettingsResponse = { changed: false; version: number } | ({ changed: true } & ClubSnapshot);
+export type SyncSettingsResponse = ({ changed: false; version: number } | ({ changed: true } & ClubSnapshot)) & {
+  /**
+   * What the branch is (set at sign-up in the cabinet, changed by the manager there): the HUB
+   * switches its club setting `business.type` to it. In every answer, `changed: false` too —
+   * the HUB's connection check (GET /sync/settings with a far-future `since`) sees it at once.
+   * Absent from an older cloud: the HUB keeps its own setting then.
+   */
+  business?: { type: BusinessType };
+};
 
 /** Reported by the HUB in GET /api/state as `sync`. */
 export interface SyncStatus {
@@ -383,6 +392,11 @@ export interface SyncAccessResponse {
   clubId: string;
   people: SyncPerson[];
   keys: SyncKey[];
+  /**
+   * Same as SyncSettingsResponse.business. A change of the business type in the cabinet bumps
+   * the branch's access version, so the HUB learns it here without a settings version of its own.
+   */
+  business?: { type: BusinessType };
 }
 
 export interface SyncPerson {
@@ -542,6 +556,8 @@ export interface BranchView {
   currency: string;
   createdAt: number;
   hubs: Array<{ id: string; name: string; lastSeenAt: number | null }>;
+  /** billiards / cafe; absent from an older cloud (= billiards). */
+  businessType?: BusinessType;
 }
 
 export interface CreateBranchRequest {
@@ -601,4 +617,78 @@ export interface IssueCloudKeyResponse {
   /** Shown once. */
   key: string;
   view: CloudKeyView;
+}
+
+// ---------------------------------------------------------------------------
+// Self sign-up and the first steps (Supabase Edge Functions `signup` and `owner`)
+// ---------------------------------------------------------------------------
+//
+//   POST /functions/v1/signup                        SignupRequest → 201 SignupResponse (no JWT)
+//        errors {error:{code,message}}: 400 BAD_REQUEST, 422 INVALID_EMAIL / WEAK_PASSWORD / NAME_REQUIRED /
+//        INVALID_BUSINESS_TYPE / INVALID_TIMEZONE, 409 EMAIL_TAKEN, 429 RATE_LIMITED, 403 SIGNUP_DISABLED,
+//        503 AUTH_ADMIN_OFF (functions without SUPABASE_SERVICE_ROLE_KEY)
+//   POST /owner/clubs/:clubId/hub-code               → HubCodeResponse (new HUB key: the old one stops working)
+//   POST /owner/clubs/:clubId/business               SetBusinessTypeRequest → BranchView
+//   GET  /owner/onboarding                           → OnboardingResponse
+
+export interface SignupRequest {
+  email: string;
+  /** At least 8 characters. */
+  password: string;
+  /** The venue: the company, its first branch and the licence get this name. */
+  venueName: string;
+  businessType: BusinessType;
+  /** IANA time zone of the venue; Asia/Almaty when empty. */
+  timezone?: string;
+  /** Name of the first staff member (role manager); «Управляющий» when empty. */
+  ownerName?: string;
+}
+
+export interface SignupResponse {
+  ok: true;
+  companyId: string;
+  clubId: string;
+  hubId: string;
+  /** Six-digit key of the first staff member (role manager) for the venue screens; shown once. */
+  managerKey: string;
+  /** Length of the trial licence (14) and its end, ms since epoch. */
+  trialDays: number;
+  trialUntil: number;
+}
+
+export interface HubCodeResponse {
+  hubId: string;
+  /** CLOUD_API_KEY of the HUB; shown once, the previous key stops working. */
+  apiKey: string;
+  /** CLOUD_URL: `${SUPABASE_URL}/functions/v1`. */
+  cloudUrl: string;
+  /** encodeHubSetupCode({ hubId, apiKey, cloudUrl }): `TS1.…`. */
+  code: string;
+}
+
+export interface SetBusinessTypeRequest {
+  type: BusinessType;
+}
+
+export interface OnboardingClub {
+  clubId: string;
+  name: string;
+  businessType: BusinessType;
+  /** The oldest HUB of the branch (the one a connection code is for); null without one. */
+  hubId: string | null;
+  /** A HUB of the branch has reached the cloud at least once. */
+  hubConnected: boolean;
+  lastSeenAt: number | null;
+  /** Active staff of the branch in the cabinet. */
+  staff: number;
+  /** Tariffs the HUB reported (or the manager edited in the cabinet). */
+  tariffs: number;
+  /** Shifts ever opened (as the HUB reported them). */
+  shifts: number;
+  /** Menu items: the cloud keeps no menu yet — always null. */
+  menu: number | null;
+}
+
+export interface OnboardingResponse {
+  clubs: OnboardingClub[];
 }

@@ -5,6 +5,8 @@ import { clubHref, usePoll } from './hooks.ts';
 import { AlertList, Difference, HubBadge, Section, StatTile, gamesLabel, loadingText } from './shared.tsx';
 import { ShiftsTable } from './Shifts.tsx';
 import { LicenseBanner, useCompanyLicense } from './Company.tsx';
+import { zoneLabel } from './cities.ts';
+import { StartCard } from './Start.tsx';
 
 function tablesLabel(n: number): string {
   const mod10 = n % 10;
@@ -15,6 +17,13 @@ function tablesLabel(n: number): string {
       : mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)
         ? 'стола'
         : 'столов';
+  return `${n} ${word}`;
+}
+
+function venuesLabel(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  const word = mod10 === 1 && mod100 !== 11 ? 'заведение' : mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20) ? 'заведения' : 'заведений';
   return `${n} ${word}`;
 }
 
@@ -69,7 +78,7 @@ function ClubCard({ club, now }: { club: ClubSummary; now: number }) {
         <div>
           <h2>{club.name}</h2>
           <p className="muted">
-            {formatClock(now, club.timezone)} · {club.timezone}
+            {formatClock(now, club.timezone)} · {zoneLabel(club.timezone)}
           </p>
         </div>
         <HubBadge hub={club.hub} now={now} />
@@ -93,12 +102,17 @@ function ClubCard({ club, now }: { club: ClubSummary; now: number }) {
   );
 }
 
-export function Overview() {
+export function Overview({ companyId }: { companyId: string }) {
   const { data, error } = usePoll(fetchOverview, 30_000);
   const lic = useCompanyLicense();
 
   if (!data) {
-    return <p className="boot-inline">{loadingText(error, 'обзор')}</p>;
+    return (
+      <>
+        <StartCard companyId={companyId} />
+        <p className="boot-inline">{loadingText(error, 'обзор')}</p>
+      </>
+    );
   }
 
   const now = data.serverNow;
@@ -111,13 +125,14 @@ export function Overview() {
   return (
     <>
       <LicenseBanner license={lic.data ? lic.data.license : undefined} />
-      <section className="totals" aria-label="Итоги по сети">
+      <StartCard companyId={companyId} />
+      <section className="totals" aria-label="Итоги">
         <h2 className="section-title">
           {data.company.name}
-          <span className="muted"> · {data.clubs.length} {data.clubs.length === 1 ? 'клуб' : data.clubs.length < 5 ? 'клуба' : 'клубов'}</span>
+          <span className="muted"> · {venuesLabel(data.clubs.length)}</span>
         </h2>
         {mixedCurrency ? (
-          <p className="hint">Клубы работают в разных валютах — итоги по сети показаны в валюте первого клуба.</p>
+          <p className="hint">Заведения работают в разных валютах — итоги показаны в валюте первого заведения.</p>
         ) : null}
         <div className="stats stats-big">
           <StatTile label="Сегодня" stats={data.totals.today} currency={currency} big />
@@ -126,8 +141,15 @@ export function Overview() {
         </div>
       </section>
 
-      <section className="clubs" aria-label="Клубы">
-        {data.clubs.length === 0 && <p className="empty">В компании пока нет клубов</p>}
+      <section className="clubs" aria-label="Заведения">
+        {data.clubs.length === 0 && (
+          <div className="empty-state">
+            <p className="muted">Заведений пока нет.</p>
+            <a className="btn btn-primary" href="#/company">
+              Добавьте первое заведение
+            </a>
+          </div>
+        )}
         {data.clubs.map((club) => (
           <ClubCard key={club.id} club={club} now={now} />
         ))}
@@ -150,7 +172,7 @@ export function Overview() {
       </Section>
 
       <Section title="Открытые тревоги" aside={<span className="panel-total">{data.alerts.length}</span>}>
-        <AlertList alerts={data.alerts} showClub emptyText="Во всех клубах спокойно — открытых тревог нет" />
+        <AlertList alerts={data.alerts} showClub emptyText="Везде спокойно — открытых тревог нет" />
       </Section>
     </>
   );

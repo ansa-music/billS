@@ -8,6 +8,8 @@ import { randomUUID } from 'node:crypto';
 import type {
   Action,
   BranchView,
+  BusinessType,
+  OnboardingResponse,
   CloudKeyView,
   CloudStaffView,
   CreateBranchResponse,
@@ -16,6 +18,7 @@ import type {
   Role,
 } from '@bills/domain';
 import {
+  BUSINESS_TYPES,
   decide,
   formatShortKey,
   isShortKeyShape,
@@ -28,12 +31,13 @@ import {
   normalizeRoles,
   shortKeyHashInput,
 } from '@bills/domain';
-import { AdminError, checkClubInput, insertClubWithHub } from './admin.ts';
+import { AdminError, checkClubInput, insertClubWithHub, newHubKey } from './admin.ts';
 import { hashApiKey } from './auth.ts';
 import type { SqlDriver } from './db/driver.ts';
 import { CloudError } from './errors.ts';
 import type { LicenseSigner } from './license.ts';
 import { bumpClubAccess, currentLicense, reissueLicense, toLicenseView } from './license.ts';
+import { businessTypeOf } from './settings.ts';
 
 /** The signed-in manager: an `owners` row. */
 export interface ManagerRef {
@@ -48,7 +52,7 @@ const numOrNull = (v: unknown): number | null => (v === null || v === undefined 
 const DAY_MS = 86_400_000;
 
 /** Refuses an action the license does not allow now (expired, blocked, missing → read-only). */
-async function requireLicensed(db: SqlDriver, now: number, companyId: string, action: Action) {
+export async function requireLicensed(db: SqlDriver, now: number, companyId: string, action: Action) {
   const stored = await currentLicense(db, companyId);
   const status = licenseStatus(stored?.payload ?? null, now);
   const decision = decide(['manager'], action, licenseGateOf(status));
@@ -72,11 +76,12 @@ interface ClubRow {
   timezone: string;
   currency: string;
   created_at: number | string;
+  business_type?: string | null;
 }
 
 async function branchViews(db: SqlDriver, companyId: string, clubId?: string): Promise<BranchView[]> {
   const clubs = await db.all<ClubRow>(
-    `SELECT id, name, timezone, currency, created_at FROM clubs WHERE company_id = ?${clubId ? ' AND id = ?' : ''} ORDER BY created_at, id`,
+    `SELECT * FROM clubs WHERE company_id = ?${clubId ? ' AND id = ?' : ''} ORDER BY created_at, id`,
     clubId ? [companyId, clubId] : [companyId],
   );
   const hubs = await db.all<{ id: string; club_id: string; name: string; last_seen_at: number | string | null }>(
@@ -90,6 +95,7 @@ async function branchViews(db: SqlDriver, companyId: string, clubId?: string): P
     currency: c.currency,
     createdAt: Number(c.created_at),
     hubs: hubs.filter((h) => h.club_id === c.id).map((h) => ({ id: h.id, name: h.name, lastSeenAt: numOrNull(h.last_seen_at) })),
+    businessType: businessTypeOf(c),
   }));
 }
 
@@ -129,6 +135,89 @@ export async function createBranch(
     const [branch] = await branchViews(tx, me.companyId, created.clubId);
     return { branch: branch!, hubId: created.hubId, hubApiKey: created.apiKey };
   });
+}
+
+/**
+ * A new API key for the branch's HUB (its oldest one): the connection code is shown again.
+ * The previous key stops working at once, like `new-hub-key` of the CLI.
+ */
+export async function reissueBranchHubKey(db: SqlDriver, now: number, me: ManagerRef, clubId: string): Promise<{ hubId: string; apiKey: string }> {
+  return db.transaction(async (tx) => {
+    await requireBranch(tx, me, clubId);
+    await requireLicensed(tx, now, me.companyId, 'branches.edit');
+    const hubs = await tx.all<{ id: string }>('SELECT id FROM hubs WHERE club_id = ? ORDER BY created_at, id LIMIT 1', [clubId]);
+    if (!hubs[0]) throw new CloudError(404, 'HUB_NOT_FOUND', 'У филиала нет HUB');
+    return { hubId: hubs[0].id, apiKey: await newHubKey(tx, hubs[0].id) };
+  });
+}
+
+export function isBusinessType(v: unknown): v is BusinessType {
+  return typeof v === 'string' && (BUSINESS_TYPES as readonly string[]).includes(v);
+}
+
+/** Billiards or cafe for a branch; its HUB(s) pull it with the access package (GET /sync/access). */
+export async function setBranchBusinessType(db: SqlDriver, now: number, me: ManagerRef, clubId: string, raw: unknown): Promise<BranchView> {
+  const type = isObject(raw) ? raw.type : undefined;
+  if (!isBusinessType(type)) throw new CloudError(422, 'INVALID_BUSINESS_TYPE', 'Выберите тип заведения: бильярдный клуб или кофейня');
+  return db.transaction(async (tx) => {
+    await requireBranch(tx, me, clubId);
+    await requireLicensed(tx, now, me.companyId, 'club.edit');
+    await tx.run('UPDATE clubs SET business_type = ? WHERE id = ?', [type, clubId]);
+    await bumpClubAccess(tx, clubId);
+    const [branch] = await branchViews(tx, me.companyId, clubId);
+    return branch!;
+  });
+}
+
+/** What the «Первые шаги» checklist needs for every branch, in one call. */
+export async function onboarding(db: SqlDriver, me: ManagerRef): Promise<OnboardingResponse> {
+  const clubs = await db.all<{ id: string; name: string; business_type?: string | null }>(
+    'SELECT * FROM clubs WHERE company_id = ? ORDER BY created_at, id',
+    [me.companyId],
+  );
+  if (clubs.length === 0) return { clubs: [] };
+  const ids = clubs.map((c) => c.id);
+  const inList = ids.map(() => '?').join(', ');
+  const hubs = await db.all<{ id: string; club_id: string; last_seen_at: number | string | null }>(
+    `SELECT id, club_id, last_seen_at FROM hubs WHERE club_id IN (${inList}) ORDER BY created_at, id`,
+    ids,
+  );
+  const counts = async (sql: string): Promise<Map<string, number>> =>
+    new Map((await db.all<{ club_id: string; n: number | string }>(sql, ids)).map((r) => [r.club_id, Number(r.n)]));
+  const staff = await counts(`SELECT club_id, COUNT(*) AS n FROM club_staff WHERE club_id IN (${inList}) AND is_active = 1 GROUP BY club_id`);
+  const shifts = await counts(`SELECT club_id, COUNT(*) AS n FROM shifts WHERE club_id IN (${inList}) GROUP BY club_id`);
+  const settings = await db.all<{ club_id: string; tariffs_json: string }>(
+    `SELECT club_id, tariffs_json FROM club_settings WHERE club_id IN (${inList})`,
+    ids,
+  );
+  const tariffs = new Map(
+    settings.map((s) => {
+      try {
+        const list = JSON.parse(s.tariffs_json) as unknown;
+        return [s.club_id, Array.isArray(list) ? list.length : 0] as const;
+      } catch {
+        return [s.club_id, 0] as const;
+      }
+    }),
+  );
+  return {
+    clubs: clubs.map((c) => {
+      const own = hubs.filter((h) => h.club_id === c.id);
+      const seen = own.map((h) => numOrNull(h.last_seen_at)).filter((v): v is number => v !== null);
+      return {
+        clubId: c.id,
+        name: c.name,
+        businessType: businessTypeOf(c),
+        hubId: own[0]?.id ?? null,
+        hubConnected: seen.length > 0,
+        lastSeenAt: seen.length ? Math.max(...seen) : null,
+        staff: staff.get(c.id) ?? 0,
+        tariffs: tariffs.get(c.id) ?? 0,
+        shifts: shifts.get(c.id) ?? 0,
+        menu: null,
+      };
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------------

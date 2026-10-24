@@ -9,6 +9,7 @@ import { formatAccessKey, isAccessKeyShape, keyPrefixOf, normalizeAccessKey, rol
 import { hashApiKey } from './auth.ts';
 import type { SqlDriver } from './db/driver.ts';
 import { bumpAllAccess, bumpCompanyAccess, currentLicense } from './license.ts';
+import { businessTypeOf } from './settings.ts';
 import type { HubRow } from './sync.ts';
 
 export const PLATFORM_COOKIE = 'ts_platform';
@@ -189,7 +190,7 @@ const toSyncKey = (r: KeyRow): SyncKey => ({
  * staff of THIS branch with their live keys. Keys of other branches never leave the cloud.
  */
 export async function accessPackage(db: SqlDriver, hub: HubRow): Promise<SyncAccessResponse> {
-  const clubs = await db.all<{ id: string; company_id: string }>('SELECT id, company_id FROM clubs WHERE id = ?', [hub.club_id]);
+  const clubs = await db.all<{ id: string; company_id: string; business_type?: string | null }>('SELECT * FROM clubs WHERE id = ?', [hub.club_id]);
   const club = clubs[0];
   if (!club) throw new Error(`club of hub ${hub.id} is missing`);
   const version = await accessVersionOf(db, club.id);
@@ -237,5 +238,6 @@ export async function accessPackage(db: SqlDriver, hub: HubRow): Promise<SyncAcc
     clubId: club.id,
     people,
     keys: [...platformKeys, ...managerKeys, ...clubKeys].map(toSyncKey),
+    business: { type: businessTypeOf(club) },
   };
 }

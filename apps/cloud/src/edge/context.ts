@@ -39,9 +39,27 @@ export interface EdgeContext {
   authAdmin: AuthAdmin | null;
   /** The manager cabinet's address for links in letters: TS_CABINET_URL, else DEFAULT_CABINET_URL. */
   cabinetUrl: string;
+  /**
+   * CLOUD_URL a HUB of this project uses (connection codes): TS_CLOUD_URL, else
+   * `${SUPABASE_URL}/functions/v1`; null when neither is set.
+   */
+  cloudUrl: string | null;
+  /** Self sign-up (`signup`): TS_SIGNUP_DISABLED=1 turns it off; TS_SIGNUP_PER_HOUR attempts per IP (5). */
+  signup: { disabled: boolean; perHour: number };
 }
 
 export const DEFAULT_CABINET_URL = 'https://ts-cabinet.pages.dev';
+
+/** Sign-up attempts one IP address may make an hour (TS_SIGNUP_PER_HOUR overrides). */
+export const DEFAULT_SIGNUP_PER_HOUR = 5;
+
+/** CLOUD_URL for HUBs: TS_CLOUD_URL, else `${SUPABASE_URL}/functions/v1`, without a trailing slash. */
+export function cloudUrlOf(env: Env): string | null {
+  const own = env.TS_CLOUD_URL?.trim().replace(/\/+$/, '');
+  if (own) return own;
+  const base = env.SUPABASE_URL?.trim().replace(/\/+$/, '');
+  return base ? `${base}/functions/v1` : null;
+}
 
 export type AuthUserLookup = (accessToken: string) => Promise<{ id: string; email: string | null } | null>;
 
@@ -76,7 +94,9 @@ export interface EdgeContextOptions {
  * NTFY_DISABLED, SUPABASE_JWT_SECRET (optional), TS_CORS_ORIGINS,
  * CLOUD_HUB_OFFLINE_MINUTES (10), CLOUD_SHIFT_OPEN_HOURS (20), CLOUD_PUSH_MAX_AGE_MINUTES (120),
  * LICENSE_SIGNING_KEY (PKCS#8 Ed25519; the dev key when missing), LICENSE_KEY_ID ('ts-2026'),
- * SUPABASE_URL + SUPABASE_ANON_KEY (Auth API lookups), SUPABASE_SERVICE_ROLE_KEY (Auth admin API).
+ * SUPABASE_URL + SUPABASE_ANON_KEY (Auth API lookups), SUPABASE_SERVICE_ROLE_KEY (Auth admin API),
+ * TS_CLOUD_URL (connection codes; `${SUPABASE_URL}/functions/v1` by default),
+ * TS_SIGNUP_DISABLED (=1 turns self sign-up off), TS_SIGNUP_PER_HOUR (5 sign-up attempts per IP an hour).
  */
 export function edgeContext(db: SqlDriver, env: Env, options: EdgeContextOptions = {}): EdgeContext {
   const log = options.log ?? ((m: string) => console.log(m));
@@ -113,6 +133,11 @@ export function edgeContext(db: SqlDriver, env: Env, options: EdgeContextOptions
         ? authAdminApi(env.SUPABASE_URL.trim(), env.SUPABASE_SERVICE_ROLE_KEY.trim())
         : null,
     cabinetUrl: (env.TS_CABINET_URL?.trim() || DEFAULT_CABINET_URL).replace(/\/+$/, ''),
+    cloudUrl: cloudUrlOf(env),
+    signup: {
+      disabled: /^(1|true|yes|on)$/i.test(env.TS_SIGNUP_DISABLED?.trim() ?? ''),
+      perHour: Math.floor(minutes(env.TS_SIGNUP_PER_HOUR, DEFAULT_SIGNUP_PER_HOUR)),
+    },
   };
 }
 

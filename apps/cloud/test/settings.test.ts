@@ -83,7 +83,7 @@ test('owner edits tariffs: version +1, HUB pulls by version, stale snapshot is 4
     assert.deepEqual(changed.body.club, { name: 'Клуб «Демо»', timezone: 'Asia/Almaty', currency: 'KZT' });
   }
   const same = await hubGet<SyncSettingsResponse>(c, HUB1.key, '/sync/settings?since=1');
-  assert.deepEqual(same.body, { changed: false, version: 1 });
+  assert.deepEqual(same.body, { changed: false, version: 1, business: { type: 'billiards' } });
 
   // A snapshot from a HUB still on version 0 is refused; on version 1 it is accepted and the version stays 1.
   const stale = await hubPost<SyncSnapshotResponse>(c, HUB1.key, '/sync/snapshot', snapshot(0));

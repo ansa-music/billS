@@ -2,10 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import type { LampDetail } from '@bills/domain';
 import type { SimulatorStatus, UpsSimulatorStatus } from '../api.ts';
 import { fetchLamps, fetchSimulator, fetchUpsSimulator, updateSimulator, updateUpsSimulator } from '../api.ts';
-import { EmptyState, SectionCard, StatTile } from '../components.tsx';
+import { EmptyState, relayLabel, SectionCard, StatTile } from '../components.tsx';
+import { useDemo } from '../demo.tsx';
 import { formatAgo, lampErrorText } from '../format.ts';
 import { HardwarePanel } from '../Hardware.tsx';
-import { TlsCard } from './TlsCard.tsx';
 import { Icon } from '../icons.tsx';
 import { useHub, useLive } from '../useHub.tsx';
 
@@ -27,7 +27,7 @@ function LampCard({ l, now }: { l: LampDetail; now: number }) {
         </span>
         <div className="lamp-card-title">
           <strong>{l.tableName}</strong>
-          <span>{l.channel}</span>
+          <span>реле {relayLabel(l.channel)}</span>
         </div>
       </header>
       <dl className="lamp-facts">
@@ -76,16 +76,22 @@ function useDevStatus<T>(load: () => Promise<T | null>, version: number, everyMs
   return [status, setStatus] as const;
 }
 
-/** Development only: drives the lamp simulator in the HUB. Hidden when the HUB has no simulator. */
-function SimulatorCard() {
+/**
+ * Demo only: drives the lamp simulator in the HUB (faults, sensors). In a real
+ * club without a controller it just says so; with a controller it says nothing.
+ */
+function SimulatorCard({ demo }: { demo: boolean }) {
   const { notify, version } = useHub();
   const [sim, setSim] = useDevStatus<SimulatorStatus>(fetchSimulator, version, 3000);
 
-  if (sim === undefined) return null;
-  if (sim === null) {
+  if (!sim) return null;
+  if (!demo) {
     return (
-      <SectionCard title="Контроллер ламп">
-        <p className="hint">Подключён настоящий контроллер. Его настройки появятся на этапе 5.</p>
+      <SectionCard title="Контроллер света">
+        <p className="hint">
+          Контроллер света не подключён: лампы над столами не включаются сами, время игры считается как обычно. Если в
+          заведении есть контроллер, его подключает установщик или поддержка TS.
+        </p>
       </SectionCard>
     );
   }
@@ -110,8 +116,8 @@ function SimulatorCard() {
       }
     >
       <p className="hint">
-        Вместо настоящего реле работает симулятор: так можно проверить отказы без железа. На этапе 5 его заменит контроллер
-        ESP32/Modbus.
+        Это демо: вместо настоящего контроллера света работает имитация. Здесь можно проверить, как касса ведёт себя при
+        сбоях.
       </p>
       <div className="sim-controls">
         <label className="check">
@@ -156,9 +162,9 @@ function SimulatorCard() {
               return (
                 <li key={channel} data-on={on || undefined} data-blink={blink || undefined}>
                   <span className="lamp-dot" aria-hidden="true" />
-                  {channel}
+                  Реле {relayLabel(channel)}
                   {blink && <span className="relay-note">мигает</span>}
-                  <span className="sim-light" role="group" aria-label={`Датчик тока ${channel}`}>
+                  <span className="sim-light" role="group" aria-label={`Датчик тока, реле ${relayLabel(channel)}`}>
                     <button
                       type="button"
                       aria-pressed={light === undefined}
@@ -198,12 +204,12 @@ function SimulatorCard() {
   );
 }
 
-/** Development only: the simulated UPS (HUB_UPS=simulator). Hidden otherwise. */
-function UpsSimulatorCard() {
+/** Demo only: the simulated UPS (HUB_UPS=simulator). Hidden otherwise. */
+function UpsSimulatorCard({ demo }: { demo: boolean }) {
   const { notify, version } = useHub();
   const [ups, setUps] = useDevStatus<UpsSimulatorStatus>(fetchUpsSimulator, version, 5000);
   // The HUB answers { configured: false } without a simulated UPS; a patch reply may omit the flag.
-  if (!ups || ups.configured === false) return null;
+  if (!demo || !ups || ups.configured === false) return null;
 
   const patch = (p: Parameters<typeof updateUpsSimulator>[0]) =>
     updateUpsSimulator(p)
@@ -260,6 +266,7 @@ function UpsSimulatorCard() {
 
 export function EquipmentSection() {
   const hub = useHub();
+  const { demo } = useDemo();
   const lamps = useLive(fetchLamps, [], hub.version);
   const list = lamps.data ?? [];
   const on = list.filter((l) => l.reported === 'ON').length;
@@ -276,7 +283,7 @@ export function EquipmentSection() {
         <StatTile
           label="Без ответа"
           value={show(unknown)}
-          detail={!loaded ? undefined : unknown ? 'HUB повторяет команду раз в минуту' : 'все отвечают'}
+          detail={!loaded ? undefined : unknown ? 'касса повторяет команду раз в минуту' : 'все отвечают'}
           tone={unknown ? 'danger' : undefined}
         />
         <StatTile label="Команд в пути" value={show(pending)} detail={!loaded ? undefined : pending ? 'ждём подтверждения' : 'очередь пуста'} />
@@ -286,7 +293,9 @@ export function EquipmentSection() {
           {lamps.data === null ? (
             <p className="hint">{lamps.error ?? 'Загрузка…'}</p>
           ) : list.length === 0 ? (
-            <EmptyState icon="lamp" title="Столов нет" />
+            <EmptyState icon="lamp" title="Столов нет">
+              Добавьте столы в «Настройки → Столы» — у каждого стола своя лампа.
+            </EmptyState>
           ) : (
             <div className="lamp-grid">
               {list.map((l) => (
@@ -297,10 +306,9 @@ export function EquipmentSection() {
         </SectionCard>
         <HardwarePanel />
       </div>
-      <TlsCard />
       <div className="two-col">
-        <SimulatorCard />
-        <UpsSimulatorCard />
+        <SimulatorCard demo={demo} />
+        <UpsSimulatorCard demo={demo} />
       </div>
     </div>
   );

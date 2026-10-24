@@ -127,7 +127,7 @@ export function OccupancyChart({ hours, date }: { hours: number[]; date: string 
 
 // ── Revenue for 14 days ──────────────────────────────────────────────────────
 
-export function RevenueChart({ points, currency }: { points: RevenuePoint[]; currency: string }) {
+export function RevenueChart({ points, currency, withGames = true }: { points: RevenuePoint[]; currency: string; withGames?: boolean }) {
   const box = useRef<HTMLDivElement>(null);
   const width = useWidth(box);
   const H = 220;
@@ -174,7 +174,7 @@ export function RevenueChart({ points, currency }: { points: RevenuePoint[]; cur
         {n > 0 && <path className="line" d={line} />}
         {points.map((p, i) => {
           const [px, py] = coords[i]!;
-          const label = `${shortDate(p.date)} — ${formatMoney(p.amount, currency)}, ${p.games} ${plural(p.games, ['игра', 'игры', 'игр'])}`;
+          const label = `${shortDate(p.date)} — ${formatMoney(p.amount, currency)}${withGames ? `, ${p.games} ${plural(p.games, ['игра', 'игры', 'игр'])}` : ''}`;
           const showLabel = i % 2 === (n - 1) % 2;
           return (
             <g key={p.date} className="point-group">

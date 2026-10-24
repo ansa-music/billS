@@ -184,6 +184,12 @@
   border-color: var(--warn);
 }
 
+.hall-manual-who {
+  flex: 0 1 auto;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
 /* UPS indicator in the top bar */
 
 .power {

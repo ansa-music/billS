@@ -1,5 +1,5 @@
 /* Owner cabinet. Same tokens as the hall screen (apps/web/src/styles.css):
-   dark by default, light when the system asks for it. Desktop and tablet only. */
+   dark by default, light when the system asks for it. Phone (from 360px), tablet and desktop. */
 
 :root {
   color-scheme: dark;
@@ -53,7 +53,7 @@
 
 body {
   margin: 0;
-  min-width: 768px;
+  min-width: 0;
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
@@ -266,7 +266,9 @@ a:focus-visible {
   align-content: start;
 }
 
-.field > input {
+.field > input,
+.field > select,
+.field select {
   color: var(--text);
 }
 
@@ -574,7 +576,7 @@ a:focus-visible {
 
 .clubs {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr));
   gap: 16px;
 }
 
@@ -2214,4 +2216,843 @@ html:has(.apps-page) body {
 
 .clients-grid tr[data-selected] td {
   background: color-mix(in oklab, var(--accent) 8%, transparent);
+}
+
+/* ---- «Простой старт»: navigation, start screen, signup, first steps, connecting the register ---- */
+
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.link-inline {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.btn-big-text {
+  min-height: 52px;
+  font-size: 17px;
+}
+
+.empty-state {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  padding: 20px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.empty-state h2 {
+  font-size: 18px;
+}
+
+/* Cabinet navigation: tabs under the top bar; a bottom bar on a phone */
+
+.cab-nav {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.cab-nav-item {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.cab-nav-item svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
+.cab-nav-item:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.cab-nav-item[aria-current='page'] {
+  color: var(--accent-text);
+  background: var(--accent);
+}
+
+@media (max-width: 700px) {
+  .app-cabinet {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+
+  .cab-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    gap: 0;
+    padding: 6px calc(4px + env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) calc(4px + env(safe-area-inset-left));
+    border-radius: 0;
+    border-width: 1px 0 0;
+    box-shadow: 0 -6px 20px rgb(0 0 0 / 0.18);
+    overflow: visible;
+  }
+
+  .cab-nav-item {
+    flex-direction: column;
+    gap: 3px;
+    min-height: 54px;
+    padding: 4px 2px;
+    font-size: 11px;
+    font-weight: 600;
+    min-width: 0;
+  }
+
+  .cab-nav-item svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .cab-nav-item[aria-current='page'] {
+    color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 14%, transparent);
+  }
+
+  .toasts {
+    bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+
+  .topbar {
+    flex-wrap: nowrap;
+  }
+
+  .topbar .brand {
+    min-width: 0;
+  }
+
+  .topbar .brand h1 {
+    font-size: 17px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .topbar .brand p {
+    font-size: 12px;
+  }
+
+  .topbar .brand-mark {
+    width: 34px;
+    height: 34px;
+  }
+
+  .topbar-right {
+    flex-wrap: nowrap;
+    gap: 10px;
+  }
+
+  .topbar-right .owner,
+  .topbar-right .btn-link,
+  .conn-text {
+    display: none;
+  }
+
+  .conn {
+    font-size: 0;
+  }
+}
+
+/* Start screen and sign-in */
+
+.welcome {
+  gap: 18px;
+}
+
+.welcome-title {
+  font-size: 24px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.welcome-points {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 10px;
+}
+
+.welcome-points li {
+  position: relative;
+  padding-left: 30px;
+  font-size: 15px;
+}
+
+.welcome-points li::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-text);
+  background: var(--accent);
+}
+
+.login-alt {
+  text-align: center;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.login-team {
+  justify-self: center;
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+/* Signup */
+
+.signup {
+  width: min(480px, 100%);
+}
+
+.kind-field {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.kind-field legend {
+  padding: 0;
+  margin-bottom: 4px;
+}
+
+.kind-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.kind-card {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 4px;
+  padding: 14px 10px 12px;
+  border-radius: 14px;
+  border: 2px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.kind-card:hover {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+}
+
+.kind-card[aria-checked='true'] {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 12%, var(--surface));
+}
+
+.kind-icon {
+  width: 40px;
+  height: 40px;
+  color: var(--muted);
+}
+
+.kind-card[aria-checked='true'] .kind-icon {
+  color: var(--accent);
+}
+
+.kind-title {
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.kind-text {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.field-error {
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.pw-wrap {
+  position: relative;
+}
+
+.pw-wrap input {
+  padding-right: 92px;
+  color: var(--text);
+}
+
+.pw-toggle {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  bottom: 4px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pw-meter {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.pw-meter span {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.pw-meter[data-level='1'] span:nth-child(1) {
+  background: var(--danger);
+}
+
+.pw-meter[data-level='2'] span:nth-child(-n + 2) {
+  background: var(--warn);
+}
+
+.pw-meter[data-level='3'] span {
+  background: var(--accent);
+}
+
+/* «Первые шаги» */
+
+.start-page {
+  display: grid;
+  gap: 16px;
+  max-width: 860px;
+  width: 100%;
+  min-width: 0;
+}
+
+.start-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 24px;
+}
+
+.start-head h2 {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.start-progress {
+  display: grid;
+  gap: 6px;
+  min-width: 180px;
+}
+
+.start-count {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  justify-self: end;
+}
+
+.progress {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.start-club {
+  max-width: 360px;
+}
+
+.steps-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.step {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.step[data-state='current'] {
+  border-color: color-mix(in oklab, var(--accent) 60%, var(--border));
+}
+
+.step-head {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.step-num {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 15px;
+  border: 2px solid var(--border);
+  color: var(--muted);
+}
+
+.step[data-state='current'] .step-num {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.step[data-state='done'] .step-num {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.step-titles {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 5px;
+}
+
+.step-title {
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.step[data-state='done'] .step-title {
+  color: var(--muted);
+}
+
+.step-text {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.step-body {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+  padding: 0 16px 16px 64px;
+}
+
+.dl-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  max-width: 560px;
+}
+
+.btn.btn-big {
+  flex-direction: column;
+  gap: 2px;
+  min-height: 64px;
+  padding: 8px 14px;
+  font-size: 16px;
+}
+
+.btn-big small {
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.step-skip {
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.login-key {
+  display: grid;
+  gap: 4px;
+}
+
+.start-done {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in oklab, var(--accent) 50%, var(--border));
+  background: color-mix(in oklab, var(--accent) 10%, var(--surface));
+}
+
+.start-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--border));
+  background: linear-gradient(135deg, color-mix(in oklab, var(--accent) 14%, var(--surface)), var(--surface) 70%);
+  box-shadow: var(--shadow);
+}
+
+.start-card-main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.start-card-main .progress {
+  max-width: 320px;
+}
+
+.start-card-kicker {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.start-card .btn {
+  flex: none;
+}
+
+/* «Подключите кассу»: the code, QR, a new code */
+
+.connect {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.connect-ok {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.connect-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px 20px;
+  align-items: start;
+}
+
+.connect-code {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  min-width: 0;
+}
+
+.connect-how {
+  font-size: 15px;
+}
+
+.connect-code-text {
+  display: block;
+  width: 100%;
+  max-height: 9.5em;
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  font-size: 15px;
+  line-height: 1.45;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.btn.connect-copy {
+  min-width: 200px;
+  min-height: 48px;
+}
+
+.connect-qr .qr {
+  width: 200px;
+}
+
+.tech {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.tech summary,
+.advanced summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 6px 0;
+}
+
+.tech-body {
+  display: grid;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+/* «Заведения» */
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.form-grid-wide {
+  grid-column: 1 / -1;
+}
+
+.branch-connect {
+  display: grid;
+  gap: 12px;
+}
+
+.branch-actions {
+  justify-content: flex-end;
+}
+
+.biz-line {
+  margin-top: 4px;
+  font-size: 14px;
+}
+
+.biz-edit {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  max-width: 420px;
+}
+
+/* «Уведомления» */
+
+.alerts-main {
+  width: 100%;
+  max-width: 460px;
+}
+
+.alerts-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: alert-step;
+  display: grid;
+  gap: 14px;
+}
+
+.alerts-steps li {
+  counter-increment: alert-step;
+  position: relative;
+  display: grid;
+  gap: 6px;
+  padding-left: 46px;
+}
+
+.alerts-steps li::before {
+  content: counter(alert-step);
+  position: absolute;
+  left: 0;
+  top: -2px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  color: var(--accent-text);
+  background: var(--accent);
+}
+
+.alerts-qr {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.alerts-qr .qr {
+  width: 180px;
+}
+
+.advanced {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 8px 18px;
+}
+
+.advanced[open] {
+  padding-bottom: 18px;
+}
+
+.advanced-body {
+  display: grid;
+  gap: 16px;
+  padding-top: 8px;
+}
+
+.advanced-body .panel {
+  box-shadow: none;
+  background: var(--surface-2);
+}
+
+/* Phones */
+
+@media (max-width: 600px) {
+  .welcome-title {
+    font-size: 21px;
+  }
+
+  .start-head h2 {
+    font-size: 22px;
+  }
+
+  .start-progress {
+    width: 100%;
+  }
+
+  .start-count {
+    justify-self: start;
+  }
+
+  .step-head {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .step-body {
+    padding: 0 12px 14px;
+  }
+
+  .dl-pair {
+    grid-template-columns: 1fr;
+  }
+
+  .connect-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .connect-qr {
+    justify-self: center;
+  }
+
+  .connect-qr .qr {
+    width: 220px;
+  }
+
+  .btn.connect-copy {
+    width: 100%;
+  }
+
+  .start-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .branch-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .branch-actions {
+    justify-content: flex-start;
+  }
+
+  .stats {
+    grid-template-columns: 1fr;
+  }
+
+  .advanced {
+    padding: 6px 14px;
+  }
+
+  .key-text[data-big] {
+    font-size: 28px;
+  }
 }

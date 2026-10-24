@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type {
+  BusinessType,
   ClubSnapshot,
   SyncAccessResponse,
   SyncEvent,
@@ -14,7 +15,7 @@ import type {
   TariffSetting,
   TariffConfig,
 } from '@bills/domain';
-import { isValidTimeZone, normalizeRoles, primaryRole, validateTariff } from '@bills/domain';
+import { BUSINESS_TYPES, isValidTimeZone, normalizeRoles, primaryRole, validateTariff } from '@bills/domain';
 import { scopeOf } from './auth.ts';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
@@ -22,7 +23,7 @@ import { afterCommit, all, one, run, transaction } from './db.ts';
 import type { HubEvents } from './events.ts';
 import { record } from './journal.ts';
 import type { LicenseService } from './license.ts';
-import { clubId } from './views.ts';
+import { clubId, loadSettings } from './views.ts';
 
 /**
  * HUB → cloud sync (stage 6). One worker per HUB:
@@ -239,16 +240,44 @@ export function applySettings(db: Db, now: number, settings: ClubSnapshot, event
       );
     }
 
+    // What the club is (billiards / coffee shop), as chosen at sign-up in the cabinet. Older clouds
+    // send no `business`; an unknown type is ignored rather than failing the whole package.
+    const businessType = businessTypeOf(settings);
+    let businessChanged = false;
+    if (businessType) {
+      const current = loadSettings(db, club.id);
+      if (current.business.type !== businessType) {
+        run(db, 'UPDATE clubs SET settings = ? WHERE id = ?', JSON.stringify({ ...current, business: { type: businessType } }), club.id);
+        businessChanged = true;
+      }
+    }
+
     record(db, now, {
       actor: CLOUD_ACTOR,
       action: 'cloud.settings_applied',
       entityType: 'club',
       entityId: club.id,
-      data: { version: settings.version, tariffs: settings.tariffs.length, tables: settings.tables.length },
+      data: {
+        version: settings.version,
+        tariffs: settings.tariffs.length,
+        tables: settings.tables.length,
+        ...(businessChanged ? { businessType } : {}),
+      },
     });
     run(db, 'UPDATE sync_state SET settings_version = ? WHERE id = 1', settings.version);
-    if (events) afterCommit(db, () => events.changed({ kind: 'session' }));
+    if (events) {
+      afterCommit(db, () => {
+        events.changed({ kind: 'session' });
+        if (businessChanged) events.changed({ kind: 'club' });
+      });
+    }
   });
+}
+
+/** `business.type` of a settings package from the cloud, when it names a known type. */
+function businessTypeOf(settings: ClubSnapshot): BusinessType | null {
+  const type = (settings as ClubSnapshot & { business?: { type?: unknown } | null }).business?.type;
+  return typeof type === 'string' && (BUSINESS_TYPES as readonly string[]).includes(type) ? (type as BusinessType) : null;
 }
 
 /** The access package version this HUB applied; null = never. */

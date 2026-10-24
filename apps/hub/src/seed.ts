@@ -6,7 +6,7 @@ import type { Db } from './db.ts';
 import { all, one, run, transaction } from './db.ts';
 import { hashPin } from './staff.ts';
 
-const STANDARD: TariffConfig = {
+export const STANDARD: TariffConfig = {
   currency: 'KZT',
   basePricePerHour: 2000_00,
   windows: [
@@ -19,7 +19,7 @@ const STANDARD: TariffConfig = {
   roundingMinor: 10_00,
 };
 
-const SNOOKER: TariffConfig = {
+export const SNOOKER: TariffConfig = {
   ...STANDARD,
   basePricePerHour: 4000_00,
   windows: [
@@ -40,7 +40,7 @@ const DEMO_STAFF: Array<[name: string, roles: Role[]]> = [
   ['Данияр Официант', ['waiter']],
 ];
 
-const DEMO_MENU: Array<[category: string, products: Array<[name: string, priceMinor: number]>]> = [
+export const DEMO_MENU: Array<[category: string, products: Array<[name: string, priceMinor: number]>]> = [
   [
     'Напитки',
     [
@@ -113,9 +113,9 @@ const SHOT: ProductOptionGroup = {
 };
 const MILK_COFFEE = [SIZE, MILK, SYRUP, SHOT];
 
-type CafeProduct = [name: string, priceMinor: number, options: ProductOptionGroup[], stock: number | null];
+export type CafeProduct = [name: string, priceMinor: number, options: ProductOptionGroup[], stock: number | null];
 
-const CAFE_MENU: Array<[category: string, products: CafeProduct[]]> = [
+export const CAFE_MENU: Array<[category: string, products: CafeProduct[]]> = [
   [
     'Кофе',
     [
@@ -177,6 +177,53 @@ export function seedDemo(db: Db, now: number, timezone = 'Asia/Almaty', business
     }
     return created;
   });
+}
+
+/** Name of the club a real HUB creates on an empty database, until the cabinet sends the real one. */
+export const NEW_CLUB_NAME = 'Моё заведение';
+
+/**
+ * A real club's first start: one company and one club row the HUB needs to run — named
+ * «Моё заведение», in `timezone`, KZT — and nothing else: no tables, tariffs, menu or people.
+ * The cabinet fills in the name, the business type and the staff once the HUB is connected;
+ * nobody sees fake demo data. Returns true when the club was created (the database was empty).
+ */
+export function seedEmptyClub(db: Db, now: number, timezone = 'Asia/Almaty'): boolean {
+  return transaction(db, () => {
+    if (one(db, 'SELECT id FROM companies LIMIT 1')) return false;
+    const companyId = randomUUID();
+    run(db, 'INSERT INTO companies (id, name, created_at) VALUES (?, ?, ?)', companyId, NEW_CLUB_NAME, now);
+    run(
+      db,
+      'INSERT INTO clubs (id, company_id, name, timezone, currency, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      randomUUID(),
+      companyId,
+      NEW_CLUB_NAME,
+      timezone,
+      'KZT',
+      now,
+    );
+    return true;
+  });
+}
+
+/**
+ * What main.ts does with the database on start. A demo HUB (HUB_DEMO=1) gets the demo club
+ * (`seedDemo`) and, when it was just created, a key for every demo employee; a real HUB gets
+ * only an empty club (`seedEmptyClub`) — its single starting key is the support (TECH) key that
+ * `AuthService.bootstrapKeys` writes to first-run-keys.txt. Returns whether every active person
+ * should get a starting key.
+ */
+export function prepareClub(
+  db: Db,
+  now: number,
+  options: { demo: boolean; timezone?: string; business?: BusinessType },
+): { created: boolean; keyEveryone: boolean } {
+  if (options.demo) {
+    const created = seedDemo(db, now, options.timezone, options.business);
+    return { created, keyEveryone: created };
+  }
+  return { created: seedEmptyClub(db, now, options.timezone), keyEveryone: false };
 }
 
 function isCafe(settings: string | null): boolean {

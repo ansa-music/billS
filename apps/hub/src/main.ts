@@ -5,7 +5,7 @@ import { buildApp } from './http/app.ts';
 import { Hub } from './hub.ts';
 import { createLampDriver } from './lamps/factory.ts';
 import { createUpsSource, parseUpsUrl, SimulatorUps } from './power/ups.ts';
-import { seedDemo } from './seed.ts';
+import { prepareClub } from './seed.ts';
 import { managerMatcher } from './manual-mode.ts';
 import { versionInfo, versionString } from './version.ts';
 import { writeBootstrapKeys } from './auth.ts';
@@ -26,8 +26,9 @@ const { config, setupPath, setupError } = loadHubConfig();
 // and the wizard at /setup asks for HUB_ID and the key.
 const cloudReady = Boolean(config.cloudUrl && config.cloudApiKey && config.hubId);
 const db = openDb(config.dbPath);
-// HUB_DEMO_BUSINESS=cafe: an empty database becomes a demo coffee shop instead of a billiard club.
-const seeded = seedDemo(db, Date.now(), config.demoTimezone, config.demoBusiness);
+// Demo data only on a demo HUB (HUB_DEMO=1; HUB_DEMO_BUSINESS=cafe makes it a coffee shop). A real club
+// starts empty — «Моё заведение», no tables or people — and the cabinet fills it in once connected.
+const seeded = prepareClub(db, Date.now(), { demo: config.demo, timezone: config.demoTimezone, business: config.demoBusiness });
 
 // The relay controller comes from HUB_LAMP_DRIVER: simulator, esp32-http or modbus-tcp.
 const lamps = createLampDriver(config);
@@ -113,9 +114,9 @@ if (config.demo) {
 }
 
 // Nobody must be locked out: without any working long key (platform, manager) the HUB's own
-// managers — or a new installer account (TECH) — get one, written next to the database.
+// managers — or a new support account (TECH) — get one, written next to the database.
 // On a fresh demo club every employee gets one.
-const bootstrap = hub.auth.bootstrapKeys(seeded);
+const bootstrap = hub.auth.bootstrapKeys(seeded.keyEveryone);
 if (bootstrap.length) {
   const file = join(dirname(config.dbPath), 'first-run-keys.txt');
   writeBootstrapKeys(file, bootstrap, Date.now());
@@ -144,7 +145,7 @@ const webDistServed = existsSync(config.webDistPath);
 app.log.info(
   {
     dbPath: config.dbPath,
-    seeded,
+    seeded: seeded.created,
     version: versionString(),
     lampDriver: config.lampDriver,
     lampPollMs: hub.monitor.supported ? config.lampPollMs : 'unsupported',

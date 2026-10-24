@@ -1,4 +1,5 @@
-import type { ClubSnapshot, StaffSetting, TableSetting, TariffSetting } from '@bills/domain';
+import type { BusinessType, ClubSnapshot, StaffSetting, TableSetting, TariffSetting } from '@bills/domain';
+import { BUSINESS_TYPES } from '@bills/domain';
 import type { SqlDriver } from './db/driver.ts';
 
 export interface ClubRow {
@@ -8,6 +9,13 @@ export interface ClubRow {
   timezone: string;
   currency: string;
   created_at: number;
+  /** 'billiards' | 'cafe' (migration 005); absent in rows read before it. */
+  business_type?: string | null;
+}
+
+/** The club's business type; anything unknown (or no column yet) is billiards. */
+export function businessTypeOf(club: { business_type?: string | null }): BusinessType {
+  return (BUSINESS_TYPES as readonly string[]).includes(club.business_type ?? '') ? (club.business_type as BusinessType) : 'billiards';
 }
 
 interface SettingsRow {

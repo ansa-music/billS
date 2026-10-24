@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { normalizeAccessKey, normalizeCloudUrl, parseLoginQr, roleOfKeyPrefix } from '@bills/domain';
-import { CloudRequestError, SUPABASE_MODE, loginByKey, loginEmail, platformLogin, sendMagicLink, sendPasswordReset, takeLinkError } from './api.ts';
+import { CloudRequestError, SIGNUP_AVAILABLE, SUPABASE_MODE, loginByKey, loginEmail, platformLogin, sendMagicLink, sendPasswordReset, takeLinkError } from './api.ts';
 import type { Identity } from './api.ts';
 import { BrandMark } from './BrandMark.tsx';
 import { nativeBridge } from './platform.ts';
+import { isReturning } from './signup.ts';
 
 /**
  * 'key' — self-hosted only (owner keys); 'link' — Supabase only (magic link to the e-mail);
@@ -47,7 +48,7 @@ function describePlatform(err: unknown): string {
 function platformKeyProblem(key: string): string | null {
   const role = roleOfKeyPrefix(key);
   if (role === 'owner' || role === 'tech') return null;
-  if (role === 'manager') return 'Это ключ управляющего — он для входа на HUB филиала. В кабинет управляющий входит на вкладке «Управляющий».';
+  if (role === 'manager') return 'Это ключ управляющего — он для входа в кассу заведения. В кабинет управляющий входит почтой и паролем.';
   return 'Ключ платформы начинается с OWNER- или TECH-';
 }
 
@@ -55,9 +56,12 @@ type Side = 'manager' | 'platform';
 
 export function Login({
   onLogin,
+  start = 'welcome',
 }: {
   /** The manager, the platform or both (Supabase: one e-mail may be both). */
   onLogin: (id: Identity) => void;
+  /** 'welcome' — «Начать бесплатно» first for a new visitor (#/); 'form' — straight to the sign-in form (#/login). */
+  start?: 'welcome' | 'form';
 }) {
   // With Supabase the app signs in like the browser: no cloud address, no owner keys.
   const bridge = SUPABASE_MODE ? null : nativeBridge();
@@ -74,12 +78,17 @@ export function Login({
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A new visitor first sees «Начать бесплатно»; whoever signed in here before — the form.
+  const [welcome, setWelcome] = useState(() => SIGNUP_AVAILABLE && !inApp && start === 'welcome' && !isReturning());
 
   // A magic link that did not work (expired, used twice) comes back here with the reason.
   useEffect(() => {
     if (!SUPABASE_MODE) return;
     void takeLinkError().then((e) => {
-      if (e) setError(e);
+      if (e) {
+        setError(e);
+        setWelcome(false);
+      }
     });
   }, []);
 
@@ -190,35 +199,65 @@ export function Login({
     }
   }
 
+  const teamLink = !inApp && (
+    <button
+      type="button"
+      className="link login-team"
+      onClick={() => {
+        setSide(side === 'platform' ? 'manager' : 'platform');
+        setWelcome(false);
+        setError(null);
+      }}
+    >
+      {side === 'platform' ? '← Вход для владельцев заведений' : 'Вход для команды TS'}
+    </button>
+  );
+
+  if (welcome && side === 'manager') {
+    return (
+      <main className="login-page">
+        <section className="login welcome" aria-labelledby="welcome-title">
+          <div className="brand">
+            <BrandMark />
+            <div>
+              <h1 id="welcome-title">TS</h1>
+              <p className="muted">Касса и учёт для заведения</p>
+            </div>
+          </div>
+          <h2 className="welcome-title">Касса, смены и отчёты для кофейни или бильярдного клуба</h2>
+          <ul className="welcome-points">
+            <li>Касса работает даже без интернета</li>
+            <li>Выручка и смены — на телефоне, где бы вы ни были</li>
+            <li>14 дней бесплатно, карта не нужна</li>
+          </ul>
+          <a className="btn btn-primary btn-big-text" href="#/signup">
+            Начать бесплатно
+          </a>
+          <p className="login-alt">
+            Уже есть аккаунт?{' '}
+            <a className="link-inline" href="#/login" onClick={() => setWelcome(false)}>
+              Войти
+            </a>
+          </p>
+        </section>
+        <a className="link login-apps" href="#/apps">
+          Скачать программу для кассы и телефона
+        </a>
+        {teamLink}
+      </main>
+    );
+  }
+
   return (
     <main className="login-page">
       <form className="login" onSubmit={submit}>
         <div className="brand">
           <BrandMark />
           <div>
-            <h1>{side === 'platform' ? 'Платформа TS' : 'Кабинет управляющего'}</h1>
-            <p className="muted">TS</p>
+            <h1>{side === 'platform' ? 'Вход для команды TS' : 'Вход в кабинет'}</h1>
+            <p className="muted">{side === 'platform' ? 'Владелец и техподдержка TS' : 'TS'}</p>
           </div>
         </div>
-
-        {!inApp && (
-          <div className="seg seg-side" role="tablist" aria-label="Кто входит">
-            {(['manager', 'platform'] as const).map((s) => (
-              <button
-                key={s}
-                type="button"
-                role="tab"
-                aria-selected={side === s}
-                onClick={() => {
-                  setSide(s);
-                  setError(null);
-                }}
-              >
-                {s === 'manager' ? 'Управляющий' : 'Платформа TS'}
-              </button>
-            ))}
-          </div>
-        )}
 
         {side === 'platform' ? (
           <>
@@ -239,8 +278,8 @@ export function Login({
               />
             </label>
             <p className="hint">
-              Для владельца и техподдержки TS. Клиенты входят на вкладке «Управляющий».
-              {SUPABASE_MODE && ' Или войдите почтой владельца платформы на вкладке «Управляющий» — откроется кабинет платформы.'}
+              Для владельца и техподдержки TS. Владельцы заведений входят почтой и паролем.
+              {SUPABASE_MODE && ' Владелец платформы может войти и своей почтой — откроется кабинет платформы.'}
             </p>
           </>
         ) : (
@@ -462,12 +501,21 @@ export function Login({
                 Забыли пароль?
               </button>
             )}
+            {SIGNUP_AVAILABLE && side === 'manager' && (
+              <p className="login-alt">
+                Нет аккаунта?{' '}
+                <a className="link-inline" href="#/signup">
+                  Начать бесплатно
+                </a>
+              </p>
+            )}
           </>
         )}
       </form>
       <a className="link login-apps" href="#/apps">
-        Скачать приложение для телефона и кассы
+        Скачать программу для кассы и телефона
       </a>
+      {teamLink}
     </main>
   );
 }

@@ -86,12 +86,13 @@
             <div class="spinner" aria-hidden="true"></div>
             <p class="lead">Проверяю этот компьютер и локальную сеть клуба. Это займёт до 15 секунд.</p>
           </div>
-          <p>HUB — программа, которая хранит столы, игры, кассу и клиентов клуба. Она работает на одном компьютере, а кассы, планшеты и экраны подключаются к ней.</p>
+          <p>Главная программа TS (HUB) хранит столы, игры, кассу и заказы заведения. Она работает на одном компьютере, а кассы, планшеты и экраны подключаются к ней.</p>
         </section>
 
         <section id="w-found" class="welcome" hidden>
-          <h2 id="w-found-title">HUB найден</h2>
+          <h2 id="w-found-title">TS найден</h2>
           <div id="w-found-list" class="choices"></div>
+          <p>Если TS ещё не подключён к кабинету, откроется экран «Подключите кассу к кабинету» — вставьте там код подключения из кабинета.</p>
           <div id="w-found-status" class="status" role="status"></div>
           <div class="links">
             <button class="link" data-action="search-again">Искать ещё раз</button>
@@ -100,16 +101,16 @@
         </section>
 
         <section id="w-none" class="welcome" hidden>
-          <h2>HUB в сети не найден</h2>
-          <p class="lead">HUB — программа, которая хранит столы, игры, кассу и клиентов клуба. Где он будет работать?</p>
+          <h2>TS в сети не найден</h2>
+          <p class="lead">Главная программа TS хранит столы, игры, кассу и заказы заведения. Где она будет работать?</p>
           <div class="choices">
             <button id="choose-install" class="choice main">
-              <strong>Это главный компьютер клуба — установить HUB сюда</strong>
-              <span>Для клуба без отдельного мини-ПК. Нужны интернет и права администратора, установка займёт 5–15 минут. Этот компьютер должен быть включён, пока клуб работает.</span>
+              <strong>Это главный компьютер заведения — установить TS сюда</strong>
+              <span>Для заведения без отдельного мини-ПК. Нужны интернет и права администратора, установка займёт 5–15 минут. Потом вы подключите TS к кабинету кодом подключения. Этот компьютер должен быть включён, пока заведение работает.</span>
             </button>
             <button class="choice" data-action="address">
-              <strong>HUB стоит на другом компьютере — ввести адрес</strong>
-              <span>Адрес показан на экране мини-ПК или в настройках HUB, например 192.168.1.10.</span>
+              <strong>TS уже стоит на другом компьютере — ввести адрес</strong>
+              <span>Адрес показан на экране мини-ПК или в настройках TS, например 192.168.1.10.</span>
             </button>
           </div>
           <div class="links">
@@ -132,7 +133,7 @@
         </section>
 
         <section id="w-install" class="welcome" hidden>
-          <h2 id="install-title">Устанавливаю HUB на этот компьютер</h2>
+          <h2 id="install-title">Устанавливаю TS на этот компьютер</h2>
           <div id="install-progress" class="waiting">
             <div class="spinner" aria-hidden="true"></div>
             <div>
@@ -202,10 +203,10 @@
           <h2>Обслуживание</h2>
           <div class="row">
             <button id="update">Проверить обновления</button>
-            <button id="install-hub">Установить HUB на этот ПК</button>
+            <button id="install-hub">Установить TS на этот ПК</button>
             <button id="quit" class="danger">Закрыть TS</button>
           </div>
-          <p>«Установить HUB» ставит HUB клуба на этот ПК как службу (нужны права администратора); адрес после установки — этот же ПК.</p>
+          <p>«Установить TS» ставит главную программу TS (HUB) на этот ПК как службу (нужны права администратора); адрес после установки — этот же ПК. Затем откроется экран «Подключите кассу к кабинету».</p>
           <div id="maintenance-status" class="status" role="status"></div>
         </section>
 
@@ -320,11 +321,11 @@
         // A HUB on this PC, or the only one in the network: connect right away.
         const target = found.includes(LOCAL_HUB) ? LOCAL_HUB : found.length === 1 ? found[0] : null;
         if (target) {
-          showFound([target], 'HUB найден');
+          showFound([target], 'TS найден');
           if (await connect(target, 'w-found-status')) return;
           if (found.length === 1) return;
         }
-        showFound(found, 'Найдено несколько HUB — выберите свой');
+        showFound(found, 'Найдено несколько TS — выберите свой');
       }
 
       function showFound(list, title) {
@@ -335,7 +336,7 @@
           const button = document.createElement('button');
           button.className = 'choice main';
           const strong = document.createElement('strong');
-          strong.textContent = `Подключиться к HUB: ${hubLabel(origin)}`;
+          strong.textContent = `Открыть TS: ${hubLabel(origin)}`;
           const small = document.createElement('span');
           small.textContent = origin;
           button.append(strong, small);
@@ -356,12 +357,12 @@
             ? [
                 'Windows спросит «Разрешить этому приложению вносить изменения?» — нажмите «Да».',
                 'Откроется окно установки — не закрывайте его. Если на компьютере нет Node.js и Git, они установятся сами.',
-                'Когда HUB заработает, окно установки закроется, а TS подключится к HUB сам.',
+                'Когда TS заработает, окно установки закроется и откроется экран «Подключите кассу к кабинету» — там вставьте код подключения из кабинета.',
               ]
             : [
                 'Система спросит пароль администратора этого компьютера — введите его.',
                 'Установка идёт без отдельного окна: скачиваются нужные программы и TS.',
-                'Когда HUB заработает, TS подключится к нему сам.',
+                'Когда TS заработает, откроется экран «Подключите кассу к кабинету» — там вставьте код подключения из кабинета.',
               ];
         $('install-steps').replaceChildren(
           ...steps.map((text) => {
@@ -377,7 +378,7 @@
         installing = true;
         showWelcome('install');
         installSteps();
-        $('install-title').textContent = 'Устанавливаю HUB на этот компьютер';
+        $('install-title').textContent = 'Устанавливаю TS на этот компьютер';
         $('install-lead').textContent = 'Не выключайте компьютер и не закрывайте TS. Обычно это занимает 5–15 минут.';
         $('install-progress').hidden = false;
         $('install-steps').hidden = false;
@@ -392,13 +393,13 @@
         const timer = setInterval(tick, 1000);
         try {
           const origin = await invoke('install_hub');
-          $('install-title').textContent = 'HUB установлен';
-          $('install-lead').textContent = 'Подключаюсь к HUB на этом компьютере…';
+          $('install-title').textContent = 'TS установлен';
+          $('install-lead').textContent = 'Теперь подключите его к кабинету — открываю экран подключения…';
           $('install-steps').hidden = true;
-          if (!(await connect(origin, 'install-status'))) installFailed('HUB установлен, но подключиться не удалось');
+          if (!(await connect(origin, 'install-status'))) installFailed('TS установлен, но открыть его не удалось');
         } catch (e) {
           say('install-status', String(e), 'error');
-          installFailed('HUB не установлен');
+          installFailed('TS не установлен');
         } finally {
           clearInterval(timer);
           installing = false;
@@ -530,7 +531,7 @@
         }
       };
       $('install-hub').onclick = () => {
-        if (confirm('Установить HUB на этот компьютер? Нужны интернет и права администратора, установка займёт 5–15 минут.')) {
+        if (confirm('Установить TS на этот компьютер? Нужны интернет и права администратора, установка займёт 5–15 минут. Потом подключите его к кабинету кодом подключения.')) {
           previousPanel = 'none';
           startInstall();
         }

@@ -64,6 +64,13 @@ export type Route =
   | { kind: 'staff'; id: string }
   | { kind: 'company' }
   | { kind: 'phone' }
+  /** «Сотрудники» in the cabinet's menu: the venue's staff, or a venue to pick. */
+  | { kind: 'staff-home' }
+  /** «Первые шаги». */
+  | { kind: 'start' }
+  /** «Начать бесплатно» and the sign-in form; signed in, they show the overview. */
+  | { kind: 'signup' }
+  | { kind: 'login' }
   /** «Задать пароль» — the invitation / reset letter's link leads here (Supabase). */
   | { kind: 'set-password' };
 
@@ -73,6 +80,10 @@ export function parseHash(hash: string): Route {
   if (path === '/phone') return { kind: 'phone' };
   if (path === '/company') return { kind: 'company' };
   if (path === '/set-password') return { kind: 'set-password' };
+  if (path === '/staff') return { kind: 'staff-home' };
+  if (path === '/start') return { kind: 'start' };
+  if (path === '/signup') return { kind: 'signup' };
+  if (path === '/login') return { kind: 'login' };
   const m = /^\/clubs\/([^/]+)(?:\/(tariffs|shifts|staff))?$/.exec(path);
   if (m && m[1]) {
     const id = decodeURIComponent(m[1]);
@@ -84,7 +95,7 @@ export function parseHash(hash: string): Route {
   return { kind: 'overview' };
 }
 
-/** Routing by `location.hash`: #/, #/apps, #/clubs/:id, #/clubs/:id/tariffs, #/clubs/:id/shifts, #/clubs/:id/staff, #/company, #/phone, #/set-password. */
+/** Routing by `location.hash`: #/, #/apps, #/start, #/signup, #/login, #/staff, #/clubs/:id, #/clubs/:id/tariffs, #/clubs/:id/shifts, #/clubs/:id/staff, #/company, #/phone, #/set-password. */
 export function useHashRoute(): Route {
   const [route, setRoute] = useState<Route>(() => parseHash(location.hash));
   useEffect(() => {

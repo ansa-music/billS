@@ -2,13 +2,13 @@
 import { useCallback, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { BranchView, CreateBranchResponse, LicenseView } from '@bills/domain';
-import { encodeHubSetupCode, hubCloudUrl, hubSetupUrl, isLocalOnlyCloudUrl } from '@bills/domain';
 import { companyLicense, listBranches, createBranch } from './api.ts';
-import { CopyValue, LicenseLine, ShownOnce } from './cabinet-ui.tsx';
-import { SUPABASE_MODE, supabaseUrl } from './config.ts';
-import { nativeBridge } from './platform.ts';
-import { QrImage } from './QrImage.tsx';
-import { formatDateTime } from './format.ts';
+import { LicenseLine } from './cabinet-ui.tsx';
+import { CURRENCIES, DEFAULT_CITY_ID, citiesByCountry, cityById, currencyName, zoneLabel } from './cities.ts';
+import type { CurrencyCode } from './cities.ts';
+import { ConnectCash, rememberHubCode } from './ConnectCash.tsx';
+import { formatAgo } from './format.ts';
+import { StartCard } from './Start.tsx';
 import { clubHref, usePoll } from './hooks.ts';
 import {
   canAddBranch,
@@ -84,15 +84,15 @@ function LicenseSection({ license, error }: { license: LicenseView | null | unde
           </dd>
         </div>
         <div>
-          <dt>Филиалов</dt>
+          <dt>Заведений</dt>
           <dd>до {p.maxClubs}</dd>
         </div>
         <div>
-          <dt>Столов в филиале</dt>
+          <dt>Столов в заведении</dt>
           <dd>{p.maxTables ?? 'без ограничения'}</dd>
         </div>
         <div>
-          <dt>Сотрудников в филиале</dt>
+          <dt>Сотрудников в заведении</dt>
           <dd>{p.maxStaff ?? 'без ограничения'}</dd>
         </div>
         <div>
@@ -101,8 +101,8 @@ function LicenseSection({ license, error }: { license: LicenseView | null | unde
         </div>
       </dl>
       <p className="hint">
-        Продление и расширение — у владельца платформы TS. HUB'ы филиалов получают лицензию из облака сами; если клуб
-        работает без интернета, они продолжат работать до конца срока.
+        Продление и расширение — у команды TS. Кассы заведений получают лицензию сами; если пропал интернет, они
+        продолжат работать до конца срока.
       </p>
     </Section>
   );
@@ -110,8 +110,8 @@ function LicenseSection({ license, error }: { license: LicenseView | null | unde
 
 function NewBranch({ onCreated, onCancel }: { onCreated: (res: CreateBranchResponse) => void; onCancel: () => void }) {
   const [name, setName] = useState('');
-  const [timezone, setTimezone] = useState('Asia/Almaty');
-  const [currency, setCurrency] = useState('KZT');
+  const [cityId, setCityId] = useState(DEFAULT_CITY_ID);
+  const [currency, setCurrency] = useState<CurrencyCode>(cityById(DEFAULT_CITY_ID).currency);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -121,7 +121,7 @@ function NewBranch({ onCreated, onCancel }: { onCreated: (res: CreateBranchRespo
     setBusy(true);
     setError(null);
     try {
-      onCreated(await createBranch({ name: name.trim(), timezone: timezone.trim() || undefined, currency: currency.trim().toUpperCase() || undefined }));
+      onCreated(await createBranch({ name: name.trim(), timezone: cityById(cityId).timezone, currency }));
     } catch (err) {
       setError(describeCabinetError(err));
     } finally {
@@ -131,19 +131,41 @@ function NewBranch({ onCreated, onCancel }: { onCreated: (res: CreateBranchRespo
 
   return (
     <form className="cab-form sub-panel" onSubmit={submit}>
-      <h3>Новый филиал</h3>
-      <div className="row wrap">
-        <label className="field grow">
+      <h3>Новое заведение</h3>
+      <div className="form-grid">
+        <label className="field form-grid-wide">
           <span>Название</span>
-          <input required maxLength={120} value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="Например: TS на Абая" />
+          <input required maxLength={120} value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="Например: Кофейня на Абая" />
         </label>
         <label className="field">
-          <span>Часовой пояс</span>
-          <input value={timezone} onChange={(e) => setTimezone(e.target.value)} />
+          <span>Город</span>
+          <select
+            value={cityId}
+            onChange={(e) => {
+              setCityId(e.target.value);
+              setCurrency(cityById(e.target.value).currency);
+            }}
+          >
+            {citiesByCountry().map((g) => (
+              <optgroup key={g.country} label={g.label}>
+                {g.cities.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
         </label>
         <label className="field">
           <span>Валюта</span>
-          <input value={currency} maxLength={3} onChange={(e) => setCurrency(e.target.value)} />
+          <select value={currency} onChange={(e) => setCurrency(e.target.value as CurrencyCode)}>
+            {CURRENCIES.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.name}
+              </option>
+            ))}
+          </select>
         </label>
       </div>
       {error && (
@@ -151,9 +173,9 @@ function NewBranch({ onCreated, onCancel }: { onCreated: (res: CreateBranchRespo
           {error}
         </p>
       )}
-      <div className="row">
+      <div className="row wrap">
         <button type="submit" className="btn btn-primary" disabled={busy}>
-          {busy ? 'Создаём…' : 'Создать филиал'}
+          {busy ? 'Создаём…' : 'Создать заведение'}
         </button>
         <button type="button" className="btn" onClick={onCancel}>
           Отмена
@@ -163,81 +185,61 @@ function NewBranch({ onCreated, onCancel }: { onCreated: (res: CreateBranchRespo
   );
 }
 
-/**
- * CLOUD_URL for a branch's HUB: the `sync` Edge Function under the Supabase project, or the
- * self-hosted cloud this cabinet is served from (in the phone app — the cloud from its settings).
- */
-function branchCloudUrl(): string | null {
-  if (SUPABASE_MODE) return hubCloudUrl({ supabaseUrl: supabaseUrl() });
-  return hubCloudUrl({ cloudOrigin: nativeBridge()?.cloudUrl() ?? (typeof location === 'undefined' ? null : location.origin) });
-}
-
+/** Right after «Создать заведение»: connect its cash register with the code, the technical values folded. */
 function BranchConnect({ res, onDone }: { res: CreateBranchResponse; onDone: () => void }) {
-  const cloudUrl = branchCloudUrl();
-  let code: string | null = null;
-  try {
-    code = cloudUrl ? encodeHubSetupCode({ hubId: res.hubId, apiKey: res.hubApiKey, cloudUrl }) : null;
-  } catch {
-    code = null; // values the cloud never issues: the manual ones below still work
-  }
-  const env = [`HUB_ID=${res.hubId}`, `CLOUD_API_KEY=${res.hubApiKey}`, ...(cloudUrl ? [`CLOUD_URL=${cloudUrl}`] : [])].join('\n');
   return (
-    <ShownOnce
-      onDone={onDone}
-      note={
-        <div className="hint">
-          <p>
-            Без кода: на странице мастера нажмите «ввести HUB_ID и ключ вручную» или впишите эти строки в файл настроек HUB
-            (<code>/etc/bills/hub.env</code>) и перезапустите HUB:
-          </p>
-          <pre className="env-snippet">{env}</pre>
-          {cloudUrl && isLocalOnlyCloudUrl(cloudUrl) && (
-            <p>
-              Кабинет открыт по адресу <code>{cloudUrl}</code> — такой адрес облака работает только на этом же компьютере. HUB
-              другого клуба подключайте вручную, указав вместо него адрес этого компьютера в сети (например, Tailscale).
-            </p>
-          )}
-          <p>HUB получит лицензию, сотрудников и их ключи при первой синхронизации.</p>
-        </div>
-      }
-    >
-      {code && (
-        <>
-          <p className="hint">
-            На мини-ПК клуба: отсканируйте QR телефоном в Wi-Fi клуба — откроется мастер настройки HUB. Если не открылось —
-            откройте адрес, который показан на экране мини-ПК, и вставьте код.
-          </p>
-          <QrImage text={hubSetupUrl(code)} alt={`QR-код для подключения HUB филиала «${res.branch.name}»`} />
-          <CopyValue label="Код подключения" value={code} />
-        </>
-      )}
-      <CopyValue label="HUB_ID" value={res.hubId} />
-      <CopyValue label="CLOUD_API_KEY" value={res.hubApiKey} />
-      {cloudUrl && <CopyValue label="CLOUD_URL" value={cloudUrl} />}
-    </ShownOnce>
+    <div className="sub-panel branch-connect" role="status">
+      <h3>Заведение «{res.branch.name}» создано. Теперь подключите кассу</h3>
+      <ConnectCash
+        clubId={res.branch.id}
+        clubName={res.branch.name}
+        hubConnected={false}
+        initial={{ hubId: res.hubId, apiKey: res.hubApiKey }}
+      />
+      <p className="hint">
+        Код можно открыть позже: «Первые шаги» → «Подключите кассу». Программа для кассы — на странице{' '}
+        <a className="link-inline" href="#/apps">
+          «Скачать»
+        </a>
+        .
+      </p>
+      <div className="row wrap">
+        <button type="button" className="btn" onClick={onDone}>
+          Готово
+        </button>
+      </div>
+    </div>
   );
 }
 
-function BranchList({ branches }: { branches: BranchView[] }) {
-  if (branches.length === 0) return <p className="empty">Филиалов пока нет</p>;
+function BranchList({ branches, onAdd }: { branches: BranchView[]; onAdd: (() => void) | null }) {
+  if (branches.length === 0) {
+    return (
+      <div className="empty-state">
+        <p className="muted">Заведений пока нет.</p>
+        {onAdd && (
+          <button type="button" className="btn btn-primary" onClick={onAdd}>
+            Добавьте первое заведение
+          </button>
+        )}
+      </div>
+    );
+  }
+  const now = Date.now();
   return (
     <ul className="plain-list">
       {branches.map((b) => {
         const seen = b.hubs.map((h) => h.lastSeenAt ?? 0).reduce((a, x) => Math.max(a, x), 0);
         return (
-          <li key={b.id} className="list-item">
+          <li key={b.id} className="list-item branch-item">
             <div className="list-main">
               <strong>{b.name}</strong>
               <span className="hint">
-                {b.timezone} · {b.currency} ·{' '}
-                {b.hubs.length === 0
-                  ? 'HUB не подключён'
-                  : seen
-                    ? `HUB на связи ${formatDateTime(seen, b.timezone)}`
-                    : 'HUB ещё не выходил на связь'}
+                {zoneLabel(b.timezone)} · {currencyName(b.currency)} ·{' '}
+                {b.hubs.length === 0 ? 'касса не подключена' : seen ? `касса была на связи ${formatAgo(Math.max(0, now - seen))}` : 'касса ещё не подключена'}
               </span>
             </div>
-            <span className="row">
+            <span className="row wrap branch-actions">
               <a className="btn btn-small" href={clubHref(b.id, 'staff')}>
                 Сотрудники
               </a>
@@ -252,7 +254,7 @@ function BranchList({ branches }: { branches: BranchView[] }) {
   );
 }
 
-export function CompanyPage() {
+export function CompanyPage({ companyId }: { companyId: string }) {
   const lic = useCompanyLicense();
   const loadBranches = useCallback(() => listBranches(), []);
   const branches = usePoll(loadBranches, 60_000);
@@ -267,13 +269,10 @@ export function CompanyPage() {
 
   return (
     <div className="company-page">
-      <a className="back" href="#/">
-        ← Все клубы
-      </a>
-      <LicenseSection license={license} error={lic.error} />
+      <StartCard companyId={companyId} />
 
       <Section
-        title="Филиалы"
+        title="Заведения"
         aside={
           <span className="panel-aside">
             <span className="panel-total">{status?.maxClubs ? `${used} из ${status.maxClubs}` : used}</span>
@@ -285,18 +284,19 @@ export function CompanyPage() {
                 title={!allowed && status?.readOnly ? 'Лицензия: только чтение' : undefined}
                 onClick={() => setAdding(true)}
               >
-                {limitReached && status?.maxClubs != null ? clubLimitText(status.maxClubs) : 'Новый филиал'}
+                {limitReached && status?.maxClubs != null ? clubLimitText(status.maxClubs) : 'Добавить заведение'}
               </button>
             )}
           </span>
         }
       >
-        {limitReached && <p className="hint">Чтобы открыть ещё филиал, расширьте лицензию у владельца платформы TS.</p>}
-        {status?.readOnly && <p className="hint">Лицензия в режиме «только чтение» — новые филиалы не открываются.</p>}
+        {limitReached && <p className="hint">Чтобы открыть ещё одно заведение, расширьте лицензию у команды TS.</p>}
+        {status?.readOnly && <p className="hint">Лицензия в режиме «только чтение» — новые заведения не добавить.</p>}
         {adding && (
           <NewBranch
             onCancel={() => setAdding(false)}
             onCreated={(res) => {
+              rememberHubCode(res.branch.id, { hubId: res.hubId, apiKey: res.hubApiKey });
               setAdding(false);
               setCreated(res);
               void branches.reload();
@@ -305,8 +305,14 @@ export function CompanyPage() {
           />
         )}
         {created && <BranchConnect res={created} onDone={() => setCreated(null)} />}
-        {branches.data ? <BranchList branches={branches.data} /> : <p className="empty">{loadingText(branches.error, 'филиалы')}</p>}
+        {branches.data ? (
+          <BranchList branches={branches.data} onAdd={allowed && !adding && !created ? () => setAdding(true) : null} />
+        ) : (
+          <p className="empty">{loadingText(branches.error, 'заведения')}</p>
+        )}
       </Section>
+
+      <LicenseSection license={license} error={lic.error} />
     </div>
   );
 }

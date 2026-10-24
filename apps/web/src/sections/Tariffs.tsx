@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { TariffConfig } from '@bills/domain';
 import { calculateCharge, formatMoney, priceAt, zonedParts } from '@bills/domain';
-import { SectionCard } from '../components.tsx';
+import { EmptyState, SectionCard } from '../components.tsx';
 import { formatClock, formatSpan } from '../format.ts';
 import { Icon } from '../icons.tsx';
 import { hrefFor } from '../router.tsx';
@@ -207,11 +207,11 @@ function Calculator({ now }: { now: number }) {
 }
 
 function rules(t: TariffConfig, currency: string): string[] {
-  const out = [`базовая ${formatMoney(t.basePricePerHour, currency)}/ч`];
-  out.push(t.stepMinutes === 1 ? 'поминутно' : `шаг ${t.stepMinutes} мин`);
-  if (t.minimumMinutes) out.push(`минимум ${t.minimumMinutes} мин`);
-  if (t.freeMinutes) out.push(`первые ${t.freeMinutes} мин бесплатно`);
-  if (t.roundingMinor > 1) out.push(`сумма до ${formatMoney(t.roundingMinor, currency)}`);
+  const out = [`обычная цена ${formatMoney(t.basePricePerHour, currency)}/ч`];
+  out.push(t.stepMinutes === 1 ? 'шаг 1 мин (поминутно)' : `шаг ${t.stepMinutes} мин`);
+  if (t.minimumMinutes) out.push(`минимальное время ${t.minimumMinutes} мин`);
+  if (t.freeMinutes) out.push(`бесплатные минуты: ${t.freeMinutes}`);
+  if (t.roundingMinor > 1) out.push(`округление суммы до ${formatMoney(t.roundingMinor, currency)}`);
   return out;
 }
 
@@ -231,6 +231,23 @@ export function TariffsSection() {
   );
   const usedBy = (id: string) => state.tables.filter((t) => t.defaultTariffId === id).map((t) => t.name);
 
+  if (state.tariffs.length === 0) {
+    return (
+      <div className="page">
+        <EmptyState icon="tariffs" title="Тарифов пока нет">
+          <p>Тариф — это цена часа игры. Без него не открыть игру и не добавить столы.</p>
+          {canNow('tariffs.edit') ? (
+            <a className="btn btn-primary" href={hrefFor('/settings', { tab: 'tariffs' })}>
+              Создать тариф или заполнить примером
+            </a>
+          ) : (
+            <p>Тарифы создаёт управляющий или администратор.</p>
+          )}
+        </EmptyState>
+      </div>
+    );
+  }
+
   return (
     <div className="page">
       <p className="page-lead">
@@ -239,7 +256,7 @@ export function TariffsSection() {
         {canNow('tariffs.edit') && (
           <>
             {' '}
-            <a href={hrefFor('/settings', { tab: 'tariffs' })}>Изменить тарифы и окна цен — в настройках клуба.</a>
+            <a href={hrefFor('/settings', { tab: 'tariffs' })}>Изменить тарифы и цену по времени суток — в настройках клуба.</a>
           </>
         )}
       </p>

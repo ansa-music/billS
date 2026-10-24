@@ -28,7 +28,7 @@ export function HubBadge({ hub, now }: { hub: HubStatus | null; now: number }) {
   if (!hub) {
     return (
       <span className="hub" data-hub="none">
-        HUB не подключён
+        Касса не подключена
       </span>
     );
   }
@@ -37,13 +37,13 @@ export function HubBadge({ hub, now }: { hub: HubStatus | null; now: number }) {
     <span className="hub-wrap">
       <span className="hub" data-hub={hub.online ? 'online' : 'offline'} title={title}>
         {hub.online
-          ? 'HUB на связи'
+          ? 'Касса на связи'
           : hub.lastSeenAt
-            ? `Нет связи с HUB ${formatAgo(now - hub.lastSeenAt)}`
-            : 'HUB ещё не выходил на связь'}
+            ? `Нет связи с кассой ${formatAgo(now - hub.lastSeenAt)}`
+            : 'Касса ещё не выходила на связь'}
       </span>
       {hub.pendingSettings && (
-        <span className="tag tag-warn" title="Облако отправило новые настройки, HUB их ещё не забрал">
+        <span className="tag tag-warn" title="Кабинет отправил новые настройки, касса их ещё не забрала">
           ждёт настройки
         </span>
       )}

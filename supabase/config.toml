@@ -28,8 +28,8 @@ site_url = "http://127.0.0.1:5180"
 additional_redirect_urls = ["http://127.0.0.1:5180/**", "http://localhost:5180/**"]
 jwt_expiry = 3600
 enable_refresh_token_rotation = true
-# Companies and owners are created by the platform, not by sign-up from the internet:
-# an Auth user is linked to an existing owner by e-mail (see migrations).
+# Companies and owners are created by the platform or by the `signup` function (Auth admin API,
+# e-mail confirmed); an Auth user is linked to an existing owner by e-mail (see migrations).
 enable_signup = true
 
 [auth.email]
@@ -56,4 +56,9 @@ verify_jwt = false
 # A client's manager gets a Supabase Auth account (invitation letter or a temporary password).
 # The caller is the platform (a key session or a Supabase JWT), checked inside like `platform`.
 [functions.invite-manager]
+verify_jwt = false
+
+# Self sign-up from the cabinet («Начать бесплатно»): anyone on the internet, no JWT yet.
+# Guarded inside: TS_SIGNUP_DISABLED, a per-IP limit (signup_attempts), one account per e-mail.
+[functions.signup]
 verify_jwt = false

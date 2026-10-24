@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { IssueKeyRequest, KeyListResponse, LoginAttemptsResponse, LoginRequest, MeResponse } from '@bills/domain';
+import type { IssueKeyRequest, KeyListResponse, LoginAttemptsResponse, LoginRequest, MeResponse, RosterResponse } from '@bills/domain';
 import type { Hub } from '../hub.ts';
 import { actorOf, assertCan, emptyBody, guard, runCommand } from './command.ts';
 
@@ -12,13 +12,15 @@ export interface AuthHookOptions {
 }
 
 /**
- * Endpoints that work without a session: health and metrics for monitoring, login itself, the guest
- * screen of a coffee shop, and the first-boot wizard (nobody has a key yet; LAN only and closed once set up — see routes/setup.ts).
+ * Endpoints that work without a session: health and metrics for monitoring, login itself and the
+ * «Кто на смене?» list in front of it, the guest screen of a coffee shop, and the first-boot wizard (nobody has a key yet; LAN only and closed once set up — see routes/setup.ts).
  */
 const PUBLIC = new Set([
   '/api/health',
   '/metrics',
   '/api/auth/login',
+  // Names and roles of the people who may sign in here (club setting display.showRoster), never keys.
+  '/api/auth/roster',
   '/api/demo',
   '/api/setup',
   '/api/setup/status',
@@ -94,6 +96,11 @@ export function registerAuth(app: FastifyInstance, hub: Hub, options: AuthHookOp
       return reply.status(200).send(result);
     },
   );
+
+  app.get('/api/auth/roster', async (_req, reply): Promise<RosterResponse> => {
+    reply.header('cache-control', 'no-store');
+    return { people: hub.auth.roster() };
+  });
 
   app.get('/api/auth/me', async (req): Promise<MeResponse> => {
     const token = req.sessionToken;

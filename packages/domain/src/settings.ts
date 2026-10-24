@@ -29,6 +29,8 @@ export interface DisplaySettings {
   theme: Theme;
   cardSize: CardSize;
   waiterSees: WaiterView;
+  /** The login screen lists who works here («Кто на смене?», names and roles only); false — just the keypad. */
+  showRoster: boolean;
 }
 
 export interface RuleSettings {
@@ -53,7 +55,7 @@ export interface ClubSettings {
 }
 
 export const DEFAULT_CLUB_SETTINGS: ClubSettings = {
-  display: { title: null, logoUrl: null, theme: 'auto', cardSize: 'normal', waiterSees: 'amount' },
+  display: { title: null, logoUrl: null, theme: 'auto', cardSize: 'normal', waiterSees: 'amount', showRoster: true },
   rules: {
     freeTableAfterStop: 'immediately',
     defaultFreeMinutes: 3,
@@ -87,6 +89,10 @@ function int(value: unknown, fallback: number, min: number, max: number): number
   return n;
 }
 
+function bool(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
 function obj(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
 }
@@ -114,6 +120,7 @@ export function normalizeClubSettings(input: unknown, base: ClubSettings = DEFAU
       theme: pick(d.theme, THEMES, base.display.theme),
       cardSize: pick(d.cardSize, CARD_SIZES, base.display.cardSize),
       waiterSees: pick(d.waiterSees, WAITER_VIEWS, base.display.waiterSees),
+      showRoster: bool(d.showRoster, base.display.showRoster),
     },
     rules: {
       freeTableAfterStop: pick(r.freeTableAfterStop, FREE_TABLE_RULES, base.rules.freeTableAfterStop),

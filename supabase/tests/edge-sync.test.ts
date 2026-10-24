@@ -118,7 +118,7 @@ test('sync: snapshot 409 after an owner edit, settings pull, then the HUB catche
   assert.equal(pulled.body.changed, true);
   assert.equal(pulled.body.version, 1);
   assert.equal(pulled.body.tariffs.length, current.length);
-  assert.deepEqual((await e.call(handleSync, 'GET', '/sync/settings?since=1', { headers: auth(HUB1.key) })).body, { changed: false, version: 1 });
+  assert.deepEqual((await e.call(handleSync, 'GET', '/sync/settings?since=1', { headers: auth(HUB1.key) })).body, { changed: false, version: 1, business: { type: 'billiards' } });
 
   const caughtUp = await e.call(handleSync, 'POST', '/sync/snapshot', {
     headers: auth(HUB1.key),

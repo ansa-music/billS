@@ -22,7 +22,7 @@ export function ManualModeBanner({
   mode: ManualModeView;
   timezone: string;
   busy: boolean;
-  /** The HUB lets only a manager switch it off; others just see the banner. */
+  /** `lamps.manual_off`: manager, administrator or senior shift; others see who can. */
   canDisable: boolean;
   onDisable: () => void;
 }) {
@@ -43,14 +43,19 @@ export function ManualModeBanner({
           </span>
         )}
       </p>
-      {canDisable && (
+      {canDisable ? (
         <button type="button" className="btn btn-small hall-manual-btn" disabled={busy} onClick={onDisable}>
-          Выключить (управляющий)
+          Выключить ручной режим
         </button>
+      ) : (
+        <span className="hall-manual-who">{MANUAL_OFF_WHO}</span>
       )}
     </div>
   );
 }
+
+/** Who may switch manual mode off (`lamps.manual_off` in packages/domain/src/permissions.ts). */
+const MANUAL_OFF_WHO = 'Выключить может управляющий, администратор или старший смены';
 
 function SensorBadge({ lamp }: { lamp: TableView['lamp'] }) {
   if (lamp.currentOn === null) return <span className="muted">датчик: —</span>;
@@ -70,6 +75,8 @@ function SensorBadge({ lamp }: { lamp: TableView['lamp'] }) {
 export function HardwarePanel() {
   const hub = useHub();
   const { state, actor } = hub;
+  const canTurnOff = hub.canNow('lamps.manual_off');
+  const canTurnOn = hub.canNow('lamps.manual');
   const [reason, setReason] = useState('');
   const mode = state.manualMode;
   const polled = state.tables.some((t) => t.lamp.polledAt != null);
@@ -146,15 +153,19 @@ export function HardwarePanel() {
               Включён{mode.since != null ? ` в ${formatClock(mode.since, state.club.timezone)}` : ''}
               {mode.by ? ` (${mode.by})` : ''}. Причина: {mode.reason}
             </p>
-            <button type="button" className="btn btn-small" disabled={busy} onClick={() => manual(false)}>
-              Выключить — только управляющий
-            </button>
+            {canTurnOff ? (
+              <button type="button" className="btn btn-small" disabled={busy} onClick={() => manual(false)}>
+                Выключить ручной режим
+              </button>
+            ) : (
+              <p className="hint">{MANUAL_OFF_WHO}.</p>
+            )}
           </>
         ) : (
           <>
             <p className="hint">
-              Если контроллер сломан: игры открываются без ожидания лампы, свет включают ключом в щитке. Каждая такая игра
-              помечается в аудите.
+              Если контроллер света сломан: игры открываются без ожидания лампы, свет включают ключом в щитке. Каждая такая
+              игра отмечается в журнале.
             </p>
             <label className="field">
               Причина
@@ -168,7 +179,7 @@ export function HardwarePanel() {
             <button
               type="button"
               className="btn btn-small btn-warn"
-              disabled={busy || reason.trim().length < 3}
+              disabled={busy || !canTurnOn || reason.trim().length < 3}
               onClick={() => {
                 manual(true, reason.trim());
                 setReason('');

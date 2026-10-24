@@ -17,6 +17,8 @@ import {
 } from './format.ts';
 import type { ClubTab } from './hooks.ts';
 import { clubHref, usePoll } from './hooks.ts';
+import { BusinessTypeLine } from './BusinessType.tsx';
+import { currencyName, zoneLabel } from './cities.ts';
 import { AlertList, HubBadge, Section, StatTile, gamesLabel, loadingText } from './shared.tsx';
 
 /** Club name, HUB status and the tabs — shared by the club page, the shifts page and the tariff editor. */
@@ -25,12 +27,14 @@ export function ClubHeader({ club, now, tab }: { club: ClubSummary; now: number;
     <header className="club-page-head">
       <div>
         <a className="back" href="#/">
-          ← Все клубы
+          ← Обзор
         </a>
         <h2>{club.name}</h2>
         <p className="muted">
-          {club.timezone} · {club.currency} · {club.tablesCount} столов
+          {zoneLabel(club.timezone)} · {currencyName(club.currency)}
+          {club.tablesCount > 0 ? ` · столов: ${club.tablesCount}` : ''}
         </p>
+        {tab === 'overview' && <BusinessTypeLine club={club} />}
       </div>
       <div className="club-page-right">
         <HubBadge hub={club.hub} now={now} />

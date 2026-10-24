@@ -10,7 +10,7 @@ export interface HubConfig {
   host: string;
   port: number;
   dbPath: string;
-  /** Time zone of the demo club created on first start. */
+  /** HUB_DEMO_TZ: time zone of the club created on an empty database (the demo club, or a real club's empty one). */
   demoTimezone: string;
   /** HUB_DEMO_BUSINESS: what the demo club created on an empty database is — billiards (default) or a coffee shop (cafe). */
   demoBusiness: BusinessType;

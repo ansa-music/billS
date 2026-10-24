@@ -2,7 +2,9 @@ import { useState } from 'react';
 import type { ClubAdminView, TariffAdminView, TariffConfig, Weekday } from '@bills/domain';
 import { formatMoney, nextPriceChange, priceAt, validateTariff } from '@bills/domain';
 import { formatClock } from '../../format.ts';
-import { Empty, Field, Modal, Section } from '../../ui.tsx';
+import { navigate } from '../../router.tsx';
+import { EmptyState } from '../../components.tsx';
+import { Field, Modal, Section } from '../../ui.tsx';
 import { useServerNow } from '../../useHub.tsx';
 import type { SectionProps } from './shared.tsx';
 import { fromMajor, toInt, toMajor, WEEKDAY_SHORT } from './shared.tsx';
@@ -31,8 +33,17 @@ interface TariffDraft {
 /** «Тарифы»: list with the rate in force now, editor dialog with a live preview. */
 export function TariffsEditor({ club, online, isBusy, run, onSaved, reload, canEdit }: SectionProps & { canEdit: boolean }) {
   const [editing, setEditing] = useState<TariffAdminView | 'new' | null>(null);
+  /** Tariffs are there but no tables yet: point to the next step. */
+  const [nextStep, setNextStep] = useState(false);
   const now = useServerNow(30_000);
   const disabled = !canEdit || !online;
+
+  const fillExample = async () => {
+    const res = await run<{ tariffs: number }>('template', '/api/templates/apply', { kind: 'tariffs-standard' });
+    if (!res) return;
+    await reload(res.tariffs > 0 ? 'Тарифы «Стандарт» и «Снукер» добавлены' : 'Тарифы уже есть');
+    if (res.tariffs > 0 && club.tables.length === 0) setNextStep(true);
+  };
 
   const toggle = async (t: TariffAdminView) => {
     const res = await run<TariffAdminView>(`tariff:${t.id}`, `/api/tariffs/${t.id}/update`, { isActive: !t.isActive });
@@ -49,7 +60,18 @@ export function TariffsEditor({ club, online, isBusy, run, onSaved, reload, canE
       }
     >
       {club.tariffs.length === 0 ? (
-        <Empty>Тарифов пока нет.</Empty>
+        <EmptyState icon="tariffs" title="Тарифов пока нет">
+          <p>Тариф — это цена часа игры. Он нужен, чтобы добавить столы и открывать игры.</p>
+          <div className="row wrap">
+            <button type="button" className="btn btn-primary" disabled={disabled || isBusy('template')} onClick={() => void fillExample()}>
+              {isBusy('template') ? 'Добавляем…' : 'Заполнить примером'}
+            </button>
+            <button type="button" className="btn" disabled={disabled} onClick={() => setEditing('new')}>
+              Создать тариф самому
+            </button>
+          </div>
+          <p className="hint">Пример — «Стандарт» и «Снукер»: днём, вечером и в выходные разная цена. Всё можно поменять.</p>
+        </EmptyState>
       ) : (
         <ul className="list tariff-list">
           {club.tariffs.map((t) => {
@@ -99,6 +121,16 @@ export function TariffsEditor({ club, online, isBusy, run, onSaved, reload, canE
           })}
         </ul>
       )}
+      {(nextStep || (club.tariffs.some((t) => t.isActive) && club.tables.length === 0)) && (
+        <div className="settings-guide" role="note">
+          <p>
+            <strong>Дальше: добавьте столы.</strong> Каждому столу назначается тариф.
+          </p>
+          <button type="button" className="btn btn-primary" onClick={() => navigate('/settings', { tab: 'tables' })}>
+            Перейти к столам
+          </button>
+        </div>
+      )}
       <p className="hint">
         Тариф фиксируется в игре при открытии стола: изменение цен не влияет на уже идущие игры. Выключенный тариф нельзя выбрать для новых игр.
       </p>
@@ -129,11 +161,11 @@ export function TariffsEditor({ club, online, isBusy, run, onSaved, reload, canE
 
 function describe(c: TariffConfig, currency: string): string {
   const parts = [`база ${formatMoney(c.basePricePerHour, currency)}/час`];
-  if (c.windows.length) parts.push(`${c.windows.length} ${plural(c.windows.length, 'окно', 'окна', 'окон')}`);
-  parts.push(c.stepMinutes === 1 ? 'поминутно' : `шаг ${c.stepMinutes} мин`);
-  if (c.minimumMinutes > 0) parts.push(`минимум ${c.minimumMinutes} мин`);
-  if (c.freeMinutes > 0) parts.push(`${c.freeMinutes} мин бесплатно`);
-  if (c.roundingMinor > 1) parts.push(`округление до ${formatMoney(c.roundingMinor, currency)}`);
+  if (c.windows.length) parts.push(`цен по времени суток: ${c.windows.length}`);
+  parts.push(c.stepMinutes === 1 ? 'шаг 1 мин (поминутно)' : `шаг ${c.stepMinutes} мин`);
+  if (c.minimumMinutes > 0) parts.push(`минимальное время ${c.minimumMinutes} мин`);
+  if (c.freeMinutes > 0) parts.push(`бесплатные минуты: ${c.freeMinutes}`);
+  if (c.roundingMinor > 1) parts.push(`округление суммы до ${formatMoney(c.roundingMinor, currency)}`);
   return parts.join(' · ');
 }
 
@@ -167,9 +199,9 @@ function toConfig(d: TariffDraft, club: ClubAdminView): { config: TariffConfig |
   const errors: string[] = [];
   const cur = club.currency;
   const basePricePerHour = fromMajor(d.basePrice, cur);
-  if (basePricePerHour === null) errors.push('Базовая цена: укажите сумму за час');
+  if (basePricePerHour === null) errors.push('Обычная цена: укажите сумму за час');
   const stepMinutes = toInt(d.stepMinutes);
-  if (stepMinutes === null || stepMinutes < 1) errors.push('Шаг округления: целое число минут, не меньше 1');
+  if (stepMinutes === null || stepMinutes < 1) errors.push('Шаг: целое число минут, не меньше 1');
   const minimumMinutes = toInt(d.minimumMinutes);
   if (minimumMinutes === null) errors.push('Минимальное время: целое число минут');
   const freeMinutes = toInt(d.freeMinutes);
@@ -178,11 +210,11 @@ function toConfig(d: TariffDraft, club: ClubAdminView): { config: TariffConfig |
   if (roundingMinor === null || roundingMinor < 1) errors.push('Округление суммы: сумма не меньше минимальной единицы');
   const windows = d.windows.map((w, i) => {
     const n = i + 1;
-    if (!w.label.trim()) errors.push(`Окно ${n}: укажите название`);
-    if (w.days.length === 0) errors.push(`Окно ${n}: выберите хотя бы один день`);
-    if (!/^\d{2}:\d{2}$/.test(w.from) || !/^\d{2}:\d{2}$/.test(w.to)) errors.push(`Окно ${n}: время в формате ЧЧ:ММ`);
+    if (!w.label.trim()) errors.push(`Цена по времени ${n}: укажите название`);
+    if (w.days.length === 0) errors.push(`Цена по времени ${n}: выберите хотя бы один день`);
+    if (!/^\d{2}:\d{2}$/.test(w.from) || !/^\d{2}:\d{2}$/.test(w.to)) errors.push(`Цена по времени ${n}: время в формате ЧЧ:ММ`);
     const pricePerHour = fromMajor(w.price, cur);
-    if (pricePerHour === null) errors.push(`Окно ${n}: укажите цену за час`);
+    if (pricePerHour === null) errors.push(`Цена по времени ${n}: укажите цену за час`);
     // <input type=time> cannot hold 24:00; "00:00" as an end means the end of the day (domain: to === 0 → 24:00).
     return { label: w.label.trim(), days: w.days, from: w.from, to: w.to === '00:00' ? '24:00' : w.to, pricePerHour: pricePerHour ?? 0 };
   });
@@ -244,15 +276,16 @@ function TariffDialog({
           <Field label="Название">
             <input autoFocus value={d.name} maxLength={60} onChange={(e) => setD((x) => ({ ...x, name: e.target.value }))} />
           </Field>
-          <Field label={`Базовая цена за час, ${unit}`} hint="Действует, когда ни одно окно не подходит">
+          <Field label={`Обычная цена за час, ${unit}`} hint="Действует всё время, кроме часов с особой ценой ниже">
             <input inputMode="decimal" value={d.basePrice} placeholder="2000" onChange={(e) => setD((x) => ({ ...x, basePrice: e.target.value }))} />
           </Field>
         </div>
 
         <fieldset className="windows">
-          <legend>Окна цен</legend>
+          <legend>Цена по времени суток</legend>
           <p className="hint">
-            Первое подходящее окно побеждает. Окно принадлежит дню начала: «Пт 22:00–06:00» действует и в субботу до 06:00.
+            Например, вечером и в выходные дороже. Если часы пересекаются, действует верхняя строка. Время через полночь
+            относится к дню начала: «Пт 22:00–06:00» действует и в субботу до 06:00.
           </p>
           {d.windows.map((w, i) => (
             <div key={i} className="window">
@@ -291,7 +324,7 @@ function TariffDialog({
                 <button
                   type="button"
                   className="btn btn-small btn-ghost btn-narrow"
-                  aria-label="Удалить окно"
+                  aria-label="Удалить эту цену"
                   onClick={() => setD((x) => ({ ...x, windows: x.windows.filter((_, j) => j !== i) }))}
                 >
                   Удалить
@@ -309,7 +342,7 @@ function TariffDialog({
               }))
             }
           >
-            + Добавить окно
+            + Добавить цену по времени
           </button>
         </fieldset>
 
@@ -317,13 +350,13 @@ function TariffDialog({
           <Field label="Шаг, мин" hint="1 — поминутно">
             <input inputMode="numeric" value={d.stepMinutes} onChange={(e) => setD((x) => ({ ...x, stepMinutes: e.target.value }))} />
           </Field>
-          <Field label="Минимум, мин" hint="0 — без минимума">
+          <Field label="Минимальное время, мин" hint="0 — без минимума">
             <input inputMode="numeric" value={d.minimumMinutes} onChange={(e) => setD((x) => ({ ...x, minimumMinutes: e.target.value }))} />
           </Field>
-          <Field label="Бесплатно, мин" hint="Короче — не платят">
+          <Field label="Бесплатные минуты" hint="Игра короче — бесплатно">
             <input inputMode="numeric" value={d.freeMinutes} onChange={(e) => setD((x) => ({ ...x, freeMinutes: e.target.value }))} />
           </Field>
-          <Field label={`Округление, ${unit}`} hint="Сумма кратна этому">
+          <Field label={`Округление суммы, ${unit}`} hint="Итог кратен этой сумме">
             <input inputMode="decimal" value={d.rounding} onChange={(e) => setD((x) => ({ ...x, rounding: e.target.value }))} />
           </Field>
         </div>

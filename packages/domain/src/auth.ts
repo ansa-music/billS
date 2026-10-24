@@ -157,3 +157,43 @@ export function loginLockMs(failures: number): number {
   if (failures < t.freeFailures) return 0;
   return Math.min(t.baseLockMs * 2 ** (failures - t.freeFailures), t.maxLockMs);
 }
+
+// ── Login screen helpers ────────────────────────────────────────────────────
+
+/**
+ * A readable name of this device for the list of logins («Планшет Android · Chrome»), so nobody
+ * has to type one: taken from the browser's user agent; the person may rename it later.
+ */
+export function deviceNameFromUserAgent(ua: string, touchPoints = 0): string {
+  const s = ua || '';
+  let device: string;
+  if (/iPad/i.test(s) || (/Macintosh/i.test(s) && touchPoints > 1)) device = 'iPad';
+  else if (/iPhone|iPod/i.test(s)) device = 'iPhone';
+  else if (/Android/i.test(s)) device = /Mobile/i.test(s) ? 'Телефон Android' : 'Планшет Android';
+  else if (/Windows/i.test(s)) device = 'Компьютер Windows';
+  else if (/Macintosh|Mac OS X/i.test(s)) device = 'Mac';
+  else if (/CrOS/i.test(s)) device = 'Chromebook';
+  else if (/Linux/i.test(s)) device = 'Компьютер Linux';
+  else device = 'Устройство';
+  const browser = /Edg\//.test(s)
+    ? 'Edge'
+    : /YaBrowser\//.test(s)
+      ? 'Яндекс Браузер'
+      : /OPR\/|Opera/.test(s)
+        ? 'Opera'
+        : /Firefox\/|FxiOS\//.test(s)
+          ? 'Firefox'
+          : /Chrome\/|CriOS\//.test(s)
+            ? 'Chrome'
+            : /Safari\//.test(s)
+              ? 'Safari'
+              : null;
+  return browser ? `${device} · ${browser}` : device;
+}
+
+/** Up to two initials for an avatar: «Данияр Официант» → «ДО», «Асель» → «А». */
+export function nameInitials(name: string): string {
+  const words = name.trim().split(/[\s\-_.]+/u).filter(Boolean);
+  const letters = words.slice(0, 2).map((w) => [...w][0] ?? '');
+  return letters.join('').toUpperCase() || '?';
+}

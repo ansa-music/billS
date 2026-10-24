@@ -132,8 +132,12 @@ const SENIOR: readonly Role[] = [...M, 'admin', 'senior'];
 const ADMIN: readonly Role[] = [...M, 'admin'];
 const BAR: readonly Role[] = [...M, 'admin', 'senior', 'cashier', 'bartender', 'waiter'];
 const BAR_EDIT: readonly Role[] = [...M, 'admin', 'bartender'];
-/** The counter of a coffee shop: the cashier and the barista take orders, payment included. */
-const COUNTER: readonly Role[] = [...CASH, 'bartender'];
+/**
+ * The counter of a coffee shop: the cashier, the barista and the waiter take orders, payment
+ * included, and move them along. A coffee shop has no tables to serve, so without these a waiter
+ * would see no page at all; the counter exists only in a coffee shop (`business.type = cafe`).
+ */
+const COUNTER: readonly Role[] = [...CASH, 'bartender', 'waiter'];
 
 /**
  * action → roles allowed to do it. The platform roles (owner, tech) may do

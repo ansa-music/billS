@@ -2,6 +2,7 @@
 import type {
   ApiError,
   BlockClientRequest,
+  BusinessType,
   BranchView,
   ClientView,
   ClubDetails,
@@ -41,6 +42,7 @@ import type {
 import { CloudRequestError, emit } from './api-core.ts';
 import { nativeBridge } from './platform.ts';
 import type { RegisterDeviceBody } from './api-core.ts';
+import type { HubCodeResponse } from './onboarding.ts';
 
 async function toError(res: Response): Promise<CloudRequestError> {
   try {
@@ -273,4 +275,18 @@ export function issueStaffKey(staffId: string, body: IssueCloudKeyRequest): Prom
 
 export function revokeKey(keyId: string): Promise<CloudKeyView> {
   return request<CloudKeyView>(`/api/company/keys/${enc(keyId)}/revoke`, { method: 'POST' });
+}
+
+// --- «Первые шаги»: connection code, checklist numbers, venue type ------------------
+
+export function issueHubCode(clubId: string): Promise<HubCodeResponse> {
+  return request<HubCodeResponse>(`/api/owner/clubs/${enc(clubId)}/hub-code`, { method: 'POST' });
+}
+
+export function fetchOnboarding(): Promise<unknown> {
+  return request<unknown>('/api/owner/onboarding');
+}
+
+export async function setBusinessType(clubId: string, type: BusinessType): Promise<void> {
+  await request<unknown>(`/api/owner/clubs/${enc(clubId)}/business`, json('POST', { type }));
 }

@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  deviceNameFromUserAgent,
+  nameInitials,
   formatAccessKey,
   formatShortKey,
   isAccessKeyShape,
@@ -71,4 +73,26 @@ test('login throttle: five free failures, then a growing pause with a ceiling', 
   assert.equal(loginLockMs(LOGIN_THROTTLE.freeFailures), LOGIN_THROTTLE.baseLockMs);
   assert.equal(loginLockMs(LOGIN_THROTTLE.freeFailures + 1), LOGIN_THROTTLE.baseLockMs * 2);
   assert.equal(loginLockMs(100), LOGIN_THROTTLE.maxLockMs);
+});
+
+test('device name from the user agent: tablet, phone, computer and the browser', () => {
+  const tab = 'Mozilla/5.0 (Linux; Android 13; SM-X200) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36';
+  const phone = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36';
+  const ipad = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15';
+  const iphone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+  const win = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0';
+  assert.equal(deviceNameFromUserAgent(tab), 'Планшет Android · Chrome');
+  assert.equal(deviceNameFromUserAgent(phone), 'Телефон Android · Chrome');
+  assert.equal(deviceNameFromUserAgent(ipad, 5), 'iPad · Safari');
+  assert.equal(deviceNameFromUserAgent(ipad, 0), 'Mac · Safari');
+  assert.equal(deviceNameFromUserAgent(iphone), 'iPhone · Safari');
+  assert.equal(deviceNameFromUserAgent(win), 'Компьютер Windows · Edge');
+  assert.equal(deviceNameFromUserAgent(''), 'Устройство');
+});
+
+test('avatar initials', () => {
+  assert.equal(nameInitials('Данияр Официант'), 'ДО');
+  assert.equal(nameInitials('  асель '), 'А');
+  assert.equal(nameInitials('Анна-Мария Ли Цой'), 'АМ');
+  assert.equal(nameInitials(''), '?');
 });

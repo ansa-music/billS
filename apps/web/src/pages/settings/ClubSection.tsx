@@ -3,7 +3,7 @@ import type { ClubAdminView } from '@bills/domain';
 import { isValidTimeZone } from '@bills/domain';
 import { Field, Section } from '../../ui.tsx';
 import type { SectionProps } from './shared.tsx';
-import { CURRENCIES, SaveBar, TIME_ZONES, useDraft } from './shared.tsx';
+import { CURRENCIES, CURRENCY_LABEL, SaveBar, TIME_ZONE_LABEL, TIME_ZONES, useDraft } from './shared.tsx';
 
 const OTHER = '__other__';
 
@@ -44,7 +44,7 @@ export function ClubSection({ club, online, isBusy, run, onSaved, canEdit }: Sec
               onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
             />
           </Field>
-          <Field label="Валюта" hint="Код ISO 4217; цены тарифов задаются в этой валюте">
+          <Field label="Валюта" hint="В ней задаются все цены и считаются отчёты">
             <select
               value={draft.currency}
               disabled={disabled}
@@ -52,14 +52,14 @@ export function ClubSection({ club, online, isBusy, run, onSaved, canEdit }: Sec
             >
               {[...CURRENCIES, ...((CURRENCIES as readonly string[]).includes(draft.currency) ? [] : [draft.currency])].map((c) => (
                 <option key={c} value={c}>
-                  {c}
+                  {CURRENCY_LABEL[c] ?? c}
                 </option>
               ))}
             </select>
           </Field>
         </div>
         <div className="form-row">
-          <Field label="Часовой пояс" hint="По нему считаются окна тарифов (день/вечер) и отчёты" error={zoneError}>
+          <Field label="Часовой пояс (город)" hint="По нему считаются цены по времени суток и отчёты за день" error={zoneError}>
             <select
               value={customZone ? OTHER : draft.timezone}
               disabled={disabled}
@@ -73,14 +73,14 @@ export function ClubSection({ club, online, isBusy, run, onSaved, canEdit }: Sec
             >
               {TIME_ZONES.map((z) => (
                 <option key={z} value={z}>
-                  {z}
+                  {TIME_ZONE_LABEL[z] ?? z}
                 </option>
               ))}
-              <option value={OTHER}>Другой…</option>
+              <option value={OTHER}>Другой город…</option>
             </select>
           </Field>
           {customZone && (
-            <Field label="Название зоны IANA" hint="Например Europe/Berlin">
+            <Field label="Часовой пояс вручную" hint="Латиницей, как в настройках компьютера: Europe/Berlin">
               <input
                 value={draft.timezone}
                 disabled={disabled}

@@ -20,7 +20,7 @@ import { CloudError } from './errors.ts';
 import { projectEvent } from './projection.ts';
 import { hubBackOnline } from './push.ts';
 import type { ClubRow } from './settings.ts';
-import { loadSettings, saveSettings, tariffNames, toClubSettings } from './settings.ts';
+import { businessTypeOf, loadSettings, saveSettings, tariffNames, toClubSettings } from './settings.ts';
 
 export interface HubRow {
   id: string;
@@ -139,8 +139,9 @@ export async function acceptSnapshot(
 
 export async function settingsSince(db: SqlDriver, club: ClubRow, since: number): Promise<SyncSettingsResponse> {
   const current = await loadSettings(db, club);
-  if (since >= current.version) return { changed: false, version: current.version };
-  return { changed: true, ...toClubSettings(current) };
+  const business = { type: businessTypeOf(club) };
+  if (since >= current.version) return { changed: false, version: current.version, business };
+  return { changed: true, ...toClubSettings(current), business };
 }
 
 // --- Owner tariff edits ------------------------------------------------------

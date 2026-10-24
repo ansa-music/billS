@@ -152,12 +152,11 @@ test('validateCounterLines: the same product may repeat with other options, not 
   assert.ok(validateCounterLines([{ productId: 'cap', qty: 1, options: [1 as never] }])[0]!.includes('добавок'));
 });
 
-test('counter rights: cashier and barista take orders and move stages; a waiter does not', () => {
-  for (const role of ['cashier', 'bartender', 'senior', 'admin', 'manager'] as const) {
+test('counter rights: cashier, barista and waiter take orders and move stages', () => {
+  for (const role of ['cashier', 'bartender', 'waiter', 'senior', 'admin', 'manager'] as const) {
     assert.ok(can(role, 'counter.take'), role);
     assert.ok(can(role, 'counter.stage'), role);
   }
-  assert.ok(!can('waiter', 'counter.take'));
   assert.ok(!can('bartender', 'payment.take'));
   const ro = { readOnly: true, modules: { bar: true, cloud: true, hardware: true } };
   assert.equal(decide('bartender', 'counter.take', ro), 'read_only');

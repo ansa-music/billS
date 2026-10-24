@@ -27,6 +27,7 @@ import { localDeviceIds } from './localDevices.ts';
 import { NtfySection } from './NtfySection.tsx';
 import { forgetNtfy, currentNtfyTopic } from './ntfy.ts';
 import { WebPushSection } from './WebPushSection.tsx';
+import { EnableAlerts } from './EnableAlerts.tsx';
 import { disableWebPush, webPushDeviceId } from './webPush.ts';
 import { usePhonePushStatus } from './phonePush.ts';
 import type { PhonePushStatus } from './phonePush.ts';
@@ -95,15 +96,14 @@ function RulesTable({
       aside={saving ? <span className="hint">Сохраняем…</span> : <span className="saved">Сохраняется сразу</span>}
     >
       <p className="hint">
-        «Все клубы» задаёт вид уведомлений для всех клубов сразу; галочка в колонке клуба — своя настройка для этого
-        клуба.
+        «Везде» включает уведомление для всех заведений сразу; галочка в колонке заведения — своя настройка для него.
       </p>
       <div className="grid-wrap rules-wrap">
         <table className="grid rules-grid">
           <thead>
             <tr>
               <th className="rules-kind">Уведомление</th>
-              <th className="rules-cell">Все клубы</th>
+              <th className="rules-cell">Везде</th>
               {clubs.map((c) => (
                 <th key={c.id} className="rules-cell" title={c.name}>
                   {c.name}
@@ -122,7 +122,7 @@ function RulesTable({
                       type="checkbox"
                       className="rules-check"
                       checked={all}
-                      aria-label={`${k.label}: все клубы`}
+                      aria-label={`${k.label}: везде`}
                       onChange={() => onChange(toggleAll(rules, k.kind))}
                     />
                   </td>
@@ -135,7 +135,7 @@ function RulesTable({
                           className="rules-check"
                           checked={pushRuleAllows(rules, k.kind, c.id)}
                           aria-label={`${k.label}: ${c.name}`}
-                          title={own ? 'Своя настройка клуба' : 'Как для всех клубов'}
+                          title={own ? 'Своя настройка заведения' : 'Как везде'}
                           onChange={() => onChange(toggleClub(rules, k.kind, c.id))}
                         />
                       </td>
@@ -557,14 +557,14 @@ export function Phone() {
     }
   }
 
+  const inApp = nativeBridge() !== null;
+
   return (
     <main className="phone-page">
       <header className="club-page-head">
         <div>
-          <a className="back" href="#/">
-            ← Все клубы
-          </a>
-          <h2>Телефон и уведомления</h2>
+          <h2>Уведомления</h2>
+          <p className="muted">Тревоги из заведений — на телефон, даже когда кабинет закрыт.</p>
         </div>
       </header>
 
@@ -574,14 +574,11 @@ export function Phone() {
         <>
           {!settings.pushEnabled && (
             <p className="notice" role="status">
-              {SUPABASE_MODE
-                ? 'Push-уведомления на сервере выключены: не заданы ключи VAPID. Правила сохраняются, но ничего не отправляется.'
-                : 'Push-уведомления на облаке выключены. Правила сохраняются, но ничего не отправляется.'}
+              Отправка уведомлений на сервере TS пока не настроена — настройки сохранятся, но уведомления не придут.
+              Напишите в поддержку TS.
             </p>
           )}
-          <ThisPhone />
-          {SUPABASE_MODE && !nativeBridge() && <WebPushSection onChange={reload} />}
-          {SUPABASE_MODE && <NtfySection onChange={reload} />}
+          {SUPABASE_MODE ? <EnableAlerts onChange={reload} /> : inApp ? <ThisPhone /> : <GetTheApp />}
           <RulesTable
             rules={settings.rules}
             clubs={clubs}
@@ -589,10 +586,35 @@ export function Phone() {
             saving={saving}
             error={rulesError}
           />
-          <Devices settings={settings} reload={reload} />
         </>
       )}
-      {SUPABASE_MODE ? <PhoneSignIn /> : <Keys />}
+
+      <details className="advanced">
+        <summary>Дополнительно</summary>
+        <div className="advanced-body">
+          {settings && <Devices settings={settings} reload={reload} />}
+          {settings && SUPABASE_MODE && !inApp && <WebPushSection onChange={reload} />}
+          {settings && SUPABASE_MODE && <NtfySection onChange={reload} />}
+          {settings && !settings.pushEnabled && SUPABASE_MODE && (
+            <p className="hint">Для техподдержки: на сервере не заданы ключи VAPID для push-уведомлений браузера.</p>
+          )}
+          {SUPABASE_MODE ? <PhoneSignIn /> : <Keys />}
+        </div>
+      </details>
     </main>
+  );
+}
+
+/** Self-hosted cabinet in a browser: alerts go to the TS phone app. */
+function GetTheApp() {
+  return (
+    <Section title="Уведомления на телефоне">
+      <p className="hint">Тревоги приходят в приложение TS на телефоне. Установите его и войдите — уведомления включатся сами.</p>
+      <div className="row wrap">
+        <a className="btn btn-primary btn-big-text" href="#/apps">
+          Скачать приложение TS
+        </a>
+      </div>
+    </Section>
   );
 }

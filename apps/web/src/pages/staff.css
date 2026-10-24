@@ -575,3 +575,26 @@
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+
+/* QR code to log in with the new key (IssuedKey). */
+.key-qr {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+}
+
+.key-qr .qr-code {
+  flex: none;
+  border-radius: 8px;
+}
+
+.key-qr .hint {
+  flex: 1 1 200px;
+  margin: 0;
+}
+
+.staff-cloud {
+  font-size: 13px;
+  color: var(--muted);
+}

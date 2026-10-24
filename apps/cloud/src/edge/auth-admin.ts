@@ -10,8 +10,10 @@ export interface AuthAdmin {
   invite(email: string, redirectTo: string, data: Record<string, unknown>): Promise<'invited' | 'exists'>;
   /** POST /recover: the password-reset letter (what resetPasswordForEmail does). */
   recover(email: string, redirectTo: string): Promise<void>;
-  /** POST /admin/users with email_confirm: true → the new user's id. */
+  /** POST /admin/users with email_confirm: true → the new user's id; 409 EMAIL_TAKEN when the e-mail has an account. */
   createUser(email: string, password: string, userMetadata: Record<string, unknown>): Promise<string>;
+  /** DELETE /admin/users/:id (a sign-up that failed half-way); a user already gone is not an error. */
+  deleteUser(id: string): Promise<void>;
   /** PUT /admin/users/:id: a new password, the e-mail confirmed. */
   updateUser(id: string, password: string, userMetadata: Record<string, unknown>): Promise<void>;
 }
@@ -38,6 +40,11 @@ async function goTrueError(res: Response): Promise<GoTrueError> {
 }
 
 const EXISTS = /already (been )?registered|already exists/i;
+
+const isExists = (e: GoTrueError): boolean =>
+  e.code === 'email_exists' || e.code === 'user_already_exists' || (e.status === 422 && EXISTS.test(e.message));
+
+export const EMAIL_TAKEN_MESSAGE = 'Эта почта уже зарегистрирована — войдите';
 
 /** GoTrue's answer → what the platform owner should read. */
 export function authAdminError(e: GoTrueError): CloudError {
@@ -74,7 +81,7 @@ export function authAdminApi(supabaseUrl: string, serviceKey: string, fetchFn: t
       const res = await call('POST', `/invite${redirect(redirectTo)}`, { email, data });
       if (res.ok) return 'invited';
       const e = await goTrueError(res);
-      if (e.code === 'email_exists' || e.code === 'user_already_exists' || (e.status === 422 && EXISTS.test(e.message))) return 'exists';
+      if (isExists(e)) return 'exists';
       throw authAdminError(e);
     },
     async recover(email, redirectTo) {
@@ -83,7 +90,11 @@ export function authAdminApi(supabaseUrl: string, serviceKey: string, fetchFn: t
     },
     async createUser(email, password, userMetadata) {
       const res = await call('POST', '/admin/users', { email, password, email_confirm: true, user_metadata: userMetadata });
-      if (!res.ok) throw authAdminError(await goTrueError(res));
+      if (!res.ok) {
+        const e = await goTrueError(res);
+        if (isExists(e)) throw new CloudError(409, 'EMAIL_TAKEN', EMAIL_TAKEN_MESSAGE);
+        throw authAdminError(e);
+      }
       const user = (await res.json()) as { id?: unknown };
       if (typeof user.id !== 'string') throw new CloudError(502, 'AUTH_ADMIN', 'Supabase Auth не вернул пользователя');
       return user.id;
@@ -91,6 +102,10 @@ export function authAdminApi(supabaseUrl: string, serviceKey: string, fetchFn: t
     async updateUser(id, password, userMetadata) {
       const res = await call('PUT', `/admin/users/${encodeURIComponent(id)}`, { password, email_confirm: true, user_metadata: userMetadata });
       if (!res.ok) throw authAdminError(await goTrueError(res));
+    },
+    async deleteUser(id) {
+      const res = await call('DELETE', `/admin/users/${encodeURIComponent(id)}`, { should_soft_delete: false });
+      if (!res.ok && res.status !== 404) throw authAdminError(await goTrueError(res));
     },
   };
 }

@@ -427,12 +427,10 @@ export function AppsPage() {
         more={
           <>
             {image && <Steps steps={MINIPC_IMAGE_STEPS} />}
-            <div className="dl-alt" data-first={!image || undefined}>
-              <h3>
-                {noImage ? DOWNLOAD_TEXT.minipc.commandTitleNoImage : DOWNLOAD_TEXT.minipc.commandTitle}
-              </h3>
+            <details className="dl-alt support-details" data-first={!image || undefined}>
+              <summary>Для техподдержки: {noImage ? DOWNLOAD_TEXT.minipc.commandTitleNoImage : DOWNLOAD_TEXT.minipc.commandTitle}</summary>
               <Steps steps={MINIPC_COMMAND_STEPS} />
-            </div>
+            </details>
             <p className="dl-note">
               {DOWNLOAD_TEXT.minipc.windows}{' '}
               <a className="dl-inline-link" href={MINIPC_GUIDE_URL} target="_blank" rel="noreferrer">

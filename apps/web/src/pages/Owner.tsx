@@ -7,24 +7,29 @@ import { formatClock } from '../format.ts';
 import { Link } from '../router.tsx';
 import { Empty, Loading, Page, Section, Toast, formatDateTime, localDate, useToast } from '../ui.tsx';
 import { useCommands, useHub, useServerNow } from '../useHub.tsx';
+import { businessOf } from '../cafe/cafe.ts';
 import { OccupancyChart, RevenueChart, TopTablesChart, plural } from './owner/Charts.tsx';
+import { CABINET_URL } from './settings/LicenseSection.tsx';
 import './owner.css';
 
 /**
- * Owner cabinet: one club today, the multi-club frame of stage 6 already in
- * place. Numbers come from GET /api/reports/summary; alerts from the live state.
+ * Manager's summary of this branch: revenue, table load, alerts. Numbers come
+ * from GET /api/reports/summary; alerts from the live state. Other branches
+ * are in the TS cabinet. In a coffee shop: revenue only, in cafe words.
  */
 
-const QUICK_LINKS: Array<{ to: string; query?: Record<string, string>; label: string; action: Action }> = [
-  { to: '/settings', label: 'Настройки клуба', action: 'settings.view' },
-  { to: '/settings', query: { tab: 'tariffs' }, label: 'Тарифы', action: 'tariffs.edit' },
+type QuickLink = { to: string; query?: Record<string, string>; label: string; action: Action; cafe?: boolean; billiards?: boolean };
+
+const QUICK_LINKS: QuickLink[] = [
+  { to: '/settings', label: 'Настройки', action: 'settings.view' },
+  { to: '/settings', query: { tab: 'tariffs' }, label: 'Тарифы', action: 'tariffs.edit', billiards: true },
   { to: '/staff', label: 'Сотрудники', action: 'staff.view' },
   { to: '/journal', label: 'Журнал действий', action: 'audit.view' },
-  { to: '/bar', label: 'Бар и меню', action: 'catalog.edit' },
+  { to: '/bar', label: 'Бар и меню', action: 'catalog.edit', billiards: true },
+  { to: '/bar', label: 'Меню', action: 'catalog.edit', cafe: true },
+  { to: '/stats', label: 'Отчёты за смену', action: 'reports.view', cafe: true },
   { to: '/apps', label: 'Приложение на телефон и кассу', action: 'reports.view' },
 ];
-
-type ClubKey = 'current' | 'mock-2' | 'mock-3';
 
 export function OwnerPage() {
   const { state, online } = useHub();
@@ -40,7 +45,8 @@ export function OwnerPage() {
 
   const [picked, setPicked] = useState<string | null>(null);
   const date = picked ?? today;
-  const [clubKey, setClubKey] = useState<ClubKey>('current');
+  const cafe = businessOf(state?.settings) === 'cafe';
+  const links = QUICK_LINKS.filter((l) => can(l.action) && !(cafe ? l.billiards : l.cafe));
 
   const [summary, setSummary] = useState<OwnerSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -73,20 +79,18 @@ export function OwnerPage() {
   }, [date, minute, unpaidCount, alertCount, tick]);
 
   const isToday = date !== null && date === today;
-  const clubs: Array<{ key: ClubKey; label: string; disabled: boolean }> = [
-    { key: 'current', label: club?.name ?? 'Клуб', disabled: false },
-    { key: 'mock-2', label: 'Клуб 2 (скоро)', disabled: true },
-    { key: 'mock-3', label: 'Клуб 3 (скоро)', disabled: true },
-  ];
+  const count = (n: number) => (cafe ? undefined : `${n} ${plural(n, ['игра', 'игры', 'игр'])}`);
 
   return (
     <Page
-      title="Кабинет управляющего"
+      title={cafe ? 'Выручка' : 'Кабинет управляющего'}
       wide
       subtitle={
         summary && tz
           ? `${isToday ? 'Сегодня' : 'Данные за ' + formatDay(summary.date)} · обновлено ${formatClock(summary.generatedAt, tz)}`
-          : 'Сводка по клубу: выручка, загрузка столов, тревоги.'
+          : cafe
+            ? 'Выручка кофейни по дням.'
+            : 'Сводка по клубу: выручка, загрузка столов, тревоги.'
       }
       actions={
         <>
@@ -101,21 +105,7 @@ export function OwnerPage() {
     >
       <Section>
         <div className="owner-toolbar">
-          <div className="owner-clubs" role="group" aria-label="Клуб">
-            {clubs.map((c) => (
-              <button
-                key={c.key}
-                type="button"
-                className="chip"
-                aria-pressed={c.key === clubKey}
-                disabled={c.disabled}
-                title={c.disabled ? 'Подключение филиалов — этап 6' : undefined}
-                onClick={() => setClubKey(c.key)}
-              >
-                {c.label}
-              </button>
-            ))}
-          </div>
+          <strong className="owner-club-name">{club?.name ?? ''}</strong>
           <label className="owner-date">
             <span className="muted">Дата</span>
             <input
@@ -128,7 +118,13 @@ export function OwnerPage() {
             />
           </label>
         </div>
-        <p className="owner-note">Сеть клубов: подключение филиалов — этап 6. Сейчас показан один клуб.</p>
+        <p className="owner-note">
+          Здесь — это заведение. Все филиалы вместе — в{' '}
+          <a href={CABINET_URL} target="_blank" rel="noreferrer">
+            кабинете TS
+          </a>
+          .
+        </p>
       </Section>
 
       {error && (
@@ -147,16 +143,26 @@ export function OwnerPage() {
       {summary && (
         <>
           <div className="stats" aria-busy={loading || undefined}>
-            <Stat label={isToday ? 'Выручка сегодня' : `Выручка за ${formatDay(summary.date)}`} value={formatMoney(summary.revenue.today, currency)} note={`${summary.games.today} ${plural(summary.games.today, ['игра', 'игры', 'игр'])}`} />
-            <Stat label="Выручка за неделю" value={formatMoney(summary.revenue.week, currency)} note={`${summary.games.week} ${plural(summary.games.week, ['игра', 'игры', 'игр'])}`} />
-            <Stat label="Выручка за месяц" value={formatMoney(summary.revenue.month, currency)} note={`${summary.games.month} ${plural(summary.games.month, ['игра', 'игры', 'игр'])}`} />
-            <Stat label={isToday ? 'Игр сегодня' : 'Игр за день'} value={String(summary.games.today)} note="завершённых" />
-            <Stat label="Средний чек" value={formatMoney(summary.avgCheck, currency)} note="время + бар" />
-            <Stat label="Сейчас играют" value={String(summary.liveGames)} note={`из ${state?.tables.length ?? '—'} столов`} tone={summary.liveGames > 0 ? 'accent' : undefined} />
-            <Stat label="Ожидают оплаты" value={String(summary.unpaidGames)} note={formatMoney(summary.unpaidAmount, currency)} tone={summary.unpaidGames > 0 ? 'warn' : undefined} />
+            <Stat label={isToday ? 'Выручка сегодня' : `Выручка за ${formatDay(summary.date)}`} value={formatMoney(summary.revenue.today, currency)} note={count(summary.games.today)} />
+            <Stat label="Выручка за неделю" value={formatMoney(summary.revenue.week, currency)} note={count(summary.games.week)} />
+            <Stat label="Выручка за месяц" value={formatMoney(summary.revenue.month, currency)} note={count(summary.games.month)} />
+            {!cafe && (
+              <>
+                <Stat label={isToday ? 'Игр сегодня' : 'Игр за день'} value={String(summary.games.today)} note="завершённых" />
+                <Stat label="Средний чек" value={formatMoney(summary.avgCheck, currency)} note="время + бар" />
+                <Stat label="Сейчас играют" value={String(summary.liveGames)} note={`из ${state?.tables.length ?? '—'} столов`} tone={summary.liveGames > 0 ? 'accent' : undefined} />
+                <Stat label="Ожидают оплаты" value={String(summary.unpaidGames)} note={formatMoney(summary.unpaidAmount, currency)} tone={summary.unpaidGames > 0 ? 'warn' : undefined} />
+              </>
+            )}
             <Stat label="Открытых тревог" value={String(summary.openAlerts)} note={summary.openAlerts > 0 ? 'нужно внимание' : 'всё спокойно'} tone={summary.openAlerts > 0 ? 'danger' : undefined} />
           </div>
 
+          {cafe ? (
+            <Section title="Выручка за 14 дней" aside={<span className="muted">{formatDay(summary.revenueByDay[0]?.date ?? summary.date)} — {formatDay(summary.date)}</span>}>
+              <RevenueChart points={summary.revenueByDay} currency={currency} withGames={false} />
+            </Section>
+          ) : (
+          <>
           <div className="grid-2">
             <Section title="Загрузка столов по часам" aside={<span className="muted">{formatDay(summary.date)}</span>}>
               <OccupancyChart hours={summary.occupancyByHour} date={summary.date} />
@@ -173,6 +179,8 @@ export function OwnerPage() {
               <TopTablesChart tables={summary.topTables} currency={currency} />
             )}
           </Section>
+          </>
+          )}
         </>
       )}
 
@@ -211,9 +219,9 @@ export function OwnerPage() {
         </Section>
 
         <Section title="Быстрые переходы">
-          {QUICK_LINKS.some((l) => can(l.action)) ? (
+          {links.length > 0 ? (
             <nav className="owner-links" aria-label="Быстрые переходы">
-              {QUICK_LINKS.filter((l) => can(l.action)).map((l) => (
+              {links.map((l) => (
                 <Link key={l.label} to={l.to} query={l.query}>
                   {l.label}
                 </Link>

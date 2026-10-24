@@ -33,7 +33,7 @@ export function RulesSettings({ club, online, isBusy, run, onSaved, canEdit }: S
   const roundingMinor = fromMajor(draft.rounding, cur);
   if (freeMinutes === null || freeMinutes > 60) errors.push('Бесплатные минуты: целое число от 0 до 60');
   if (minimumMinutes === null || minimumMinutes > 24 * 60) errors.push('Минимальное время: целое число минут (до суток)');
-  if (stepMinutes === null || stepMinutes < 1 || stepMinutes > 60) errors.push('Шаг округления: от 1 до 60 минут');
+  if (stepMinutes === null || stepMinutes < 1 || stepMinutes > 60) errors.push('Шаг: от 1 до 60 минут');
   if (roundingMinor === null || roundingMinor < 1) errors.push('Округление суммы: сумма не меньше минимальной единицы');
   const patch = {
     freeTableAfterStop: draft.freeTableAfterStop,
@@ -59,7 +59,7 @@ export function RulesSettings({ club, online, isBusy, run, onSaved, canEdit }: S
           label="Стол после «Стоп»"
           hint={
             draft.freeTableAfterStop === 'after_payment'
-              ? 'Стол будет занят, пока кассир не примет оплату. На экране зала это заработает на этапе 2 (касса); пока стол освобождается сразу.'
+              ? 'Стол считается занятым, пока кассир не примет оплату. Сейчас экран зала всё равно освобождает стол сразу после «Стоп».'
               : 'Стол свободен сразу, игра висит у кассира как «ожидает оплаты».'
           }
         >
@@ -83,7 +83,7 @@ export function RulesSettings({ club, online, isBusy, run, onSaved, canEdit }: S
           <Field label="Минимальное время, мин" hint="0 — без минимума">
             <input inputMode="numeric" value={draft.minimumMinutes} disabled={disabled} onChange={(e) => setDraft((d) => ({ ...d, minimumMinutes: e.target.value }))} />
           </Field>
-          <Field label="Шаг округления, мин" hint="1 — поминутно">
+          <Field label="Шаг, мин" hint="1 — поминутно">
             <input inputMode="numeric" value={draft.stepMinutes} disabled={disabled} onChange={(e) => setDraft((d) => ({ ...d, stepMinutes: e.target.value }))} />
           </Field>
           <Field label={`Округление суммы, ${cur}`} hint="Итог кратен этой сумме">

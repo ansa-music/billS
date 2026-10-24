@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import type { ClubAdminView, TableAdminView, TableKind } from '@bills/domain';
+import { EmptyState, relayChannel, relayLabel } from '../../components.tsx';
 import { KIND_LABEL } from '../../format.ts';
-import { Empty, Field, Modal, Section } from '../../ui.tsx';
+import { navigate } from '../../router.tsx';
+import { Field, Modal, Section } from '../../ui.tsx';
 import type { SectionProps } from './shared.tsx';
 
 const KINDS: TableKind[] = ['pool', 'russian', 'snooker'];
@@ -13,12 +15,26 @@ interface TableForm {
   defaultTariffId: string;
 }
 
-/** «Столы»: list, order, on/off, add and edit dialogs. */
-export function TablesEditor({ club, online, isBusy, run, onSaved, reload, canEdit }: SectionProps & { canEdit: boolean }) {
+/** «Столы»: list, order, on/off, add and edit dialogs. A table needs a tariff first: the page leads there. */
+export function TablesEditor({
+  club,
+  online,
+  isBusy,
+  run,
+  onSaved,
+  reload,
+  canEdit,
+  canEditTariffs,
+}: SectionProps & { canEdit: boolean; canEditTariffs: boolean }) {
   const [editing, setEditing] = useState<TableAdminView | 'new' | null>(null);
   const disabled = !canEdit || !online;
   const activeTariffs = club.tariffs.filter((t) => t.isActive);
   const tariffName = (id: string) => club.tariffs.find((t) => t.id === id)?.name ?? '—';
+
+  const fillTariffs = async () => {
+    const res = await run<{ tariffs: number }>('template', '/api/templates/apply', { kind: 'tariffs-standard' });
+    if (res) await reload(res.tariffs > 0 ? 'Тарифы «Стандарт» и «Снукер» добавлены — теперь можно добавить столы' : 'Тарифы уже есть');
+  };
 
   // After a table command the whole club is re-read: tariff counts change too.
   const update = async (table: TableAdminView, patch: object, message = 'Сохранено') => {
@@ -44,10 +60,31 @@ export function TablesEditor({ club, online, isBusy, run, onSaved, reload, canEd
         </button>
       }
     >
-      {activeTariffs.length === 0 && <p className="hint">Сначала создайте хотя бы один тариф.</p>}
-      {club.tables.length === 0 ? (
-        <Empty>Столов пока нет.</Empty>
-      ) : (
+      {activeTariffs.length === 0 ? (
+        <div className="settings-guide" role="note">
+          <p>
+            <strong>Шаг 1 из 2: сначала нужен тариф</strong> — сколько стоит час игры. Каждому столу назначается тариф,
+            поэтому без него стол не добавить.
+          </p>
+          <div className="row wrap">
+            <button type="button" className="btn btn-primary" disabled={!canEditTariffs || !online || isBusy('template')} onClick={() => void fillTariffs()}>
+              {isBusy('template') ? 'Добавляем…' : 'Заполнить тарифы примером'}
+            </button>
+            <button type="button" className="btn" onClick={() => navigate('/settings', { tab: 'tariffs' })}>
+              Создать тариф самому
+            </button>
+          </div>
+          <p className="hint">Пример — тарифы «Стандарт» и «Снукер» с дневной, вечерней и выходной ценой. Цены потом можно поменять.</p>
+        </div>
+      ) : club.tables.length === 0 ? (
+        <EmptyState icon="hall" title="Столов пока нет">
+          <p>Шаг 2 из 2: добавьте столы — они появятся в зале, и по ним можно будет открывать игры.</p>
+          <button type="button" className="btn btn-primary" disabled={disabled} onClick={() => setEditing('new')}>
+            Добавить первый стол
+          </button>
+        </EmptyState>
+      ) : null}
+      {club.tables.length === 0 ? null : (
         <div className="table-wrap">
           <table className="table tables-editor">
             <thead>
@@ -55,7 +92,7 @@ export function TablesEditor({ club, online, isBusy, run, onSaved, reload, canEd
                 <th className="num">#</th>
                 <th>Стол</th>
                 <th>Вид</th>
-                <th>Канал лампы</th>
+                <th>Номер реле</th>
                 <th>Тариф по умолчанию</th>
                 <th>Статус</th>
                 <th />
@@ -81,9 +118,7 @@ export function TablesEditor({ club, online, isBusy, run, onSaved, reload, canEd
                       {t.busy && <span className="tag tag-warn tables-tag">идёт игра</span>}
                     </td>
                     <td>{KIND_LABEL[t.kind]}</td>
-                    <td>
-                      <code>{t.lampChannel}</code>
-                    </td>
+                    <td>{relayLabel(t.lampChannel)}</td>
                     <td>
                       <select
                         aria-label={`Тариф для ${t.name}`}
@@ -134,7 +169,8 @@ export function TablesEditor({ club, online, isBusy, run, onSaved, reload, canEd
         </div>
       )}
       <p className="hint">
-        Канал лампы — номер реле на контроллере, к которому подключён свет стола. Выключенный стол не показывается в зале, его история остаётся.
+        Номер реле — номер на коробке контроллера света, к которому подключена лампа стола. Если ламп нет, оставьте как есть.
+        Выключенный стол не показывается в зале, его история остаётся.
       </p>
       {editing && (
         <TableDialog
@@ -176,21 +212,22 @@ function TableDialog({
 }) {
   const activeTariffs = club.tariffs.filter((t) => t.isActive);
   const usedChannels = new Set(club.tables.filter((t) => t.id !== table?.id).map((t) => t.lampChannel));
+  // People type the number from the box; `relay-7` is how the HUB stores it.
   const usedNames = new Set(club.tables.filter((t) => t.isActive && t.id !== table?.id).map((t) => t.name));
   const [form, setForm] = useState<TableForm>(() =>
     table
-      ? { name: table.name, kind: table.kind, lampChannel: table.lampChannel, defaultTariffId: table.defaultTariffId }
+      ? { name: table.name, kind: table.kind, lampChannel: relayLabel(table.lampChannel), defaultTariffId: table.defaultTariffId }
       : {
           name: `Стол ${club.tables.length + 1}`,
           kind: 'pool',
-          lampChannel: nextChannel(club.tables),
+          lampChannel: relayLabel(nextChannel(club.tables)) || '1',
           defaultTariffId: activeTariffs[0]?.id ?? '',
         },
   );
   const name = form.name.trim();
-  const channel = form.lampChannel.trim();
+  const channel = relayChannel(form.lampChannel);
   const nameError = !name ? 'Введите название' : usedNames.has(name) ? 'Такой стол уже есть' : null;
-  const channelError = !channel ? 'Укажите канал' : usedChannels.has(channel) ? 'Канал занят другим столом' : null;
+  const channelError = !channel ? 'Укажите номер реле' : usedChannels.has(channel) ? 'Это реле уже у другого стола' : null;
   const ok = !nameError && !channelError && form.defaultTariffId;
 
   return (
@@ -215,8 +252,8 @@ function TableDialog({
               ))}
             </select>
           </Field>
-          <Field label="Канал лампы" hint="Реле на контроллере, например relay-7" error={channelError}>
-            <input value={form.lampChannel} maxLength={40} onChange={(e) => setForm((f) => ({ ...f, lampChannel: e.target.value }))} />
+          <Field label="Номер реле (на коробке контроллера)" hint="Цифра у провода лампы этого стола, например 7" error={channelError}>
+            <input inputMode="numeric" value={form.lampChannel} maxLength={40} onChange={(e) => setForm((f) => ({ ...f, lampChannel: e.target.value }))} />
           </Field>
         </div>
         <Field label="Тариф по умолчанию">
@@ -241,7 +278,7 @@ function TableDialog({
   );
 }
 
-/** relay-7 after relay-1…relay-6; otherwise an empty field. */
+/** The relay after the highest one in use (7 after 1…6); otherwise an empty field. */
 function nextChannel(tables: TableAdminView[]): string {
   let max = 0;
   let prefix: string | null = null;

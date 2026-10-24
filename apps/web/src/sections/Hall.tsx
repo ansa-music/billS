@@ -25,6 +25,7 @@ import { PrepaidDialog } from '../prepaid/PrepaidDialog.tsx';
 import { hrefFor } from '../router.tsx';
 import { Popover } from '../Shell.tsx';
 import { TableCard } from '../TableCard.tsx';
+import { ShiftBanner } from '../cash/ShiftBanner.tsx';
 import { useHub, useLive } from '../useHub.tsx';
 
 type HallView = 'plan' | 'cards';
@@ -418,6 +419,21 @@ export function HallSection() {
 
   return (
     <div className="hall-page">
+      <ShiftBanner text="Игры открывать можно, но оплату примут только после открытия смены." />
+      {state.tables.length === 0 && (
+        <EmptyState icon="hall" title="В зале пока нет столов">
+          {hub.canNow('tables.edit') ? (
+            <>
+              <p>Добавьте тарифы и столы — и здесь можно будет открывать игры.</p>
+              <a className="btn btn-primary" href={hrefFor('/settings', { tab: 'tables' })}>
+                Добавить столы
+              </a>
+            </>
+          ) : (
+            <p>Столы добавляет управляющий или администратор в настройках.</p>
+          )}
+        </EmptyState>
+      )}
       <HallSummary dayRevenue={dayRevenue} />
 
       <div className="hall-bar">

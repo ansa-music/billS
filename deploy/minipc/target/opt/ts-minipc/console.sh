@@ -217,7 +217,7 @@ screen_hub() {
     return
   fi
   if ! hub_healthy; then
-    logo "$CYAN" "${CYAN}HUB запускается…${OFF}"
+    logo "$CYAN" "${CYAN}TS запускается…${OFF}"
     echo "   Если это длится дольше 5 минут — выключите и включите мини-ПК."
     footer "$ip" with-password
     return
@@ -230,11 +230,11 @@ screen_hub() {
     mdns_url=""
     [ -n "$MDNS" ] && mdns_url="$SCHEME://$MDNS.local$PORT_SUFFIX/"
     if [ "$cloud" = 1 ]; then
-      logo "$GREEN" "${GREEN}HUB подключён к облаку${OFF}"
+      logo "$GREEN" "${GREEN}TS подключён к кабинету${OFF}"
     else
-      logo "$GREEN" "${GREEN}HUB настроен и работает${OFF}"
+      logo "$GREEN" "${GREEN}TS работает${OFF}"
     fi
-    echo "   Адрес для экранов клуба (планшеты, касса):"
+    echo "   Адрес для касс и планшетов заведения:"
     echo
     printf '      %s%s%s\n' "$BOLD" "$url" "$OFF"
     [ -n "$mdns_url" ] && echo "      или $mdns_url"
@@ -245,13 +245,13 @@ screen_hub() {
     url="$SCHEME://$ip$PORT_SUFFIX/setup"
     mdns_url=""
     [ -n "$MDNS" ] && mdns_url="$SCHEME://$MDNS.local$PORT_SUFFIX/setup"
-    logo "$GREEN" "${GREEN}TS HUB готов${OFF}"
-    echo "   Откройте на телефоне или ПК в сети клуба (тот же Wi-Fi или роутер):"
+    logo "$GREEN" "${GREEN}TS установлен — подключите его к кабинету${OFF}"
+    echo "   Откройте на телефоне или компьютере в сети заведения (тот же Wi-Fi или роутер):"
     echo
     printf '      %s%s%s\n' "$BOLD" "$url" "$OFF"
     [ -n "$mdns_url" ] && echo "      или $mdns_url"
     QR_URL=$url
-    QR_NOTE="   Дальше — шаги на экране телефона (понадобится код подключения из кабинета TS)."
+    QR_NOTE="   …и вставьте код подключения из кабинета TS. Нет кабинета? Зарегистрируйтесь: ts-cabinet.pages.dev"
     footer "$ip" with-password
   fi
 }

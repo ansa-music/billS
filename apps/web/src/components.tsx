@@ -170,3 +170,18 @@ export function SectionCard({
     </section>
   );
 }
+
+/**
+ * Lamp relay as people see it on the controller box: `relay-7` → «7». Other
+ * addresses (a controller elsewhere in the network) are shown as they are.
+ */
+export function relayLabel(channel: string): string {
+  const m = /^relay-(\d+)$/.exec(channel);
+  return m ? m[1]! : channel;
+}
+
+/** What was typed into «Номер реле»: just a number becomes `relay-N`; a full address stays as typed. */
+export function relayChannel(input: string): string {
+  const t = input.trim();
+  return /^\d{1,4}$/.test(t) ? `relay-${Number(t)}` : t;
+}

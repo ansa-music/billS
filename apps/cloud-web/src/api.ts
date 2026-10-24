@@ -1,4 +1,5 @@
 import type {
+  BusinessType,
   BlockClientRequest,
   BranchView,
   ClientView,
@@ -36,6 +37,8 @@ import { CloudRequestError } from './api-core.ts';
 import type { RegisterDeviceBody } from './api-core.ts';
 import type { AlertEvent } from './api-supabase.ts';
 import { SUPABASE_MODE } from './config.ts';
+import type { HubCodeResponse } from './onboarding.ts';
+import type { SignupRequest, SignupResponse } from './signup.ts';
 
 /**
  * One API for the pages, two backends chosen at build time (config.ts):
@@ -322,4 +325,29 @@ export async function restoreSession(): Promise<Identity> {
     }
   }
   return { owner: await http.fetchMe(), platform: null };
+}
+
+// --- «Начать бесплатно» and «Первые шаги» ------------------------------------------------
+
+/** Self-sign-up exists only in the TS cloud (Supabase); a self-hosted cloud adds clients by hand. */
+export const SIGNUP_AVAILABLE: boolean = SUPABASE_MODE;
+
+/** Creates the company, the first venue and the trial; the caller then signs in with the same e-mail. */
+export async function signup(body: SignupRequest): Promise<SignupResponse> {
+  if (!SUPABASE_MODE) throw new CloudRequestError(404, 'NOT_AVAILABLE', 'Регистрация есть только в облаке TS');
+  return (await sb()).signup(body);
+}
+
+/** A new connection code for the venue's cash register; the previous code stops working. */
+export async function issueHubCode(clubId: string): Promise<HubCodeResponse> {
+  return SUPABASE_MODE ? (await sb()).issueHubCode(clubId) : http.issueHubCode(clubId);
+}
+
+/** GET /owner/onboarding as the cloud sent it (onboarding.ts parses it); 404 on an older cloud. */
+export async function fetchOnboarding(): Promise<unknown> {
+  return SUPABASE_MODE ? (await sb()).fetchOnboarding() : http.fetchOnboarding();
+}
+
+export async function setBusinessType(clubId: string, type: BusinessType): Promise<void> {
+  return SUPABASE_MODE ? (await sb()).setBusinessType(clubId, type) : http.setBusinessType(clubId, type);
 }

@@ -1,6 +1,18 @@
-import type { RegisterDeviceRequest, UpdatePushRulesRequest, UpdateTariffsRequest } from '@bills/domain';
-import { DEVICE_PLATFORMS, isNtfyTopicUrl, isPushKind, parseWebPushToken } from '@bills/domain';
-import { companyLicense, createBranch, createStaff, issueStaffKey, listBranches, listStaff, revokeStaffKey, updateStaff } from '../company.ts';
+import type { HubCodeResponse, RegisterDeviceRequest, UpdatePushRulesRequest, UpdateTariffsRequest } from '@bills/domain';
+import { DEVICE_PLATFORMS, encodeHubSetupCode, isNtfyTopicUrl, isPushKind, parseWebPushToken } from '@bills/domain';
+import {
+  companyLicense,
+  createBranch,
+  createStaff,
+  issueStaffKey,
+  listBranches,
+  listStaff,
+  onboarding,
+  reissueBranchHubKey,
+  revokeStaffKey,
+  setBranchBusinessType,
+  updateStaff,
+} from '../company.ts';
 import type { ManagerRef } from '../company.ts';
 import { CloudError } from '../errors.ts';
 import { b64urlDecode, registerDevice, removeDevice, saveRules } from '../push.ts';
@@ -34,6 +46,13 @@ import { bearerToken, errorResponse, json, notFound, readJson, readOptionalJson,
  *   POST /owner/company/staff/:id/update       UpdateCloudStaffRequest → CloudStaffView
  *   POST /owner/company/staff/:id/keys         IssueCloudKeyRequest → IssueCloudKeyResponse (422 KEY_WEAK, 409 KEY_TAKEN)
  *   POST /owner/company/keys/:id/revoke        → CloudKeyView
+ *
+ * First steps (packages/domain cloud.ts, «Self sign-up and the first steps»):
+ *   POST /owner/clubs/:id/hub-code             → HubCodeResponse: a new HUB key, the old one stops working
+ *                                                (branches.edit; 403 LICENSE_READ_ONLY, 404 CLUB_NOT_FOUND / HUB_NOT_FOUND,
+ *                                                503 CLOUD_URL_MISSING without SUPABASE_URL / TS_CLOUD_URL)
+ *   POST /owner/clubs/:id/business             { type: 'billiards' | 'cafe' } → BranchView (club.edit; 422 INVALID_BUSINESS_TYPE)
+ *   GET  /owner/onboarding                     → OnboardingResponse
  */
 
 const tariffsSchema: Schema = {
@@ -195,6 +214,25 @@ export async function handleOwner(req: EdgeRequest, ctx: EdgeContext): Promise<R
 
     if (path.startsWith('/owner/company/')) return json(200, await handleCompany(req, ctx, path.slice('/owner/company'.length)), cors);
     const device = /^\/owner\/devices\/([^/]+)$/.exec(path);
+    const clubAction = /^\/owner\/clubs\/([^/]+)\/(hub-code|business)$/.exec(path);
+
+    if (m === 'GET' && path === '/owner/onboarding') {
+      const owner = await requireOwner(req, ctx);
+      return json(200, await onboarding(ctx.db, { id: owner.id, companyId: owner.company_id }), cors);
+    }
+
+    if (m === 'POST' && clubAction) {
+      const owner = await requireOwner(req, ctx);
+      const me: ManagerRef = { id: owner.id, companyId: owner.company_id };
+      const clubId = decodeURIComponent(clubAction[1]!);
+      if (clubAction[2] === 'business') return json(200, await setBranchBusinessType(ctx.db, ctx.now(), me, clubId, await readJson(req)), cors);
+      const cloudUrl = ctx.cloudUrl;
+      if (!cloudUrl) throw new CloudError(503, 'CLOUD_URL_MISSING', 'Облако не знает свой адрес: задайте SUPABASE_URL или TS_CLOUD_URL');
+      const { hubId, apiKey } = await reissueBranchHubKey(ctx.db, ctx.now(), me, clubId);
+      const res: HubCodeResponse = { hubId, apiKey, cloudUrl, code: encodeHubSetupCode({ hubId, apiKey, cloudUrl }) };
+      ctx.log(`owner: новый код подключения HUB ${hubId}`);
+      return json(200, res, { ...cors, 'cache-control': 'no-store' });
+    }
 
     if (m === 'PUT' && tariffs) {
       const owner = await requireOwner(req, ctx);

@@ -10,7 +10,10 @@ test('the Supabase schema is the cloud migrations, verbatim and in order', () =>
   const lf = (t: string) => t.replace(/\r\n/g, '\n');
   // 001–003 are the base migration; every later one has its own Supabase migration (plus RLS).
   const base = lf(readMigration('20261020000000_cloud_schema.sql'));
-  const later: Record<string, string> = { '004_roles_license.sql': '20261021000000_roles_license.sql' };
+  const later: Record<string, string> = {
+    '004_roles_license.sql': '20261021000000_roles_license.sql',
+    '005_business_type.sql': '20261024000000_signup.sql',
+  };
   const order: string[] = [];
   for (const f of readdirSync(CLOUD_MIGRATIONS).filter((n) => n.endsWith('.sql')).sort()) {
     const sql = lf(readFileSync(new URL(f, CLOUD_MIGRATIONS), 'utf8'));

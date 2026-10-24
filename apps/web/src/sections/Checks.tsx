@@ -4,6 +4,7 @@ import { calculateChargeWithPauses, formatMoney, unpaidSpans } from '@bills/doma
 import { amountOf, isLive, playedMsOf } from '../hall.ts';
 import { fetchSessions, getJson } from '../api.ts';
 import { gameDue, orderSummary, owedTotal, placeName, unbilledOrders } from '../cash/lines.ts';
+import { ShiftBanner } from '../cash/ShiftBanner.tsx';
 import { ShiftPanel } from '../cash/ShiftPanel.tsx';
 import { UnpaidPanel } from '../cash/UnpaidPanel.tsx';
 import { EmptyState, SectionCard, StatTile, StatusBadge } from '../components.tsx';
@@ -183,6 +184,7 @@ export function ChecksSection() {
 
   return (
     <div className="page">
+      <ShiftBanner />
       <div className="stat-row">
         <StatTile
           label="Ждут оплаты"

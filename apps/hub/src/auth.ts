@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { AccessKeyView, AuthStaff, KeyKind, LoginAttemptView, LoginResponse, Role } from '@bills/domain';
+import type { AccessKeyView, AuthStaff, KeyKind, LoginAttemptView, LoginResponse, Role, RosterPerson } from '@bills/domain';
 import {
   canAssignRoles,
   DEMO_LOGIN_THROTTLE,
@@ -30,7 +30,7 @@ import { afterCommit, all, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import type { HubEvents } from './events.ts';
 import { record, SYSTEM } from './journal.ts';
-import { clubId } from './views.ts';
+import { clubId, loadSettings } from './views.ts';
 
 /**
  * Who is acting, as resolved from the session token. `id` is null only for
@@ -406,6 +406,32 @@ export class AuthService {
     });
     if (!outcome.ok) throw outcome.error;
     return outcome.response;
+  }
+
+  /**
+   * «Кто на смене?» (GET /api/auth/roster, public): active people of this branch with a working
+   * six-digit key, by name. Names and roles only — the key is still needed to sign in. Empty when
+   * the club switched the list off (`display.showRoster`). Long-key people (manager, support) sign
+   * in with their long key and are not listed.
+   */
+  roster(): RosterPerson[] {
+    const db = this.deps.db;
+    const club = clubId(db);
+    if (!loadSettings(db, club).display.showRoster) return [];
+    const now = this.deps.clock.now();
+    return all<StaffRow>(
+      db,
+      `SELECT s.id, s.club_id, s.name, s.role, s.roles, s.origin, s.is_active FROM staff s
+       WHERE s.club_id = ? AND s.is_active = 1 AND EXISTS (
+         SELECT 1 FROM access_keys k
+         WHERE k.staff_id = s.id AND k.kind = 'short' AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > ?)
+       )
+       ORDER BY s.name COLLATE NOCASE, s.id`,
+      club,
+      now,
+    )
+      .map((s) => ({ id: s.id, name: s.name, roles: rolesOf(s) }))
+      .filter((p) => !usesLongKey(p.roles));
   }
 
   /** Newest first (GET /api/auth/attempts). */

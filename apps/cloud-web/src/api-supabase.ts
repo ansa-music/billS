@@ -6,6 +6,7 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import type { RealtimeChannel, Session, SupabaseClient } from '@supabase/supabase-js';
 import type {
+  BusinessType,
   BlockClientRequest,
   BranchView,
   ClientView,
@@ -61,6 +62,8 @@ import {
   setPasswordLink,
 } from './supabase-util.ts';
 import type { MappedError } from './supabase-util.ts';
+import type { HubCodeResponse } from './onboarding.ts';
+import type { SignupRequest, SignupResponse } from './signup.ts';
 
 let client: SupabaseClient | null = null;
 let linkError: string | null = null;
@@ -660,4 +663,41 @@ export function issueStaffKey(staffId: string, body: IssueCloudKeyRequest): Prom
 
 export function revokeKey(keyId: string): Promise<CloudKeyView> {
   return edge<CloudKeyView>('POST', `/owner/company/keys/${enc(keyId)}/revoke`);
+}
+
+// --- «Начать бесплатно» and «Первые шаги» ------------------------------------------------
+
+/** POST functions/v1/signup — no session yet: the anon key only. */
+export async function signup(body: SignupRequest): Promise<SignupResponse> {
+  let res: Response;
+  try {
+    res = await fetch(`${supabaseUrl()}/functions/v1/signup`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        apikey: supabaseAnonKey(),
+        authorization: `Bearer ${supabaseAnonKey()}`,
+      },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+    });
+  } catch {
+    throw new CloudRequestError(0, 'OFFLINE', OFFLINE_MESSAGE);
+  }
+  if (res.status === 404) throw new CloudRequestError(404, 'NOT_AVAILABLE', 'Регистрация пока не работает');
+  if (res.status === 502 || res.status === 503 || res.status === 504) throw new CloudRequestError(res.status, 'OFFLINE', OFFLINE_MESSAGE);
+  if (!res.ok) throw await edgeError(res);
+  return (await res.json()) as SignupResponse;
+}
+
+export function issueHubCode(clubId: string): Promise<HubCodeResponse> {
+  return edge<HubCodeResponse>('POST', `/owner/clubs/${enc(clubId)}/hub-code`);
+}
+
+export function fetchOnboarding(): Promise<unknown> {
+  return edge<unknown>('GET', '/owner/onboarding');
+}
+
+export async function setBusinessType(clubId: string, type: BusinessType): Promise<void> {
+  await edge<unknown>('POST', `/owner/clubs/${enc(clubId)}/business`, { type });
 }

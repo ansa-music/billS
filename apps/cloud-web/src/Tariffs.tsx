@@ -344,10 +344,10 @@ export function Tariffs({ id }: { id: string }) {
 
   const cloudVersion = data.settings.version;
   const hubStatus = !hub
-    ? 'HUB не подключён — настройки применятся, когда клуб подключат к облаку'
+    ? 'Касса не подключена — настройки применятся, когда её подключат к кабинету'
     : hub.pendingSettings
-      ? `HUB ещё не забрал версию ${cloudVersion} (у него ${hub.settingsVersion})${hub.online ? '' : ' — HUB не на связи'}`
-      : `HUB применил версию ${hub.settingsVersion}`;
+      ? `Касса ещё не забрала новые настройки${hub.online ? '' : ' — она не на связи'}`
+      : 'Касса применила настройки';
 
   return (
     <>
@@ -362,7 +362,7 @@ export function Tariffs({ id }: { id: string }) {
           {saved && (
             <span className="saved">
               Версия {saved.version} отправлена {formatDateTime(saved.at, club.timezone)}
-              {hub?.pendingSettings ? ' · HUB ещё не забрал' : hub ? ' · HUB забрал' : ''}
+              {hub?.pendingSettings ? ' · касса ещё не забрала' : hub ? ' · касса забрала' : ''}
             </span>
           )}
           {dirty && cloudVersion !== loadedVersion && (

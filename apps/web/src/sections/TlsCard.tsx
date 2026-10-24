@@ -1,84 +1,90 @@
 import { useState } from 'react';
 import { CA_INSTALL_GUIDES } from '@bills/domain';
 import { fetchTls } from '../api.ts';
-import { SectionCard, Segmented } from '../components.tsx';
-import { Icon } from '../icons.tsx';
+import { Segmented } from '../components.tsx';
 import { QrCode } from '../QrCode.tsx';
+import { Section } from '../ui.tsx';
 import { useHub, useLive } from '../useHub.tsx';
 
 const day = (ms: number) => new Date(ms).toLocaleDateString('ru-RU');
 
 /**
- * HTTPS in the club network: QR code to the HUB's /ca page (root certificate +
- * instructions) and the same steps per device, so the tablet installs the
- * club's certificate once and the app works over https://hub.local.
+ * «Настройки → Установка на планшеты»: how to open the cash desk on a tablet
+ * or phone of the club, step by step. With HTTPS on, the tablet first installs
+ * the club's certificate (QR code to the HUB's /ca page), then the app can be
+ * installed. Server commands and certificate details are for support only.
  */
 export function TlsCard() {
   const hub = useHub();
   const tls = useLive(fetchTls, [], hub.version);
   const [device, setDevice] = useState(CA_INSTALL_GUIDES[0]!.device);
   const s = tls.data;
-
-  const badge = !s ? null : !s.enabled ? (
-    <span className="status-badge" data-tone="warn">HTTP</span>
-  ) : s.renewSoon ? (
-    <span className="status-badge" data-tone="warn">продлить</span>
-  ) : (
-    <span className="status-badge" data-tone="good">HTTPS</span>
-  );
+  const here = typeof window === 'undefined' ? '' : window.location.origin + window.location.pathname;
+  const appUrl = s?.enabled ? (s.appUrls[0] ?? here) : here;
 
   return (
-    <SectionCard
-      className="tls-card"
-      title={
-        <>
-          <Icon name="check" size={18} /> Сертификат клуба
-        </>
-      }
-      actions={badge}
-    >
+    <Section title="Установка на планшеты">
       {!s ? (
         <p className="hint">{tls.error ?? 'Загрузка…'}</p>
-      ) : !s.enabled ? (
-        <div className="tls-off">
-          <p>
-            HUB работает по обычному HTTP. Планшеты Android и ПК с Chrome не дадут установить приложение без защищённого
-            адреса. Включите HTTPS на сервере клуба одной командой:
-          </p>
-          <pre className="tls-cmd">sudo bills ca init</pre>
-          <p className="hint">
-            Она создаст корневой сертификат клуба, переведёт HUB на https://hub.local и откроет здесь QR-код для установки
-            сертификата на планшеты. Для разработки: <code>node apps/hub/src/cli.ts ca init</code> и переменные HUB_TLS_CERT /
-            HUB_TLS_KEY.
-          </p>
-        </div>
       ) : (
         <div className="tls-body">
           <div className="tls-qr">
-            {s.caPageUrls[0] && <QrCode value={s.caPageUrls[0]} size={184} label="QR-код страницы сертификата" />}
-            <a className="tls-link" href={s.caPageUrls[0]} target="_blank" rel="noreferrer">
-              {s.caPageUrls[0]}
+            {s.enabled && s.caPageUrls[0] ? (
+              <QrCode value={s.caPageUrls[0]} size={184} label="QR-код страницы установки" />
+            ) : (
+              appUrl && <QrCode value={appUrl} size={184} label="QR-код адреса кассы" />
+            )}
+            <a className="tls-link" href={s.enabled ? s.caPageUrls[0] : appUrl} target="_blank" rel="noreferrer">
+              {s.enabled ? s.caPageUrls[0] : appUrl}
             </a>
-            <a className="btn btn-primary" href="/ca.crt" download="TS-root.crt">
-              Скачать сертификат
-            </a>
+            {s.enabled && (
+              <a className="btn btn-primary" href="/ca.crt" download="TS-root.crt">
+                Скачать сертификат
+              </a>
+            )}
           </div>
           <div className="tls-guide">
-            <p>
-              Отсканируйте QR-код камерой планшета — откроется страница с сертификатом. Установить его нужно один раз на каждое
-              устройство.
-            </p>
-            <Segmented
-              label="Устройство"
-              value={device}
-              options={CA_INSTALL_GUIDES.map((g) => ({ value: g.device, label: g.device }))}
-              onChange={setDevice}
-            />
-            <ol className="tls-steps">
-              {(CA_INSTALL_GUIDES.find((g) => g.device === device) ?? CA_INSTALL_GUIDES[0]!).steps.map((step) => (
-                <li key={step}>{step}</li>
-              ))}
-            </ol>
+            {s.enabled ? (
+              <>
+                <p>
+                  Наведите камеру планшета на QR-код — откроется страница установки. Сделать это нужно один раз на каждом
+                  планшете, телефоне или компьютере кассы.
+                </p>
+                <Segmented
+                  label="Устройство"
+                  value={device}
+                  options={CA_INSTALL_GUIDES.map((g) => ({ value: g.device, label: g.device }))}
+                  onChange={setDevice}
+                />
+                <ol className="tls-steps">
+                  {(CA_INSTALL_GUIDES.find((g) => g.device === device) ?? CA_INSTALL_GUIDES[0]!).steps.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                  <li>Войдите своим ключом из 6 цифр. В меню браузера выберите «Добавить на главный экран» — касса откроется как приложение.</li>
+                </ol>
+                {s.renewSoon && <p className="hint">Скоро закончится срок защищённого соединения — сообщите в поддержку TS.</p>}
+              </>
+            ) : (
+              <>
+                <ol className="tls-steps">
+                  <li>Подключите планшет к Wi-Fi заведения — той же сети, что и компьютер кассы.</li>
+                  <li>Наведите камеру планшета на QR-код или наберите адрес под ним в браузере.</li>
+                  <li>Войдите своим ключом из 6 цифр.</li>
+                  <li>В меню браузера выберите «Добавить на главный экран», чтобы касса открывалась одним нажатием.</li>
+                </ol>
+                <p className="hint">
+                  Если браузер не предлагает добавить кассу на главный экран, попросите поддержку TS включить защищённое
+                  соединение — это делается один раз.
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      {s && (
+        <details className="support-details">
+          <summary>Для техподдержки</summary>
+          {s.enabled ? (
             <dl className="tls-facts">
               <dt>Адрес приложения</dt>
               <dd>{s.appUrls.join(' · ') || '—'}</dd>
@@ -100,9 +106,19 @@ export function TlsCard() {
                 </>
               )}
             </dl>
-          </div>
-        </div>
+          ) : (
+            <>
+              <p className="hint">HUB работает по HTTP. Включить HTTPS на сервере клуба:</p>
+              <pre className="tls-cmd">sudo bills ca init</pre>
+              <p className="hint">
+                Команда создаст корневой сертификат клуба, переведёт HUB на https://hub.local и покажет здесь QR-код для
+                установки сертификата. Для разработки: <code>node apps/hub/src/cli.ts ca init</code> и переменные
+                HUB_TLS_CERT / HUB_TLS_KEY.
+              </p>
+            </>
+          )}
+        </details>
       )}
-    </SectionCard>
+    </Section>
   );
 }

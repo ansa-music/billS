@@ -12,6 +12,7 @@ import { LicenseSection } from './settings/LicenseSection.tsx';
 import { RulesSettings } from './settings/RulesSettings.tsx';
 import { TablesEditor } from './settings/TablesEditor.tsx';
 import { TariffsEditor } from './settings/TariffEditor.tsx';
+import { TlsCard } from '../sections/TlsCard.tsx';
 import './settings.css';
 
 const TABS = [
@@ -20,6 +21,7 @@ const TABS = [
   { id: 'tariffs', title: 'Тарифы' },
   { id: 'display', title: 'Экран зала' },
   { id: 'rules', title: 'Правила' },
+  { id: 'devices', title: 'Установка на планшеты' },
   { id: 'license', title: 'Лицензия' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
@@ -35,12 +37,19 @@ function isTab(value: string | null): value is TabId {
 export function ClubSettingsPage() {
   const { state, online, version, license, canNow: can, can: roleCan } = useHub();
   const cafe = businessOf(state.settings) === 'cafe';
-  const tabs = TABS.filter((t) => (t.id !== 'license' || roleCan('license.view')) && !(cafe && BILLIARDS_ONLY.includes(t.id))).map(
+  const tabs = TABS.filter(
+    (t) =>
+      (t.id !== 'license' || roleCan('license.view')) &&
+      (t.id !== 'devices' || can('equipment.view')) &&
+      !(cafe && BILLIARDS_ONLY.includes(t.id)),
+  ).map(
     (t) => (cafe && t.id === 'display' ? { ...t, title: 'Экран' } : t),
   );
   const { query } = useLocation();
   const asked = query.get('tab');
   const tab: TabId = isTab(asked) && tabs.some((t) => t.id === asked) ? asked : 'club';
+  /** Tabs that need GET /api/club. */
+  const standalone = tab !== 'license' && tab !== 'devices';
   const { toast, show, clear } = useToast();
   const { isBusy, run } = useCommands(show);
   const [club, setClub] = useState<ClubAdminView | null>(null);
@@ -88,7 +97,7 @@ export function ClubSettingsPage() {
           </>
         );
       case 'tables':
-        return <TablesEditor {...props} canEdit={can('tables.edit')} />;
+        return <TablesEditor {...props} canEdit={can('tables.edit')} canEditTariffs={can('tariffs.edit')} />;
       case 'tariffs':
         return <TariffsEditor {...props} canEdit={can('tariffs.edit')} />;
       case 'display':
@@ -96,7 +105,8 @@ export function ClubSettingsPage() {
       case 'rules':
         return <RulesSettings {...props} canEdit={can('rules.edit')} />;
       case 'license':
-        return null; // rendered below: it does not need GET /api/club
+      case 'devices':
+        return null; // rendered below: they do not need GET /api/club
     }
   })();
 
@@ -115,7 +125,7 @@ export function ClubSettingsPage() {
           </button>
         ))}
       </nav>
-      {license?.readOnly && tab !== 'license' && (
+      {license?.readOnly && tab !== 'license' && tab !== 'devices' && (
         <p className="blocked-note">Только чтение: {license.message ?? 'лицензия не активна'} Настройки сейчас не сохраняются.</p>
       )}
       {tab === 'license' && (
@@ -126,8 +136,9 @@ export function ClubSettingsPage() {
           canInstall={roleCan('license.install')}
         />
       )}
-      {tab !== 'license' && !club && !loadError && <Loading online={online} />}
-      {tab !== 'license' && !club && loadError && <p className="empty">Не удалось загрузить настройки: {loadError}</p>}
+      {tab === 'devices' && <TlsCard />}
+      {standalone && !club && !loadError && <Loading online={online} />}
+      {standalone && !club && loadError && <p className="empty">Не удалось загрузить настройки: {loadError}</p>}
       {club && !online && <p className="settings-offline">Нет связи с HUB — изменения пока нельзя сохранить.</p>}
       {section}
       <Toast message={toast} onClose={clear} />

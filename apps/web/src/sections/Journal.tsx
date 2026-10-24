@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { HubState, JournalCategory, JournalEntry } from '@bills/domain';
+import type { HubState, JournalCategory, JournalEntry, TableKind } from '@bills/domain';
 import { formatMoney, isRole, rolesLabel } from '@bills/domain';
 import type { Role } from '@bills/domain';
 import { fetchJournal } from '../api.ts';
 import { EmptyState, SectionCard } from '../components.tsx';
-import { formatClock, formatDay, formatSpan, lampErrorText } from '../format.ts';
+import { formatClock, formatDay, formatSpan, KIND_LABEL, lampErrorText } from '../format.ts';
 import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';
 import { navigate } from '../router.tsx';
@@ -29,7 +29,38 @@ interface Described {
   icon: IconName;
   cat: JournalCategory;
   bad?: boolean;
+  /** The raw action code, for support: shown only as a tooltip of «Служебное действие». */
+  code?: string;
+  /** Routine records (startup checks, sync) — hidden unless asked for. */
+  routine?: boolean;
 }
+
+/** Field names in «… изменены» records, in words; unknown fields are not shown. */
+const FIELD_WORD: Record<string, string> = {
+  name: 'название',
+  timezone: 'часовой пояс',
+  currency: 'валюта',
+  settings: 'настройки',
+  display: 'экран зала',
+  rules: 'правила',
+  business: 'тип заведения',
+  kind: 'вид',
+  lampChannel: 'реле',
+  defaultTariffId: 'тариф',
+  isActive: 'вкл/выкл',
+  sortOrder: 'порядок',
+  config: 'цены',
+  roles: 'роли',
+  role: 'роль',
+  tableIds: 'столы',
+  pin: 'PIN',
+};
+const fieldsOf = (d: Record<string, unknown>): string | undefined => {
+  const words = [...new Set(Object.keys(d).map((k) => FIELD_WORD[k]).filter(Boolean))];
+  return words.length ? `изменено: ${words.join(', ')}` : undefined;
+};
+/** Who did it: people by name, the HUB's own records in words. */
+const ACTOR_WORD: Record<string, string> = { system: 'Система', setup: 'Установка', cloud: 'Кабинет TS' };
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
 /** "Официант + кассир" from a role or a list of roles in an entry; '' when there is none. */
@@ -80,12 +111,7 @@ function describe(e: JournalEntry, state: HubState): Described {
     case 'alert.resolved':
       return { title: 'Тревога принята', icon: 'check', cat: 'alerts' };
     case 'hub.recovered':
-      return {
-        title: 'HUB запущен',
-        detail: `лампы сверены: отправлено команд ${num(d.resent)} из ${num(d.tables)}`,
-        icon: 'refresh',
-        cat: 'system',
-      };
+      return { title: 'Касса запущена', detail: 'свет столов проверен', icon: 'refresh', cat: 'system', routine: true };
     case 'hall.layout_saved':
       return {
         title: 'План зала сохранён',
@@ -119,21 +145,23 @@ function describe(e: JournalEntry, state: HubState): Described {
       return { title: `Меню: изменена категория «${str(d.name) || str((d.was as Record<string, unknown> | undefined)?.name)}»`, icon: 'bar', cat: 'bar' };
     // Club settings and staff
     case 'club.updated':
-      return { title: 'Настройки клуба изменены', detail: Object.keys(d).join(', '), icon: 'settings', cat: 'club' };
-    case 'table.created':
-      return { title: `Добавлен стол «${str(d.name)}»`, detail: str(d.kind) ? `тип: ${str(d.kind)}` : undefined, icon: 'hall', cat: 'club' };
+      return { title: 'Настройки изменены', detail: fieldsOf(d), icon: 'settings', cat: 'club' };
+    case 'table.created': {
+      const kind = KIND_LABEL[str(d.kind) as TableKind];
+      return { title: `Добавлен стол «${str(d.name)}»`, detail: kind ? `вид: ${kind}` : undefined, icon: 'hall', cat: 'club' };
+    }
     case 'table.updated':
-      return { title: `${table}: настройки стола изменены`, detail: Object.keys(d).join(', '), icon: 'hall', cat: 'club' };
+      return { title: `${table}: настройки стола изменены`, detail: fieldsOf(d), icon: 'hall', cat: 'club' };
     case 'tables.reordered':
       return { title: 'Порядок столов изменён', icon: 'hall', cat: 'club' };
     case 'tariff.created':
       return { title: `Новый тариф «${str(d.name)}»`, icon: 'tariffs', cat: 'club' };
     case 'tariff.updated':
-      return { title: `Тариф изменён${str(d.name) ? `: «${str(d.name)}»` : ''}`, detail: Object.keys(d).join(', '), icon: 'tariffs', cat: 'club' };
+      return { title: `Тариф изменён${str(d.name) ? `: «${str(d.name)}»` : ''}`, detail: fieldsOf(d), icon: 'tariffs', cat: 'club' };
     case 'staff.created':
       return { title: `Новый сотрудник: ${str(d.name)}`, detail: rolesOf(d.roles ?? d.role) ? `роли: ${rolesOf(d.roles ?? d.role)}` : undefined, icon: 'staff', cat: 'club' };
     case 'staff.updated':
-      return { title: 'Сотрудник изменён', detail: Object.keys(d).join(', '), icon: 'staff', cat: 'club' };
+      return { title: 'Сотрудник изменён', detail: fieldsOf(d), icon: 'staff', cat: 'club' };
     case 'staff.pin_checked':
       return { title: d.ok === false ? 'Неверный PIN' : 'Вход по PIN', icon: 'user', cat: 'club', bad: d.ok === false };
     // Games: pauses, transfers, prepaid time, settling
@@ -284,9 +312,21 @@ function describe(e: JournalEntry, state: HubState): Described {
         cat: 'system',
       };
     case 'cloud.settings_applied':
-      return { title: 'Настройки из облака применены', detail: `тарифов ${num(d.tariffs)} · столов ${num(d.tables)}`, icon: 'refresh', cat: 'system' };
+      return { title: 'Настройки из кабинета TS получены', detail: `тарифов ${num(d.tariffs)} · столов ${num(d.tables)}`, icon: 'refresh', cat: 'system', routine: true };
+    case 'cloud.access_applied':
+      return { title: 'Сотрудники из кабинета TS обновлены', icon: 'staff', cat: 'system', routine: true };
+    case 'key.conflict':
+      return { title: 'Ключ из кабинета TS не принят', detail: 'такой ключ уже есть у другого сотрудника — выдайте новый', icon: 'alert', cat: 'club', bad: true };
+    case 'auth.branch_locked':
+      return { title: 'Вход временно закрыт', detail: 'слишком много неверных ключей подряд', icon: 'alert', cat: 'club', bad: true };
+    case 'license.installed':
+      return { title: 'Лицензия обновлена', detail: d.plan === 'trial' ? 'пробный период' : d.plan === 'paid' ? 'оплачено' : undefined, icon: 'check', cat: 'system' };
+    case 'license.rejected':
+      return { title: 'Лицензия из кабинета TS не подошла', detail: str(d.message) || undefined, icon: 'alert', cat: 'system', bad: true };
+    case 'hub.setup_saved':
+      return { title: 'Касса подключена и настроена', icon: 'settings', cat: 'system' };
     default:
-      return { title: e.action, icon: 'journal', cat: 'system' };
+      return { title: 'Служебное действие', icon: 'journal', cat: 'system', code: e.action, routine: true };
   }
 }
 
@@ -296,6 +336,8 @@ export function JournalSection({ params }: { params: URLSearchParams }) {
   const tz = state.club.timezone;
   const tableId = params.get('table') ?? '';
   const [filter, setFilter] = useState<Filter>('all');
+  /** «Все» hides routine system records (startup checks, sync); this shows them. */
+  const [showRoutine, setShowRoutine] = useState(false);
   const [older, setOlder] = useState<JournalEntry[]>([]);
   const [nextBefore, setNextBefore] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -311,10 +353,13 @@ export function JournalSection({ params }: { params: URLSearchParams }) {
     if (head.data && older.length === 0) setNextBefore(head.data.nextBefore);
   }, [head.data, older.length]);
 
-  const entries = useMemo(() => {
+  const all = useMemo(() => {
     const seen = new Set<number>();
     return [...(head.data?.entries ?? []), ...older].filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true)));
   }, [head.data, older]);
+  const hideRoutine = filter === 'all' && !showRoutine;
+  const entries = hideRoutine ? all.filter((e) => !describe(e, state).routine) : all;
+  const hiddenCount = all.length - entries.length;
 
   const loadMore = async () => {
     if (nextBefore === null) return;
@@ -341,8 +386,8 @@ export function JournalSection({ params }: { params: URLSearchParams }) {
   return (
     <div className="page">
       <p className="page-lead">
-        Всё, что происходит в клубе: кто открыл и остановил стол, когда включался свет, тревоги и запуски HUB. Записи не
-        удаляются и не меняются.
+        Всё, что происходит в заведении: кто открыл и остановил стол, оплаты, смены, свет и тревоги. Записи не удаляются и не
+        меняются.
       </p>
       <SectionCard
         title="Журнал действий"
@@ -369,6 +414,12 @@ export function JournalSection({ params }: { params: URLSearchParams }) {
             </button>
           ))}
         </div>
+        {filter === 'all' && (
+          <label className="journal-system-toggle">
+            <input type="checkbox" checked={showRoutine} onChange={(e) => setShowRoutine(e.target.checked)} />
+            Показывать служебные записи{hideRoutine && hiddenCount > 0 ? ` (скрыто: ${hiddenCount})` : ''}
+          </label>
+        )}
 
         {head.data === null ? (
           <p className="hint">{head.error ?? 'Загрузка…'}</p>
@@ -391,9 +442,11 @@ export function JournalSection({ params }: { params: URLSearchParams }) {
                           <Icon name={d.icon} size={17} />
                         </span>
                         <div>
-                          <p className="timeline-title">{d.title}</p>
+                          <p className="timeline-title" title={d.code ? `Код для поддержки: ${d.code}` : undefined}>
+                            {d.title}
+                          </p>
                           {d.detail && <p className="timeline-detail">{d.detail}</p>}
-                          <p className="timeline-actor">{e.actor === 'system' ? 'Система' : e.actor}</p>
+                          <p className="timeline-actor">{ACTOR_WORD[e.actor] ?? e.actor}</p>
                         </div>
                       </li>
                     );

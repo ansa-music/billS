@@ -21,6 +21,7 @@ import { registerMoneyRoutes } from './money-routes.ts';
 import { registerBarRoutes } from './routes/bar.ts';
 import { registerCounterRoutes } from './routes/counter.ts';
 import { registerLicenseRoutes } from './routes/license.ts';
+import { registerTemplateRoutes } from './routes/templates.ts';
 import { registerReportRoutes } from './routes/reports.ts';
 import { registerSettingsRoutes } from './routes/settings.ts';
 import { registerSetupRoutes } from './routes/setup.ts';
@@ -318,6 +319,7 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   registerStaffRoutes(app, hub);
   registerReportRoutes(app, hub);
   registerLicenseRoutes(app, hub);
+  registerTemplateRoutes(app, hub);
 
   // Server-sent events: screens refetch /api/state when something changes.
   app.get('/api/events', (req, reply) => {

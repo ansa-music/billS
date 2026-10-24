@@ -27,4 +27,5 @@ export function handleSync(req: Request, ctx: EdgeContext): Promise<Response>;
 export function handleOwner(req: Request, ctx: EdgeContext): Promise<Response>;
 export function handlePlatform(req: Request, ctx: EdgeContext): Promise<Response>;
 export function handleInviteManager(req: Request, ctx: EdgeContext): Promise<Response>;
+export function handleSignup(req: Request, ctx: EdgeContext): Promise<Response>;
 export function handleNotify(req: Request, ctx: EdgeContext): Promise<Response>;

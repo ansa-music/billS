@@ -42,6 +42,9 @@ function fakeAuthAdmin(e: EdgeTest, calls: Call[]): AuthAdmin {
     async updateUser(id, password, meta) {
       calls.push({ op: 'updateUser', args: [id, password, meta] });
     },
+    async deleteUser(id) {
+      calls.push({ op: 'deleteUser', args: [id] });
+    },
   };
 }
 
@@ -189,6 +192,15 @@ test('authAdminApi: GoTrue admin calls with the service key; exists / rate limit
   assert.equal(seen.at(-1)!.url, 'https://ref.supabase.co/auth/v1/admin/users/u-1');
   answer = () => Response.json({ error_code: 'weak_password', msg: 'Password should contain symbols' }, { status: 422 });
   await assert.rejects(api.updateUser('u-1', 'x', {}), { code: 'WEAK_PASSWORD' });
+  answer = () => Response.json({ code: 422, error_code: 'email_exists', msg: 'A user with this email address has already been registered' }, { status: 422 });
+  await assert.rejects(api.createUser('a@b.kz', 'Pw12-abcd-EFGH', {}), { code: 'EMAIL_TAKEN', status: 409 });
+
+  answer = () => new Response('{}', { status: 200 });
+  await api.deleteUser('u-1');
+  assert.equal(seen.at(-1)!.method, 'DELETE');
+  assert.equal(seen.at(-1)!.url, 'https://ref.supabase.co/auth/v1/admin/users/u-1');
+  answer = () => Response.json({ code: 404, error_code: 'user_not_found', msg: 'User not found' }, { status: 404 });
+  await api.deleteUser('u-1');
 });
 
 test('tempPassword, setPasswordUrl and TS_CABINET_URL', async () => {

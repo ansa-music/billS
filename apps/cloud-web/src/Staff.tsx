@@ -174,7 +174,7 @@ function KeyForm({ staff, onIssued, onCancel }: { staff: CloudStaffView; onIssue
         </label>
       </div>
       <p className="hint">
-        Ключ работает только в этом филиале и только для этого сотрудника. Старые ключи продолжают работать, пока их не
+        Ключ работает только в этом заведении и только для этого сотрудника. Старые ключи продолжают работать, пока их не
         отозвать.
       </p>
       {error && (
@@ -257,7 +257,7 @@ function StaffRow({ staff, readOnly, onChanged }: { staff: CloudStaffView; readO
         <span className="hint">{rolesLabel(staff.roles)}</span>
         <KeyList keys={staff.keys} busy={busy || readOnly} onRevoke={revoke} />
         {issued && (
-          <ShownOnce onDone={() => setIssued(null)} note={<p className="hint">Сообщите ключ сотруднику лично. Вход — на HUB этого филиала.</p>}>
+          <ShownOnce onDone={() => setIssued(null)} note={<p className="hint">Сообщите ключ сотруднику лично. Вход — в кассе этого заведения.</p>}>
             <CopyValue value={issued.key} big />
           </ShownOnce>
         )}
@@ -333,10 +333,10 @@ export function StaffPage({ clubId }: { clubId: string }) {
       <header className="club-page-head">
         <div>
           <a className="back" href="#/company">
-            ← Компания и филиалы
+            ← Заведения
           </a>
           <h2>{branch?.name ?? 'Филиал'}</h2>
-          <p className="muted">Сотрудники и их ключи для входа на HUB</p>
+          <p className="muted">Сотрудники и их ключи входа в кассу</p>
         </div>
         <div className="club-page-right">
           <nav className="tabs" aria-label="Разделы клуба">
@@ -396,9 +396,49 @@ export function StaffPage({ clubId }: { clubId: string }) {
           <p className="empty">{loadingText(staff.error, 'сотрудников')}</p>
         )}
         <p className="hint">
-          Управляющие и команда TS входят своими длинными ключами — здесь их нет. Изменения доходят до HUB филиала при
+          Управляющие и команда TS входят своими длинными ключами — здесь их нет. Изменения доходят до кассы заведения при
           следующей синхронизации (обычно за несколько секунд).
         </p>
+      </Section>
+    </div>
+  );
+}
+
+/** «Сотрудники» in the menu (#/staff): one venue — its staff at once, several — pick one. */
+export function StaffHome() {
+  const loadBranches = useCallback(() => listBranches(), []);
+  const branches = usePoll(loadBranches, 5 * 60_000);
+  if (!branches.data) return <p className="boot-inline">{loadingText(branches.error, 'заведения')}</p>;
+  const list = branches.data;
+  if (list.length === 1 && list[0]) return <StaffPage clubId={list[0].id} />;
+  if (list.length === 0) {
+    return (
+      <div className="company-page">
+        <div className="empty-state">
+          <h2>Сотрудников пока некуда добавить</h2>
+          <p className="muted">Сначала добавьте заведение — потом сотрудников и их ключи входа в кассу.</p>
+          <a className="btn btn-primary" href="#/company">
+            Добавьте первое заведение
+          </a>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="company-page">
+      <Section title="Сотрудники · выберите заведение">
+        <ul className="plain-list">
+          {list.map((b) => (
+            <li key={b.id} className="list-item">
+              <div className="list-main">
+                <strong>{b.name}</strong>
+              </div>
+              <a className="btn btn-small btn-primary" href={clubHref(b.id, 'staff')}>
+                Сотрудники
+              </a>
+            </li>
+          ))}
+        </ul>
       </Section>
     </div>
   );

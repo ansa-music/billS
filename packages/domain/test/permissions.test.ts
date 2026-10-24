@@ -30,6 +30,20 @@ test('a waiter opens tables and takes orders but does not touch settings or mone
   assert.ok(!can('waiter', 'audit.view'));
 });
 
+test('a coffee shop waiter takes counter orders and moves them along', () => {
+  // Without these a waiter in a coffee shop (no tables) had no page at all.
+  assert.ok(can('waiter', 'counter.take'));
+  assert.ok(can('waiter', 'counter.stage'));
+  assert.equal(decide('waiter', 'counter.take', { readOnly: false, modules: allModules }), 'ok');
+  // The module still gates it, and the read-only license keeps only the stage moves.
+  assert.equal(decide('waiter', 'counter.take', { readOnly: false, modules: { ...allModules, bar: false } }), 'module_off');
+  assert.equal(decide('waiter', 'counter.take', { readOnly: true, modules: allModules }), 'read_only');
+  assert.equal(decide('waiter', 'counter.stage', { readOnly: true, modules: allModules }), 'ok');
+  // Still no money outside the counter and no settings.
+  assert.ok(!can('waiter', 'payment.take'));
+  assert.ok(!can('waiter', 'catalog.edit'));
+});
+
 test('a cashier handles money and alerts but not tariffs, staff or approvals', () => {
   assert.ok(can('cashier', 'payment.take'));
   assert.ok(can('cashier', 'shift.open'));

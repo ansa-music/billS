@@ -999,3 +999,97 @@ a.stat-tile:hover {
 .tls-qr .btn {
   text-decoration: none;
 }
+
+/* ── Simple start: guides, support details, shift banner (step 5 of the «Простой старт» plan) ── */
+
+.empty-state-text {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.empty-state-text p {
+  margin: 0;
+}
+
+/* «Шаг 1 из 2: сначала нужен тариф» — what to do next, with the button right there. */
+.settings-guide {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--border));
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+
+.settings-guide p {
+  margin: 0;
+}
+
+/* «Для техподдержки» / «Для поддержки» / «Подробнее»: collapsed technical details. */
+.support-details,
+.license-more {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  color: var(--text-2);
+}
+
+.support-details > summary,
+.license-more > summary {
+  cursor: pointer;
+  font-weight: 600;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+
+.support-details[open] > summary,
+.license-more[open] > summary {
+  margin-bottom: 8px;
+}
+
+.license-line {
+  margin: 0;
+}
+
+.license-line .tag {
+  font-size: 16px;
+  padding: 6px 12px;
+  white-space: normal;
+}
+
+/* «Смена закрыта — откройте смену» above the hall and the checks. */
+.shift-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in oklab, var(--warn) 60%, var(--border));
+  border-radius: 12px;
+  background: var(--warn-soft);
+}
+
+.shift-banner p {
+  margin: 0;
+}
+
+.shift-banner .btn {
+  min-height: 44px;
+  padding-inline: 20px;
+  font-size: 16px;
+}
+
+.journal-system-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 10px;
+  font-size: 14px;
+  color: var(--muted);
+}

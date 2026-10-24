@@ -1,21 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { CreateStaffRequest, Role, StaffListResponse, StaffView, UpdateStaffRequest } from '@bills/domain';
+import type { CreateStaffRequest, IssueKeyResponse, Role, StaffListResponse, StaffView, UpdateStaffRequest } from '@bills/domain';
 import { ROLES, ROLE_LABEL, canAssignRoles, isPlatformRole, normalizeRoles, rolesLabel } from '@bills/domain';
 import { fetchJson } from '../api.ts';
 import { useAuth } from '../auth.ts';
 import { Confirm, Empty, Field, Loading, Modal, Page, Section, Toast, useToast } from '../ui.tsx';
 import { useCommands, useHub, useServerNow } from '../useHub.tsx';
-import { KeysModal } from './staff/KeysModal.tsx';
+import { IssuedKey, KeysModal } from './staff/KeysModal.tsx';
+import { CABINET_URL } from './settings/LicenseSection.tsx';
 import { LoginAttempts } from './staff/LoginAttempts.tsx';
 import './staff.css';
-
-const PIN_RE = /^\d{4,6}$/;
 
 interface FormState {
   name: string;
   roles: Role[];
-  pin: string;
   tableIds: string[];
 }
 
@@ -23,8 +21,9 @@ interface FormState {
 const isLead = (r: Role) => r === 'manager' || isPlatformRole(r);
 
 /**
- * Staff of the club: role sets, access keys, PINs, assigned tables, the login
- * log. Editing needs staff.edit (and a license that is not read-only).
+ * Staff of the club: name and roles, the login key (issued right when a person
+ * is added and shown big, with a QR code and a printed slip), assigned tables,
+ * the login log. Editing needs staff.edit (and a license that is not read-only).
  */
 export function StaffPage() {
   const { state, canNow, blockedReason, license } = useHub();
@@ -39,7 +38,8 @@ export function StaffPage() {
   const [staff, setStaff] = useState<StaffView[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editing, setEditing] = useState<StaffView | 'new' | null>(null);
-  const [pinFor, setPinFor] = useState<StaffView | null>(null);
+  /** Just added: the person and the key issued in the same step. */
+  const [added, setAdded] = useState<{ staff: StaffView; issued: IssueKeyResponse | null; problem: string | null } | null>(null);
   const [toggling, setToggling] = useState<StaffView | null>(null);
   const [keysFor, setKeysFor] = useState<StaffView | null>(null);
 
@@ -80,10 +80,14 @@ export function StaffPage() {
     const tableIds = form.roles.includes('waiter') ? form.tableIds : [];
     if (editing === 'new') {
       const body: CreateStaffRequest = { name: form.name.trim(), roles: form.roles, tableIds };
-      if (form.pin) body.pin = form.pin;
       const created = await formCmd.run<StaffView>('create', '/api/staff', body);
       if (!created) return false;
-      show(`Сотрудник «${created.name}» добавлен`);
+      // The key in the same step: a person without a key cannot log in.
+      let problem: string | null = null;
+      const issued = await formCmd.run<IssueKeyResponse>(`issue:${created.id}`, `/api/staff/${created.id}/keys`, {});
+      if (!issued) problem = 'Ключ выдать не удалось — нажмите «Ключ входа» у сотрудника, чтобы попробовать ещё раз.';
+      setFormError(null);
+      setAdded({ staff: created, issued: issued ?? null, problem });
     } else if (editing) {
       const body: UpdateStaffRequest = { name: form.name.trim(), roles: form.roles, tableIds };
       const updated = await formCmd.run<StaffView>(`update:${editing.id}`, `/api/staff/${editing.id}/update`, body);
@@ -94,23 +98,13 @@ export function StaffPage() {
     return true;
   };
 
-  const submitPin = async (pin: string | null): Promise<boolean> => {
-    if (!pinFor) return false;
-    const body: UpdateStaffRequest = { pin };
-    const updated = await run<StaffView>(`pin:${pinFor.id}`, `/api/staff/${pinFor.id}/update`, body);
-    if (!updated) return false;
-    show(pin === null ? `PIN у «${updated.name}» убран` : `PIN у «${updated.name}» обновлён`);
-    await load();
-    return true;
-  };
-
   const toggleActive = async () => {
     if (!toggling) return;
     const body: UpdateStaffRequest = { isActive: !toggling.isActive };
     const updated = await run<StaffView>(`active:${toggling.id}`, `/api/staff/${toggling.id}/update`, body);
     setToggling(null);
     if (!updated) return;
-    show(updated.isActive ? `«${updated.name}» снова в штате` : `«${updated.name}» уволен`);
+    show(updated.isActive ? `«${updated.name}» снова может входить` : `«${updated.name}» отключён`);
     await load();
   };
 
@@ -120,7 +114,7 @@ export function StaffPage() {
   return (
     <Page
       title="Сотрудники и роли"
-      subtitle="Кто работает в клубе и что ему можно."
+      subtitle="Кто работает в заведении и что ему можно."
       actions={
         canEdit && (
           <button
@@ -136,9 +130,8 @@ export function StaffPage() {
       }
     >
       <p className="staff-hint">
-        Сотрудники входят по простому ключу из 6 цифр — он работает только в этом филиале. Управляющий входит по
-        длинному ключу (MGR-…). Ролей у человека может быть несколько, например «официант + кассир»: права
-        складываются. Сотрудников, заведённых в облачном кабинете, меняют там.
+        Нажмите «Добавить сотрудника», впишите имя и роль — ключ входа из 6 цифр появится сразу. Передайте его человеку
+        лично или распечатайте. Ролей может быть несколько, например «официант + кассир»: права складываются.
         {maxStaff !== null && ` По лицензии — до ${maxStaff} работающих сотрудников, сейчас ${activeCount}.`}
       </p>
       {editBlocked && <p className="blocked-note">{editBlocked}</p>}
@@ -146,7 +139,7 @@ export function StaffPage() {
       <Section>
         {loadError && <p className="field-error">{loadError}</p>}
         {!staff && !loadError && <Loading />}
-        {staff && staff.length === 0 && <Empty>В клубе ещё нет сотрудников</Empty>}
+        {staff && staff.length === 0 && <Empty>Сотрудников пока нет — нажмите «Добавить сотрудника».</Empty>}
         {staff && staff.length > 0 && (
           <ul className="staff-list">
             {staff.map((s) => {
@@ -164,19 +157,18 @@ export function StaffPage() {
                       {self && <span className="muted"> (вы)</span>}
                     </span>
                     <span className="staff-role">{rolesLabel(s.roles)}</span>
-                  </div>
-                  <div className="staff-tags">
                     {s.origin === 'cloud' && (
-                      <span className="tag tag-muted" title="Заведён в облачном кабинете управляющего — меняется там">
-                        из кабинета
+                      <span className="staff-cloud">
+                        изменяется в{' '}
+                        <a href={CABINET_URL} target="_blank" rel="noreferrer">
+                          кабинете TS
+                        </a>
                       </span>
                     )}
-                    {s.roles.some(isLead) && <span className="tag tag-warn">{rolesLabel(s.roles)}</span>}
-                    <span className={`tag ${s.activeKeys > 0 ? 'tag-ok' : 'tag-warn'}`}>
-                      {s.activeKeys > 0 ? `ключей: ${s.activeKeys}` : 'нет ключа'}
-                    </span>
-                    <span className={`tag ${s.hasPin ? 'tag-ok' : 'tag-muted'}`}>{s.hasPin ? 'PIN задан' : 'нет PIN'}</span>
-                    <span className={`tag ${s.isActive ? 'tag-ok' : 'tag-muted'}`}>{s.isActive ? 'работает' : 'уволен'}</span>
+                  </div>
+                  <div className="staff-tags">
+                    <span className={`tag ${s.isActive ? 'tag-ok' : 'tag-muted'}`}>{s.isActive ? 'Активен' : 'Отключён'}</span>
+                    <span className={`tag ${s.activeKeys > 0 ? 'tag-ok' : 'tag-warn'}`}>{s.activeKeys > 0 ? 'Ключ выдан' : 'Нет ключа'}</span>
                   </div>
                   <div className="staff-tables">
                     {s.roles.includes('waiter') ? (
@@ -197,7 +189,7 @@ export function StaffPage() {
                     <div className="staff-actions">
                       {keysVisible && (
                         <button type="button" className="btn btn-small" onClick={() => setKeysFor(s)}>
-                          Ключи
+                          Ключ входа
                         </button>
                       )}
                       {editable && (
@@ -207,20 +199,12 @@ export function StaffPage() {
                           </button>
                           <button
                             type="button"
-                            className="btn btn-small"
-                            onClick={() => setPinFor(s)}
-                            disabled={!s.isActive}
-                          >
-                            Сменить PIN
-                          </button>
-                          <button
-                            type="button"
                             className={s.isActive ? 'btn btn-small btn-ghost' : 'btn btn-small'}
                             onClick={() => setToggling(s)}
                             disabled={self || isBusy(`active:${s.id}`)}
-                            title={self ? 'Нельзя уволить самого себя' : undefined}
+                            title={self ? 'Нельзя отключить самого себя' : undefined}
                           >
-                            {s.isActive ? 'Уволить' : 'Вернуть'}
+                            {s.isActive ? 'Отключить' : 'Включить снова'}
                           </button>
                         </>
                       )}
@@ -251,14 +235,29 @@ export function StaffPage() {
         />
       )}
 
-      {pinFor && (
-        <PinForm
-          key={pinFor.id}
-          staff={pinFor}
-          busy={isBusy(`pin:${pinFor.id}`)}
-          onSubmit={submitPin}
-          onClose={() => setPinFor(null)}
-        />
+      {added && (
+        <Modal open title={`${added.staff.name} — сотрудник добавлен`} onClose={() => setAdded(null)}>
+          {added.issued ? (
+            <IssuedKey
+              issued={added.issued}
+              name={added.staff.name}
+              title="Ключ входа"
+              doneLabel="Готово, ключ передан"
+              onDone={() => setAdded(null)}
+            />
+          ) : (
+            <>
+              <p className="field-error" role="alert">
+                {added.problem}
+              </p>
+              <div className="form-actions modal-actions">
+                <button type="button" className="btn btn-primary" onClick={() => setAdded(null)}>
+                  Понятно
+                </button>
+              </div>
+            </>
+          )}
+        </Modal>
       )}
 
       {keysFor && (
@@ -270,7 +269,7 @@ export function StaffPage() {
             !manages(keysFor)
               ? null
               : keysFor.origin === 'cloud'
-                ? 'Сотрудник заведён в облачном кабинете — ключи ему выдаются там.'
+                ? 'Сотрудник заведён в кабинете TS — ключ ему выдаётся там.'
                 : editBlocked
           }
           timeZone={timeZone}
@@ -282,13 +281,13 @@ export function StaffPage() {
 
       <Confirm
         open={toggling !== null}
-        title={toggling?.isActive ? 'Уволить сотрудника?' : 'Вернуть сотрудника?'}
+        title={toggling?.isActive ? 'Отключить сотрудника?' : 'Включить сотрудника снова?'}
         text={
           toggling?.isActive
-            ? `«${toggling.name}» больше не сможет входить по ключу и действовать в системе. История действий сохранится.`
-            : `«${toggling?.name ?? ''}» снова сможет входить по своим ключам.`
+            ? `«${toggling.name}» больше не сможет входить в кассу. История его действий сохранится.`
+            : `«${toggling?.name ?? ''}» снова сможет входить по своему ключу.`
         }
-        confirmLabel={toggling?.isActive ? 'Уволить' : 'Вернуть'}
+        confirmLabel={toggling?.isActive ? 'Отключить' : 'Включить'}
         danger={toggling?.isActive ?? false}
         busy={toggling ? isBusy(`active:${toggling.id}`) : false}
         onConfirm={() => void toggleActive()}
@@ -300,7 +299,7 @@ export function StaffPage() {
   );
 }
 
-/** Add or edit: name, roles (a set), PIN (on add only), tables for a waiter. */
+/** Add or edit: name, roles (a set), tables for a waiter. Adding also issues the login key. */
 function StaffForm({
   staff,
   roles,
@@ -323,7 +322,6 @@ function StaffForm({
   const [form, setForm] = useState<FormState>(() => ({
     name: staff?.name ?? '',
     roles: staff ? [...staff.roles] : roles.includes('waiter') ? ['waiter'] : roles.slice(-1),
-    pin: '',
     tableIds: staff?.tableIds ?? [],
   }));
   const [error, setError] = useState<string | null>(null);
@@ -350,7 +348,6 @@ function StaffForm({
     if (added.some((r) => !roles.includes(r))) {
       return setError('Эту роль вы назначить не можете');
     }
-    if (form.pin && !PIN_RE.test(form.pin)) return setError('PIN — от 4 до 6 цифр');
     setError(null);
     if (await onSubmit({ ...form, name, roles: checked.roles })) onClose();
   };
@@ -392,20 +389,6 @@ function StaffForm({
             })}
           </div>
         </Field>
-        {!staff && (
-          <Field label="PIN" hint="4–6 цифр, можно задать позже. Это не ключ входа — ключ выдаётся кнопкой «Ключи».">
-            <input
-              className="pin-input"
-              type="password"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              autoComplete="new-password"
-              maxLength={6}
-              value={form.pin}
-              onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, '') })}
-            />
-          </Field>
-        )}
         {form.roles.includes('waiter') && (
           <Field
             label="Столы официанта"
@@ -437,84 +420,7 @@ function StaffForm({
             Отмена
           </button>
           <button type="submit" className="btn btn-primary" disabled={busy || form.roles.length === 0}>
-            {staff ? 'Сохранить' : 'Добавить'}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-/** New PIN for an employee, or remove it. */
-function PinForm({
-  staff,
-  busy,
-  onSubmit,
-  onClose,
-}: {
-  staff: StaffView;
-  busy: boolean;
-  onSubmit: (pin: string | null) => Promise<boolean>;
-  onClose: () => void;
-}) {
-  const [pin, setPin] = useState('');
-  const [again, setAgain] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!PIN_RE.test(pin)) return setError('PIN — от 4 до 6 цифр');
-    if (pin !== again) return setError('PIN не совпадает');
-    setError(null);
-    if (await onSubmit(pin)) onClose();
-  };
-
-  const remove = async () => {
-    if (await onSubmit(null)) onClose();
-  };
-
-  return (
-    <Modal open title={`PIN: ${staff.name}`} onClose={onClose}>
-      <form className="form" onSubmit={(e) => void submit(e)}>
-        <div className="form-row">
-          <Field label="Новый PIN">
-            <input
-              className="pin-input"
-              type="password"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              autoComplete="new-password"
-              maxLength={6}
-              autoFocus
-              value={pin}
-              onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-            />
-          </Field>
-          <Field label="Ещё раз">
-            <input
-              className="pin-input"
-              type="password"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              autoComplete="new-password"
-              maxLength={6}
-              value={again}
-              onChange={(e) => setAgain(e.target.value.replace(/\D/g, ''))}
-            />
-          </Field>
-        </div>
-        {error && <p className="field-error">{error}</p>}
-        <div className="form-actions modal-actions">
-          {staff.hasPin && (
-            <button type="button" className="btn btn-ghost" onClick={() => void remove()} disabled={busy}>
-              Убрать PIN
-            </button>
-          )}
-          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>
-            Отмена
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={busy}>
-            Сохранить
+            {staff ? 'Сохранить' : busy ? 'Добавляем…' : 'Добавить и выдать ключ'}
           </button>
         </div>
       </form>

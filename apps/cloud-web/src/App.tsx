@@ -3,6 +3,7 @@ import type { OwnerView, PlatformMe } from '@bills/domain';
 import { AppsPage } from './Apps.tsx';
 import {
   CloudRequestError,
+  SIGNUP_AVAILABLE,
   SUPABASE_MODE,
   logout,
   platformLogout,
@@ -13,7 +14,11 @@ import {
 import type { Identity } from './api.ts';
 import { CompanyPage } from './Company.tsx';
 import { PlatformCabinet } from './Platform.tsx';
-import { StaffPage } from './Staff.tsx';
+import { StaffHome, StaffPage } from './Staff.tsx';
+import { Signup } from './Signup.tsx';
+import { StartPage } from './Start.tsx';
+import { CabinetNav } from './CabinetNav.tsx';
+import { markReturning } from './signup.ts';
 import { ClubPage } from './ClubPage.tsx';
 import { clubHref, requestRefresh, useHashRoute } from './hooks.ts';
 import { Login } from './Login.tsx';
@@ -182,10 +187,25 @@ export function App() {
   }
 
   if (auth.status === 'anonymous') {
+    const onLogin = (id: Identity) => {
+      markReturning();
+      if (route.kind === 'login' || route.kind === 'signup') location.hash = '#/';
+      setAuth(authOf(id));
+    };
     return (
       <>
         <OfflineBanner online={online} />
-        <Login onLogin={(id) => setAuth(authOf(id))} />
+        {route.kind === 'signup' && SIGNUP_AVAILABLE ? (
+          <Signup
+            onLogin={(id) => {
+              markReturning();
+              location.hash = '#/start';
+              setAuth(authOf(id));
+            }}
+          />
+        ) : (
+          <Login key={route.kind === 'login' ? 'form' : 'start'} start={route.kind === 'login' ? 'form' : 'welcome'} onLogin={onLogin} />
+        )}
       </>
     );
   }
@@ -242,23 +262,23 @@ export function App() {
     setAuth({ status: 'anonymous' });
   }
 
+  // Signed in, «Начать бесплатно» and the sign-in form have nothing to show: the overview instead.
+  const page = route.kind === 'signup' || route.kind === 'login' ? ({ kind: 'overview' } as const) : route;
+
   return (
-    <div className="app">
+    <div className="app app-cabinet">
       <header className="topbar">
         <a className="brand" href="#/">
           <BrandMark />
           <div>
             <h1>{owner.company.name}</h1>
-            <p className="muted">Кабинет управляющего</p>
+            <p className="muted">Кабинет TS</p>
           </div>
         </a>
         <div className="topbar-right">
-          <span className="conn" data-online={online || undefined}>
-            {online ? 'Облако на связи' : 'Нет связи с облаком'}
+          <span className="conn" data-online={online || undefined} title={online ? 'Кабинет на связи' : 'Нет связи с интернетом'}>
+            <span className="conn-text">{online ? 'На связи' : 'Нет связи'}</span>
           </span>
-          <a className="topbar-link" href="#/apps" aria-current={route.kind === 'apps' ? 'page' : undefined}>
-            Скачать приложение
-          </a>
           <span className="owner" title={owner.email}>
             {owner.name || owner.email}
           </span>
@@ -274,37 +294,27 @@ export function App() {
               Кабинет платформы
             </button>
           )}
-          <a
-            className="btn btn-small btn-link"
-            href="#/company"
-            aria-current={route.kind === 'company' ? 'page' : undefined}
-          >
-            Компания и сотрудники
-          </a>
-          <a
-            className="btn btn-small btn-link"
-            href="#/phone"
-            aria-current={route.kind === 'phone' ? 'page' : undefined}
-          >
-            Телефон и уведомления
-          </a>
           <button type="button" className="btn btn-small" onClick={() => void signOut()}>
             Выйти
           </button>
         </div>
       </header>
 
+      <CabinetNav route={page} />
+
       <OfflineBanner online={online} />
       <Toasts toasts={toasts} dismiss={dismiss} />
 
-      {route.kind === 'overview' && <Overview />}
-      {route.kind === 'apps' && <AppsPage signedIn />}
-      {route.kind === 'club' && <ClubPage key={route.id} id={route.id} />}
-      {route.kind === 'tariffs' && <Tariffs key={route.id} id={route.id} />}
-      {route.kind === 'shifts' && <Shifts key={route.id} id={route.id} />}
-      {route.kind === 'staff' && <StaffPage key={route.id} clubId={route.id} />}
-      {route.kind === 'company' && <CompanyPage />}
-      {route.kind === 'phone' && <Phone />}
+      {page.kind === 'overview' && <Overview companyId={owner.company.id} />}
+      {page.kind === 'start' && <StartPage companyId={owner.company.id} />}
+      {page.kind === 'apps' && <AppsPage signedIn />}
+      {page.kind === 'club' && <ClubPage key={page.id} id={page.id} />}
+      {page.kind === 'tariffs' && <Tariffs key={page.id} id={page.id} />}
+      {page.kind === 'shifts' && <Shifts key={page.id} id={page.id} />}
+      {page.kind === 'staff' && <StaffPage key={page.id} clubId={page.id} />}
+      {page.kind === 'staff-home' && <StaffHome />}
+      {page.kind === 'company' && <CompanyPage companyId={owner.company.id} />}
+      {page.kind === 'phone' && <Phone />}
     </div>
   );
 }

@@ -620,6 +620,21 @@ export interface LoginResponse {
   expiresAt: number;
 }
 
+/**
+ * GET /api/auth/roster (public): who may sign in on this tablet — active people of the branch
+ * with a working six-digit key, for the «Кто на смене?» tiles. Names and roles only, never a key;
+ * empty when the club switched the list off (`display.showRoster = false`).
+ */
+export interface RosterPerson {
+  id: string;
+  name: string;
+  roles: Role[];
+}
+
+export interface RosterResponse {
+  people: RosterPerson[];
+}
+
 /** GET /api/auth/me */
 export interface MeResponse {
   staff: AuthStaff;

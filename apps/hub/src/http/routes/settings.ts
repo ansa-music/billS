@@ -32,6 +32,7 @@ const settingsPatchSchema = {
         theme: { type: 'string', enum: [...THEMES] },
         cardSize: { type: 'string', enum: [...CARD_SIZES] },
         waiterSees: { type: 'string', enum: [...WAITER_VIEWS] },
+        showRoster: { type: 'boolean' },
       },
     },
     rules: {

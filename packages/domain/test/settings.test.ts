@@ -47,3 +47,12 @@ test('validation flags a minimum shorter than the free minutes', () => {
   assert.equal(validateClubSettings(s).length, 1);
   assert.deepEqual(validateClubSettings(DEFAULT_CLUB_SETTINGS), []);
 });
+
+test('the login roster is on by default and only a boolean switches it', () => {
+  assert.equal(DEFAULT_CLUB_SETTINGS.display.showRoster, true);
+  const off = normalizeClubSettings({ display: { showRoster: false } });
+  assert.equal(off.display.showRoster, false);
+  // Garbage keeps the base; another patch keeps the stored choice.
+  assert.equal(normalizeClubSettings({ display: { showRoster: 'no' } }).display.showRoster, true);
+  assert.equal(normalizeClubSettings({ display: { theme: 'dark' } }, off).display.showRoster, false);
+});

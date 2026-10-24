@@ -81,6 +81,16 @@ export const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', '�
 
 export const CURRENCIES = ['KZT', 'RUB', 'USD', 'EUR', 'UZS', 'KGS'] as const;
 
+/** Currency names people know: «Тенге (₸)», not «KZT». */
+export const CURRENCY_LABEL: Record<string, string> = {
+  KZT: 'Тенге (₸)',
+  RUB: 'Рубль (₽)',
+  USD: 'Доллар США ($)',
+  EUR: 'Евро (€)',
+  UZS: 'Узбекский сум',
+  KGS: 'Киргизский сом',
+};
+
 export const TIME_ZONES = [
   'Asia/Almaty',
   'Asia/Aqtobe',
@@ -91,6 +101,18 @@ export const TIME_ZONES = [
   'Asia/Tashkent',
   'Asia/Bishkek',
 ] as const;
+
+/** Time zones by the cities people live in. */
+export const TIME_ZONE_LABEL: Record<string, string> = {
+  'Asia/Almaty': 'Алматы, Астана (UTC+5)',
+  'Asia/Aqtobe': 'Актобе (UTC+5)',
+  'Asia/Aqtau': 'Актау (UTC+5)',
+  'Asia/Qyzylorda': 'Кызылорда (UTC+5)',
+  'Asia/Oral': 'Уральск (UTC+5)',
+  'Europe/Moscow': 'Москва (UTC+3)',
+  'Asia/Tashkent': 'Ташкент (UTC+5)',
+  'Asia/Bishkek': 'Бишкек (UTC+6)',
+};
 
 export function SaveBar({
   dirty,

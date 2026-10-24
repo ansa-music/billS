@@ -1,0 +1,449 @@
+/* First start and sign-in: «Подключите кассу к кабинету» (Connect.tsx) and «Кто на смене?» (Login.tsx).
+   Both live in .login-shell, outside the app shell. Tokens from styles.css. */
+
+.onboarding,
+.login-page {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.onboarding-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.onboarding-head .page-title {
+  margin: 0;
+}
+
+.onboarding-head .page-lead {
+  margin: 4px 0 0;
+}
+
+.onboarding-mark {
+  width: 44px;
+  height: 44px;
+  flex: none;
+}
+
+.onboarding-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.onboarding-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+
+.onboarding-step {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.onboarding-step-body {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+.onboarding-step-body > .field,
+.onboarding-step-body > .onboarding-lamps,
+.onboarding-step-body > .onboarding-error,
+.onboarding-step-body > .onboarding-actions {
+  justify-self: stretch;
+}
+
+.onboarding-step h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  color: var(--text);
+}
+
+.onboarding-step p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.onboarding-num {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 15px;
+  font-weight: 750;
+  flex: none;
+}
+
+.onboarding-qr {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  flex: none;
+}
+
+.onboarding-qr .qr-code {
+  border-radius: var(--radius-sm);
+}
+
+.onboarding-code {
+  width: 100%;
+  min-height: 96px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 17px;
+  line-height: 1.4;
+  word-break: break-all;
+  resize: vertical;
+}
+
+.onboarding-code[aria-invalid='true'] {
+  border-color: color-mix(in oklab, var(--danger) 60%, var(--border));
+}
+
+.onboarding-lamps {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+}
+
+.onboarding-lamps summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+
+.onboarding-lamps[open] summary {
+  margin-bottom: 10px;
+}
+
+.onboarding-lamp-choices {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.onboarding-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.onboarding-choice input {
+  width: 20px;
+  height: 20px;
+  min-height: auto;
+  margin-top: 2px;
+  accent-color: var(--accent);
+  flex: none;
+}
+
+.onboarding-choice > span {
+  display: grid;
+  gap: 2px;
+}
+
+.onboarding-choice strong {
+  color: var(--text);
+}
+
+.onboarding-error {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in oklab, var(--danger) 45%, var(--border));
+  color: var(--text);
+}
+
+.onboarding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.onboarding-actions .btn-primary {
+  min-width: 220px;
+  font-size: 18px;
+}
+
+.onboarding-foot {
+  margin-top: 18px;
+  text-align: center;
+}
+
+.onboarding-link {
+  border: 0;
+  background: none;
+  padding: 6px 2px;
+  color: var(--accent-ink);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.onboarding-wait {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: var(--fs-lg);
+  line-height: 1.45;
+}
+
+.onboarding-wait p,
+.onboarding-done p {
+  margin: 0;
+}
+
+.onboarding-done {
+  display: grid;
+  gap: 12px;
+  line-height: 1.45;
+}
+
+.onboarding-big {
+  font-size: var(--fs-xl);
+  font-weight: 650;
+  color: var(--text);
+}
+
+.onboarding-note {
+  color: var(--warn);
+}
+
+.onboarding-spinner {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 4px solid var(--border);
+  border-top-color: var(--accent);
+  animation: onboarding-spin 0.9s linear infinite;
+  flex: none;
+}
+
+@keyframes onboarding-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 600px) {
+  .onboarding-step {
+    flex-direction: column;
+  }
+
+  .onboarding-qr {
+    align-self: center;
+  }
+
+  .onboarding-actions .btn-primary {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+/* «Кто на смене?» */
+
+.roster {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 12px;
+}
+
+.roster-tile {
+  width: 100%;
+  min-height: 150px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 16px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+
+.roster-tile:active {
+  background: color-mix(in oklab, var(--accent) 14%, var(--surface));
+}
+
+@media (hover: hover) {
+  .roster-tile:hover {
+    border-color: var(--accent);
+  }
+}
+
+.roster-avatar {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: color-mix(in oklab, var(--accent) 28%, var(--surface-2));
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.roster-avatar-big {
+  width: 76px;
+  height: 76px;
+  font-size: 28px;
+}
+
+.roster-name {
+  font-size: 17px;
+  font-weight: 650;
+  text-align: center;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.roster-role {
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  text-align: center;
+}
+
+.login-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  margin: 20px 0 0;
+}
+
+.login-device {
+  margin-top: 14px;
+  max-width: 420px;
+  font-size: var(--fs-md);
+}
+
+.login-device p {
+  margin: 0;
+}
+
+.login-pad {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  max-width: 360px;
+}
+
+.login-pad .keypad {
+  width: 100%;
+}
+
+.login-person {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+}
+
+.login-ask {
+  margin: 0;
+  font-size: var(--fs-lg);
+  color: var(--text);
+  text-align: center;
+}
+
+.login-error {
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  text-align: center;
+}
+
+.keypad[data-shake] {
+  animation: login-shake 0.42s var(--ease);
+}
+
+@keyframes login-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20%,
+  60% {
+    transform: translateX(-10px);
+  }
+  40%,
+  80% {
+    transform: translateX(10px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .keypad[data-shake],
+  .onboarding-spinner {
+    animation: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .roster {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .roster-tile {
+    min-height: 128px;
+  }
+
+  .roster-avatar {
+    width: 52px;
+    height: 52px;
+    font-size: 19px;
+  }
+}
+
+/* A coffee shop whose license lacks the counter module (App.tsx). */
+.license-hint {
+  max-width: 640px;
+  display: grid;
+  gap: 12px;
+  line-height: 1.5;
+}
+
+.license-hint p {
+  margin: 0;
+}

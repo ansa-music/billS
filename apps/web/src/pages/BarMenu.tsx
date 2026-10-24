@@ -3,6 +3,7 @@ import type { FormEvent, ReactNode } from 'react';
 import type { CategoryView, CreateProductRequest, ProductOptionGroup, ProductView, UpdateProductRequest } from '@bills/domain';
 import { formatMoney, normalizeOptionGroups, validateOptionGroups } from '@bills/domain';
 import { businessOf, optionsOf } from '../cafe/cafe.ts';
+import { EmptyState } from '../components.tsx';
 import { OfflineBanner } from '../OfflineBanner.tsx';
 import { Empty, Field, Loading, Modal, Page, Section, Toast, useToast } from '../ui.tsx';
 import { useCommands, useHub } from '../useHub.tsx';
@@ -67,6 +68,12 @@ export function BarMenuPage() {
     await reload();
   };
 
+  const fillExample = async () => {
+    const res = await run<{ products: number }>('template', '/api/templates/apply', { kind: cafe ? 'menu-cafe' : 'menu-bar' });
+    if (res) await afterChange(res.products > 0 ? 'Меню заполнено примером — поменяйте цены и названия под себя' : 'Меню уже заполнено');
+  };
+  const catalogEmpty = categories.length === 0 && sorted.products.length === 0;
+
   const toggleProduct = async (p: ProductView) => {
     const res = await run<ProductView>(`product:${p.id}`, `/api/bar/products/${p.id}/update`, { isActive: !p.isActive });
     if (res) await afterChange(res.isActive ? `«${res.name}» снова в меню` : `«${res.name}» скрыт из меню`);
@@ -101,6 +108,26 @@ export function BarMenuPage() {
       <OfflineBanner online={online} />
       {editBlocked && <p className="blocked-note">{editBlocked}</p>}
       {error && <p className="bar-error">{error}</p>}
+
+      {catalogEmpty && (
+        <Section>
+          <EmptyState icon="bar" title="Меню пока пустое">
+            <p>
+              {cafe
+                ? 'Заполните примером — кофе с размерами и молоком, чай и выпечка — и поменяйте под себя. Или добавьте всё сами.'
+                : 'Заполните примером — напитки, снеки, мел и перчатки — и поменяйте под себя. Или добавьте всё сами.'}
+            </p>
+            <div className="row wrap">
+              <button type="button" className="btn btn-primary" disabled={locked} onClick={() => void fillExample()}>
+                {busy.has('template') ? 'Заполняем…' : 'Заполнить примером'}
+              </button>
+              <button type="button" className="btn" disabled={locked} onClick={() => setCategoryDraft({ mode: 'new' })}>
+                Добавить категорию
+              </button>
+            </div>
+          </EmptyState>
+        </Section>
+      )}
 
       <Section
         title="Категории"
