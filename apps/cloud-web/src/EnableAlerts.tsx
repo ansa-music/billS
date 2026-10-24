@@ -125,7 +125,7 @@ export function EnableAlerts({ onChange }: { onChange: () => Promise<void> | voi
                   Открыть Google Play
                 </a>
               )}
-              {(ios || !inApp) && (
+              {(ios || word === 'компьютере') && (
                 <a className="btn" href={APP_STORE} target="_blank" rel="noreferrer">
                   Открыть App Store
                 </a>

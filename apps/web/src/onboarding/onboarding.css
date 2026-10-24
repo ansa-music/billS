@@ -389,6 +389,7 @@
 }
 
 .login-error {
+  color: var(--danger);
   font-size: var(--fs-lg);
   font-weight: 650;
   text-align: center;
