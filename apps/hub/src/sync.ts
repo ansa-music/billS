@@ -240,17 +240,9 @@ export function applySettings(db: Db, now: number, settings: ClubSnapshot, event
       );
     }
 
-    // What the club is (billiards / coffee shop), as chosen at sign-up in the cabinet. Older clouds
-    // send no `business`; an unknown type is ignored rather than failing the whole package.
+    // What the club is (billiards / coffee shop), as chosen at sign-up in the cabinet.
     const businessType = businessTypeOf(settings);
-    let businessChanged = false;
-    if (businessType) {
-      const current = loadSettings(db, club.id);
-      if (current.business.type !== businessType) {
-        run(db, 'UPDATE clubs SET settings = ? WHERE id = ?', JSON.stringify({ ...current, business: { type: businessType } }), club.id);
-        businessChanged = true;
-      }
-    }
+    const businessChanged = writeBusinessType(db, club.id, businessType);
 
     record(db, now, {
       actor: CLOUD_ACTOR,
@@ -274,10 +266,41 @@ export function applySettings(db: Db, now: number, settings: ClubSnapshot, event
   });
 }
 
-/** `business.type` of a settings package from the cloud, when it names a known type. */
-function businessTypeOf(settings: ClubSnapshot): BusinessType | null {
-  const type = (settings as ClubSnapshot & { business?: { type?: unknown } | null }).business?.type;
+/**
+ * `business.type` of a package from the cloud (GET /sync/settings — changed or not — and GET
+ * /sync/access carry it), when it names a known type. Older clouds send none; an unknown type is
+ * ignored rather than failing the whole package.
+ */
+export function businessTypeOf(pkg: unknown): BusinessType | null {
+  const business = pkg !== null && typeof pkg === 'object' ? (pkg as { business?: unknown }).business : undefined;
+  const type = business !== null && typeof business === 'object' ? (business as { type?: unknown }).type : undefined;
   return typeof type === 'string' && (BUSINESS_TYPES as readonly string[]).includes(type) ? (type as BusinessType) : null;
+}
+
+/** Writes the business type into the club settings (other settings kept); true when it changed. */
+function writeBusinessType(db: Db, club: string, type: BusinessType | null): boolean {
+  if (!type) return false;
+  const current = loadSettings(db, club);
+  if (current.business.type === type) return false;
+  run(db, 'UPDATE clubs SET settings = ? WHERE id = ?', JSON.stringify({ ...current, business: { type } }), club);
+  return true;
+}
+
+/**
+ * Applies the business type a cloud package names. A freshly connected HUB may never pull settings
+ * (the cloud is still at version 0), so the unchanged settings answer and the access package — pulled
+ * regularly — bring it too. Returns true when the club switched (journal `cloud.business_applied`).
+ */
+export function applyBusinessType(db: Db, now: number, pkg: unknown, events?: HubEvents): boolean {
+  const type = businessTypeOf(pkg);
+  if (!type) return false;
+  return transaction(db, () => {
+    const club = clubId(db);
+    if (!writeBusinessType(db, club, type)) return false;
+    record(db, now, { actor: CLOUD_ACTOR, action: 'cloud.business_applied', entityType: 'club', entityId: club, data: { businessType: type } });
+    if (events) afterCommit(db, () => events.changed({ kind: 'club' }));
+    return true;
+  });
 }
 
 /** The access package version this HUB applied; null = never. */
@@ -598,6 +621,8 @@ export class SyncWorker {
         this.#logger?.info(`Облако: применены настройки версии ${state.settings_version}`);
         // Tell the cloud right away which version we run now; otherwise it would learn it a tick later.
         await this.#pushSnapshot(state);
+      } else {
+        applyBusinessType(this.#db, now, res.body, this.#events);
       }
     }
 
@@ -616,6 +641,9 @@ export class SyncWorker {
       throw new Error('GET /sync/access: пакет доступа повреждён');
     }
     const applied = applyAccess(this.#db, this.#clock.now(), access, this.#events);
+    if (applyBusinessType(this.#db, this.#clock.now(), access, this.#events)) {
+      this.#logger?.info(`Облако: тип заведения — ${businessTypeOf(access) === 'cafe' ? 'кофейня' : 'бильярдный клуб'}`);
+    }
     this.#logger?.info(
       `Облако: доступ версии ${access.version}: людей ${applied.people}, ключей ${applied.keys}` +
         (applied.conflicts ? `, конфликтов ключей ${applied.conflicts}` : ''),
