@@ -13,7 +13,7 @@ import { CloudError } from '../../apps/cloud/src/errors.ts';
 import { handleOwner } from '../../apps/cloud/src/edge/owner.ts';
 import { handleSignup, SIGNUP_TRIAL_DAYS } from '../../apps/cloud/src/edge/signup.ts';
 import { handleSync } from '../../apps/cloud/src/edge/sync.ts';
-import { licenseSignerFromEnv } from '../../apps/cloud/src/license.ts';
+import { currentLicense, licenseSignerFromEnv, storeLicense } from '../../apps/cloud/src/license.ts';
 import type { EdgeTest } from './edge-helpers.ts';
 import { edgeTest, userJwt } from './edge-helpers.ts';
 
@@ -289,7 +289,7 @@ test('hub-code: a new HUB key and connection code; the old key stops working', a
   const auth = (key: string) => ({ authorization: `Bearer ${key}` });
   const check = await e.call(handleSync, 'GET', `/sync/settings?since=999999&hubId=${hubId}`, { headers: auth(first.body.apiKey) });
   assert.equal(check.status, 200);
-  assert.deepEqual(check.body, { changed: false, version: 0, business: { type: 'cafe' } });
+  assert.deepEqual(check.body, { changed: false, version: 1, business: { type: 'cafe' } });
   const access = await e.call(handleSync, 'GET', '/sync/access', { headers: auth(first.body.apiKey) });
   assert.equal(access.status, 200);
   assert.deepEqual(access.body.business, { type: 'cafe' });
@@ -366,11 +366,7 @@ test('onboarding: per branch — HUB connected, staff, tariffs, shifts; menu unk
   const code = await e.call(handleOwner, 'POST', `/owner/clubs/${clubId}/hub-code`, { headers: h });
   e.clock.now += 60_000;
   await e.call(handleSync, 'GET', '/sync/settings?since=0', { headers: { authorization: `Bearer ${code.body.apiKey}` } });
-  await e.s.db.run(
-    `INSERT INTO club_settings (club_id, version, club_json, tariffs_json, tables_json, staff_json, updated_at, source)
-     VALUES (?, 0, '{}', '[{"id":"t1"},{"id":"t2"}]', '[]', '[]', ?, 'hub')`,
-    [clubId, e.clock.now],
-  );
+  await e.s.db.run(`UPDATE club_settings SET tariffs_json = '[{"id":"t1"},{"id":"t2"}]', source = 'hub' WHERE club_id = ?`, [clubId]);
   await e.s.db.run("INSERT INTO shifts (id, club_id, number, status, opened_at, opened_by) VALUES ('s1', ?, 1, 'OPEN', ?, 'x')", [clubId, e.clock.now]);
   const after = (await get()).clubs[0];
   assert.equal(after.hubConnected, true);
@@ -379,4 +375,69 @@ test('onboarding: per branch — HUB connected, staff, tariffs, shifts; menu unk
   assert.equal(after.shifts, 1);
   assert.equal(after.menu, null);
   assert.equal((await e.call(handleOwner, 'GET', '/owner/onboarding')).status, 401);
+});
+
+test('a fresh HUB (settings version 0) takes the cloud name after sign-up and new branch, not the other way round', async (t) => {
+  const { e, h, clubId, hubId } = await signedUp(t);
+  const code = await e.call(handleOwner, 'POST', `/owner/clubs/${clubId}/hub-code`, { headers: h });
+  const auth = { authorization: `Bearer ${code.body.apiKey}` };
+  const hubDefaults = { name: 'Моё заведение', timezone: 'UTC', currency: 'USD' };
+
+  // What a new HUB does first: its own snapshot at version 0 → refused, the cloud is ahead.
+  const first = await e.call(handleSync, 'POST', '/sync/snapshot', {
+    headers: auth,
+    body: { hubId, settingsVersion: 0, club: hubDefaults, tariffs: [], tables: [] },
+  });
+  assert.equal(first.status, 409);
+  assert.deepEqual(first.body, { accepted: false, settingsVersion: 1 });
+  const events = await e.call(handleSync, 'POST', '/sync/events', { headers: auth, body: { hubId, settingsVersion: 0, events: [] } });
+  assert.equal(events.body.settingsVersion, 1);
+
+  // It pulls: the venue's name, time zone, currency and type.
+  const pulled = await e.call(handleSync, 'GET', `/sync/settings?since=0&hubId=${hubId}`, { headers: auth });
+  assert.equal(pulled.status, 200);
+  assert.deepEqual(pulled.body, {
+    changed: true,
+    version: 1,
+    club: { name: 'Кофейня Тест', timezone: 'Asia/Almaty', currency: 'KZT' },
+    tariffs: [],
+    tables: [],
+    staff: [],
+    business: { type: 'cafe' },
+  });
+
+  // Then its snapshot (now on version 1, with the cloud's club) is accepted and the name stays.
+  const tariff = {
+    id: 't-std',
+    name: 'Стандарт',
+    isActive: true,
+    config: { currency: 'KZT', basePricePerHour: 1500_00, windows: [], stepMinutes: 1, minimumMinutes: 30, freeMinutes: 0, roundingMinor: 10_00 },
+  };
+  const caughtUp = await e.call(handleSync, 'POST', '/sync/snapshot', {
+    headers: auth,
+    body: { hubId, settingsVersion: 1, club: pulled.body.club, tariffs: [tariff], tables: [] },
+  });
+  assert.deepEqual(caughtUp.body, { accepted: true, settingsVersion: 1 });
+  const stored = await e.s.db.all<{ club_json: string; tariffs_json: string }>('SELECT club_json, tariffs_json FROM club_settings WHERE club_id = ?', [clubId]);
+  assert.equal(JSON.parse(stored[0]!.club_json).name, 'Кофейня Тест');
+  assert.equal(JSON.parse(stored[0]!.tariffs_json).length, 1);
+
+  // A branch created in the cabinet starts the same way (the licence widened to 2 branches first).
+  const companyId = (await e.s.db.all<{ company_id: string }>('SELECT company_id FROM clubs WHERE id = ?', [clubId]))[0]!.company_id;
+  const current = (await currentLicense(e.s.db, companyId))!.payload;
+  await storeLicense(e.s.db, e.ctx.licenseSigner, { ...current, id: crypto.randomUUID(), maxClubs: 2 }, null);
+  const branch = await e.call(handleOwner, 'POST', '/owner/company/branches', {
+    headers: h,
+    body: { name: 'Филиал Север', timezone: 'Asia/Aqtobe', currency: 'KZT' },
+  });
+  assert.equal(branch.status, 200, JSON.stringify(branch.body));
+  const bAuth = { authorization: `Bearer ${branch.body.hubApiKey}` };
+  const refused = await e.call(handleSync, 'POST', '/sync/snapshot', {
+    headers: bAuth,
+    body: { hubId: branch.body.hubId, settingsVersion: 0, club: hubDefaults, tariffs: [], tables: [] },
+  });
+  assert.equal(refused.status, 409);
+  const bPulled = await e.call(handleSync, 'GET', '/sync/settings?since=0', { headers: bAuth });
+  assert.deepEqual(bPulled.body.club, { name: 'Филиал Север', timezone: 'Asia/Aqtobe', currency: 'KZT' });
+  assert.equal(bPulled.body.version, 1);
 });
