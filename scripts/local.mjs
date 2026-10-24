@@ -54,6 +54,8 @@ function stop(code = 0) {
 start('hub', ['--watch', 'src/main.ts'], join(root, 'apps/hub'), {
   HUB_PORT: hubPort,
   HUB_DB_PATH: join(root, `apps/hub/data/${dbName}.db`),
+  // A real HUB starts empty; the local stand keeps demo data unless HUB_DEMO=0.
+  HUB_DEMO: process.env.HUB_DEMO ?? '1',
 });
 if (!serveDist) {
   start('web', [join(root, 'node_modules/vite/bin/vite.js')], join(root, 'apps/web'), {

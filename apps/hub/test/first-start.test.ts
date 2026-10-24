@@ -9,7 +9,8 @@ import { Hub } from '../src/hub.ts';
 import { SimulatorLampDriver } from '../src/lamps/simulator.ts';
 import { INSTALLER_NAME, SYSTEM_ACTOR } from '../src/auth.ts';
 import { NEW_CLUB_NAME, prepareClub } from '../src/seed.ts';
-import { applySettings } from '../src/sync.ts';
+import { applyBusinessType, applySettings, SyncWorker } from '../src/sync.ts';
+import { HubEvents } from '../src/events.ts';
 import { clubId, loadSettings } from '../src/views.ts';
 import { FAST_LAMPS, MONDAY_NOON } from './helpers.ts';
 
@@ -157,4 +158,31 @@ test('settings from the cloud carry the business type chosen at sign-up', async 
   applySettings(db, clock.now(), { ...base, version: 4, business: { type: 'billiards' } } as ClubSnapshot);
   assert.equal(loadSettings(db, clubId(db)).business.type, 'billiards');
   assert.equal(loadSettings(db, clubId(db)).display.title, 'Парк');
+});
+
+test('a freshly connected HUB takes the business type from the access package (the cloud may stay at settings version 0)', async (t) => {
+  const { db, clock } = await startHub(t, { demo: false });
+  const fetchFake: typeof fetch = async (input) => {
+    const url = String(input);
+    assert.ok(url.includes('/sync/access'), url);
+    return new Response(
+      JSON.stringify({ version: 1, license: null, clubId: 'cloud-club', people: [], keys: [], business: { type: 'cafe' } }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  };
+  const events = new HubEvents();
+  const changed: string[] = [];
+  events.on('changed', (e) => changed.push(e.kind));
+  const worker = new SyncWorker({ db, clock, events, url: 'http://cloud.test', apiKey: 'k'.repeat(43), hubId: 'hub-1', fetch: fetchFake });
+  await worker.pullAccess();
+  assert.equal(loadSettings(db, clubId(db)).business.type, 'cafe');
+  assert.ok(changed.includes('club'), 'screens hear about the switch');
+  assert.equal(all(db, "SELECT id FROM audit_log WHERE action = 'cloud.business_applied'").length, 1);
+  // The same type again (every pull, or an unchanged settings answer) writes nothing; garbage is ignored.
+  assert.equal(applyBusinessType(db, clock.now(), { changed: false, version: 0, business: { type: 'cafe' } }), false);
+  assert.equal(applyBusinessType(db, clock.now(), { business: null }), false);
+  assert.equal(applyBusinessType(db, clock.now(), { business: { type: 'casino' } }), false);
+  assert.equal(all(db, "SELECT id FROM audit_log WHERE action = 'cloud.business_applied'").length, 1);
+  assert.equal(applyBusinessType(db, clock.now(), { changed: false, version: 0, business: { type: 'billiards' } }), true);
+  assert.equal(loadSettings(db, clubId(db)).business.type, 'billiards');
 });

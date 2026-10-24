@@ -95,6 +95,22 @@ export async function saveSettings(
   );
 }
 
+/**
+ * Settings of a branch created in the cloud (cabinet or sign-up): version 1 with the cloud's
+ * name, time zone and currency and no tariffs or tables yet. A fresh HUB is on version 0, so its
+ * first snapshot is refused (409) and it pulls these first — it takes the cloud's name instead of
+ * overwriting it with its own default; then its snapshot (tariffs, tables) is accepted at version 1.
+ * Empty lists do not touch the HUB's tariffs or hall (apps/hub applySettings).
+ */
+export async function initialSettings(
+  db: SqlDriver,
+  clubId: string,
+  club: { name: string; timezone: string; currency: string },
+  now: number,
+): Promise<void> {
+  await saveSettings(db, clubId, { version: 1, club, tariffs: [], tables: [], staff: [] }, 'owner', now);
+}
+
 export function toClubSettings(s: StoredSettings): ClubSnapshot {
   return { version: s.version, club: s.club, tariffs: s.tariffs, tables: s.tables, staff: s.staff };
 }

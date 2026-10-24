@@ -37,7 +37,7 @@ import type { SqlDriver } from './db/driver.ts';
 import { CloudError } from './errors.ts';
 import type { LicenseSigner } from './license.ts';
 import { bumpClubAccess, currentLicense, reissueLicense, toLicenseView } from './license.ts';
-import { businessTypeOf } from './settings.ts';
+import { businessTypeOf, initialSettings } from './settings.ts';
 
 /** The signed-in manager: an `owners` row. */
 export interface ManagerRef {
@@ -131,6 +131,7 @@ export async function createBranch(
       throw new CloudError(409, 'LICENSE_CLUB_LIMIT', `По лицензии филиалов не больше ${max}. Чтобы открыть ещё, расширьте лицензию.`);
     }
     const created = await insertClubWithHub(tx, now, me.companyId, input);
+    await initialSettings(tx, created.clubId, input, now);
     await reissueLicense(tx, signer, now, me.companyId, me.id);
     const [branch] = await branchViews(tx, me.companyId, created.clubId);
     return { branch: branch!, hubId: created.hubId, hubApiKey: created.apiKey };

@@ -6,6 +6,7 @@ import { normalizeEmail } from '../auth.ts';
 import { isBusinessType, issueStaffKey } from '../company.ts';
 import { CloudError } from '../errors.ts';
 import { storeLicense } from '../license.ts';
+import { initialSettings } from '../settings.ts';
 import { EMAIL_TAKEN_MESSAGE } from './auth-admin.ts';
 import type { EdgeContext } from './context.ts';
 import type { EdgeRequest } from './http.ts';
@@ -128,7 +129,10 @@ async function createVenue(ctx: EdgeContext, input: SignupInput, authUserId: str
        VALUES (?, ?, ?, ?, '!', ?, CAST(? AS uuid))`,
       [ownerId, companyId, input.email, input.staffName, now, authUserId],
     );
-    const club = await insertClubWithHub(tx, now, companyId, { name: input.venueName, timezone: input.timezone, currency: 'KZT' });
+    const clubInput = { name: input.venueName, timezone: input.timezone, currency: 'KZT' };
+    const club = await insertClubWithHub(tx, now, companyId, clubInput);
+    // Version 1: a fresh HUB pulls the venue's name before its own snapshot can replace it.
+    await initialSettings(tx, club.clubId, clubInput, now);
     await tx.run('UPDATE clubs SET business_type = ? WHERE id = ?', [input.businessType, club.clubId]);
 
     const payload: LicensePayload = {
