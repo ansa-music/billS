@@ -130,14 +130,23 @@
 }
 
 .loy-anchor {
-  position: relative;
+  grid-column: 1 / -1;
+  display: grid;
 }
 
+.loy-anchor .loy-chip {
+  justify-content: center;
+}
+
+/* The keypad floats over the counter (the order panel clips anything anchored inside it). */
 .loy-pop {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + var(--space-2));
-  z-index: 30;
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  background: var(--overlay);
 }
 
 .loy-offer {
@@ -304,4 +313,12 @@
   .loy-guest-visits {
     display: none;
   }
+}
+
+/* app.css colours every `.field input` red (meant for .field-error only): plain text here. */
+.loy-settings .field input,
+.loy-adjust .field input,
+.loy-reason input {
+  color: var(--text);
+  font-size: var(--fs-base);
 }

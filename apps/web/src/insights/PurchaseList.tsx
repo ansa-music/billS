@@ -4,6 +4,7 @@ import { formatStamp, Row, Sep } from '../cash/print/blocks.tsx';
 import { printForm } from '../cash/print/printForm.tsx';
 import { formatClock } from '../format.ts';
 import { Modal } from '../ui.tsx';
+import { roundRunOut } from './useInsights.ts';
 import './insights.css';
 
 /** «Список закупки»: what to buy so a week of sales is covered, from the stock forecast. */
@@ -57,7 +58,7 @@ export function PurchaseListModal({
         )}
         {today.length > 0 && (
           <p className="purchase-today">
-            Сегодня закончится: {today.map((s) => `${s.name} — к ${formatClock(s.runsOutAt!, club.timezone)}`).join(', ')}.
+            Сегодня закончится: {today.map((s) => `${s.name} — к ${formatClock(roundRunOut(s.runsOutAt!), club.timezone)}`).join(', ')}.
           </p>
         )}
         <div className="row wrap modal-actions">

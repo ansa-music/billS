@@ -218,7 +218,7 @@ function GuestDialog({
                 <input inputMode="numeric" value={stamps} placeholder="+1" onChange={(e) => setStamps(e.target.value)} />
               </label>
             </div>
-            <label className="field">
+            <label className="field loy-reason">
               <span>Причина</span>
               <input value={reason} maxLength={300} placeholder="Например: день рождения, ошибка кассира" onChange={(e) => setReason(e.target.value)} />
             </label>

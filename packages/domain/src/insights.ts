@@ -269,14 +269,15 @@ export function peakHoursRule(input: InsightsInput): Candidate | null {
   const hours = `${best.h}–${best.h + cfg.windowHours}`;
   const perHourNow = Math.round(best.avg * 10) / 10;
   const usual = Math.round(baseline * 10) / 10;
+  const times = Math.round(ratio * 10) / 10;
   return candidate(
     {
       id: 'peak-hours',
       severity: 'tip',
-      title: `По ${WEEKDAY_EVERY[best.w]} ${hours} ${what} в ${num1(Math.round(ratio * 10) / 10)} раза больше — ${
+      title: `По ${WEEKDAY_EVERY[best.w]} ${hours} ${what} в ${num1(times)} ${plural(times, ['раз', 'раза', 'раз'])} больше — ${
         cafe ? 'поставьте второго бариста' : 'поставьте второго администратора'
       }`,
-      detail: `В эти часы в среднем ${num1(perHourNow)} ${what} в час, в обычный час — ${num1(usual)}. Посчитано ${periodWords(span)}.`,
+      detail: `В эти часы в среднем ${num1(perHourNow)} ${plural(perHourNow, cafe ? ['заказ', 'заказа', 'заказов'] : ['игра', 'игры', 'игр'])} в час, в обычный час — ${num1(usual)}. Посчитано ${periodWords(span)}.`,
       action: { label: 'Сотрудники', route: '/staff' },
     },
     ratio * 15,

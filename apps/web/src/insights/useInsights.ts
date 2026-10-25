@@ -25,6 +25,11 @@ export function useInsights(): { allowed: boolean; data: InsightsView | null; er
 
 const ROUND_MS = 15 * 60_000;
 
+/** «Примерно» honestly: the run-out time rounded down to a quarter of an hour. */
+export function roundRunOut(ms: number): number {
+  return Math.floor(ms / ROUND_MS) * ROUND_MS;
+}
+
 /**
  * A badge for the menu: «закончится к 15:00», «осталось на 2 дня»; null when there is
  * plenty, no forecast, or it is already out (the page says «нет в наличии» itself).
@@ -39,9 +44,7 @@ export function stockBadge(
   if (item.runsOutAt !== null) {
     const left = item.runsOutAt - now;
     if (left < ROUND_MS) return { text: 'вот-вот закончится', tone: 'danger', title: pace };
-    // Rounded down to a quarter of an hour: «примерно» is honest, a later time would not be.
-    const at = Math.floor(item.runsOutAt / ROUND_MS) * ROUND_MS;
-    return { text: `закончится к ${clock(at)}`, tone: 'danger', title: pace };
+    return { text: `закончится к ${clock(roundRunOut(item.runsOutAt))}`, tone: 'danger', title: pace };
   }
   if (item.daysLeft === null || item.daysLeft > 7) return null;
   const d = item.daysLeft;

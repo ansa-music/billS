@@ -86,7 +86,7 @@ test('peak hours: Saturday evening rush → a second barista', () => {
   assert.equal(c.card.id, 'peak-hours');
   assert.equal(c.card.severity, 'tip');
   assert.match(c.card.title, /^По субботам 18–21 заказов в [\d,]+ раза больше — поставьте второго бариста$/);
-  assert.match(c.card.detail, /в среднем 13,?\d* заказов в час|в среднем 1[0-9]/);
+  assert.equal(c.card.detail, 'В эти часы в среднем 14 заказов в час, в обычный час — 3,4. Посчитано за 4 недели.');
 });
 
 test('peak hours: a flat week or too little history says nothing', () => {

@@ -800,7 +800,7 @@ export function PosPage() {
                 </div>
 
                 <footer className="pos-foot">
-                  <div className="pos-meta" style={loyalty.enabled ? { gridTemplateColumns: 'auto minmax(0, 1fr) auto' } : undefined}>
+                  <div className="pos-meta">
                     <div className="pos-seg" role="radiogroup" aria-label="Где пьёт гость">
                       {(['HERE', 'TAKEAWAY'] as const).map((s) => (
                         <button key={s} type="button" role="radio" aria-checked={draft.service === s} onClick={() => setDraft((d) => ({ ...d, service: s }))}>
@@ -828,10 +828,10 @@ export function PosPage() {
                           onClick={() => setGuestOpen((o) => !o)}
                         >
                           <Icon name="user" size={18} />
-                          <span>{guest ? guestChip(guest.card, loyalty, currency) : 'Гость'}</span>
+                          <span>{guest ? guestChip(guest.card, loyalty, currency) : 'Гость — бонусы и подарки'}</span>
                         </button>
                         {guestOpen && (
-                          <div className="loy-pop">
+                          <div className="loy-pop" onClick={(e) => e.target === e.currentTarget && setGuestOpen(false)}>
                             <GuestPad
                               settings={loyalty}
                               currency={currency}
