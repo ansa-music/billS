@@ -125,8 +125,6 @@
   color: var(--text);
 }
 
-.field input,
-.field select,
 .field .field-error {
   color: var(--danger);
   font-size: 13px;
