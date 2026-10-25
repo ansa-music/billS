@@ -321,6 +321,9 @@ export interface LoyaltyApplyRequest {
   expectDiscount?: Minor;
 }
 
+/** POST /api/checks/:id/loyalty: without `phone` the guest already on the check is kept (screens see it masked). */
+export type CheckLoyaltyRequest = Omit<LoyaltyApplyRequest, 'phone'> & { phone?: string };
+
 /** The loyalty side of a check. */
 export interface CheckLoyaltyView {
   checkId: string;

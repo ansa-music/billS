@@ -99,7 +99,9 @@ export const INSIGHT_RULES = {
 // ── Words and numbers ─────────────────────────────────────────────────────────
 
 /** Russian plural: plural(5, ['заказ', 'заказа', 'заказов']) → 'заказов'. */
-export function plural(n: number, forms: readonly [string, string, string]): string {
+function plural(n: number, forms: readonly [string, string, string]): string {
+  // «2,4 заказа», «16,3 заказа»: a fraction takes the genitive singular.
+  if (!Number.isInteger(n)) return forms[1];
   const a = Math.abs(Math.trunc(n)) % 100;
   const b = a % 10;
   if (a > 10 && a < 20) return forms[2];
@@ -119,6 +121,12 @@ function pct(share: number): string {
 
 function pctWhole(share: number): string {
   return `${Math.round(share * 100)}%`;
+}
+
+/** An average in whole major units: «93 662 ₸», not «93 661,67 ₸». */
+function roundMoney(amount: number, currency: string): Minor {
+  const unit = minorPerMajor(currency);
+  return Math.round(amount / unit) * unit;
 }
 
 /** «40 с», «6 мин 10 с», «12 мин», «1 ч 35 мин». */
@@ -363,7 +371,7 @@ export function avgCheckRule(input: InsightsInput): Candidate | null {
   if (b <= 0) return null;
   const change = a / b - 1;
   if (Math.abs(change) < cfg.minChange) return null;
-  const money = (v: number) => formatMoney(Math.round(v), input.currency);
+  const money = (v: number) => formatMoney(roundMoney(v, input.currency), input.currency);
   const checks = (n: number) => `${n} ${plural(n, ['чек', 'чека', 'чеков'])}`;
   const numbers = `${money(a)} за последние 7 дней против ${money(b)} неделей раньше (${checks(cur.length)} и ${checks(prev.length)}).`;
   if (change > 0) {
@@ -405,7 +413,7 @@ export function revenueDayRule(input: InsightsInput): Candidate | null {
   const change = value / usual - 1;
   if (Math.abs(change) < cfg.minChange) return null;
   const every = WEEKDAY_EVERY[weekdayOfDate(yesterday)];
-  const numbers = `${formatMoney(value, input.currency)} против ${formatMoney(Math.round(usual), input.currency)} в среднем по прошлым ${every}.`;
+  const numbers = `${formatMoney(roundMoney(value, input.currency), input.currency)} против ${formatMoney(roundMoney(usual, input.currency), input.currency)} в среднем по прошлым ${every}.`;
   if (change > 0) {
     return candidate(
       {
@@ -661,6 +669,7 @@ export function cashRule(input: InsightsInput): Candidate | null {
   const big = off.some((s) => Math.abs(s.difference) >= cfg.bigMajor * unit);
   if (off.length < 2 && !big) return null;
   const short = off.filter((s) => s.difference < 0);
+  const extra = off.filter((s) => s.difference > 0);
   const signed = (v: number) => (v < 0 ? `−${formatMoney(-v, input.currency)}` : `+${formatMoney(v, input.currency)}`);
   const list = off
     .slice(0, 3)
@@ -668,7 +677,12 @@ export function cashRule(input: InsightsInput): Candidate | null {
     .join(', ');
   const of = `${off.length} ${plural(off.length, ['смена', 'смены', 'смен'])} из ${shifts.length}`;
   const total = sum(off.map((s) => s.difference));
-  const title = short.length > 0 ? `Недостача в кассе: ${of} за 4 недели` : `Излишки в кассе: ${of} за 4 недели`;
+  const title =
+    extra.length === 0
+      ? `Недостача в кассе: ${of} за 4 недели`
+      : short.length === 0
+        ? `Излишки в кассе: ${of} за 4 недели`
+        : `Расхождения в кассе: ${of} за 4 недели`;
   const advice =
     short.length > 0
       ? 'Пересчитывайте кассу вдвоём при передаче смены и записывайте каждое изъятие.'

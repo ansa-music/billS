@@ -4,6 +4,7 @@ import { getJson } from '../api.ts';
 import { METHOD_LABEL } from '../cash/format.ts';
 import { EmptyState, SectionCard, StatTile } from '../components.tsx';
 import { formatSpan } from '../format.ts';
+import { InsightsPanel } from '../insights/InsightsPanel.tsx';
 import { hrefFor } from '../router.tsx';
 import { useHub, useLive } from '../useHub.tsx';
 import { COUNTER_POLL_MS, fetchCounterOrders, productNameOf, usePolling } from './cafe.ts';
@@ -57,6 +58,8 @@ export function CafeReports() {
           tone={waiting > 5 ? 'warn' : undefined}
         />
       </div>
+
+      <InsightsPanel />
 
       <div className="two-col">
         <SectionCard title="Оплаты за смену">

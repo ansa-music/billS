@@ -5,6 +5,7 @@ import { fetchSessions } from '../api.ts';
 import { EmptyState, SectionCard, Segmented, StatTile } from '../components.tsx';
 import { DAY_MS, DAY_START_HOUR, formatDay, formatSpan, workdayStart } from '../format.ts';
 import { amountOf, isLive, playedMsOf } from '../hall.ts';
+import { InsightsPanel } from '../insights/InsightsPanel.tsx';
 import { useHub, useLive } from '../useHub.tsx';
 
 type Period = 'today' | 'yesterday' | 'week';
@@ -247,6 +248,8 @@ export function StatsSection() {
           </span>
         </StatTile>
       </div>
+
+      <InsightsPanel />
 
       {data.data === null ? (
         <p className="hint">{data.error ?? 'Загрузка…'}</p>

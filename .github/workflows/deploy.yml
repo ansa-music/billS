@@ -8,6 +8,7 @@
 # Каждая часть включается своими секретами; без них шаг пропускается (проверки и сборка идут всегда):
 #   Supabase:   SUPABASE_ACCESS_TOKEN, SUPABASE_DB_PASSWORD (+ переменная SUPABASE_PROJECT_REF)
 #               (+ для push: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT, NOTIFY_SECRET)
+#               (+ Telegram-бот: TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, переменная TELEGRAM_BOT_USERNAME)
 #   Cloudflare: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
 # Несекретные значения — переменные или секреты, подойдёт любое (Settings → Secrets and variables → Actions):
 #   SUPABASE_PROJECT_REF — ID проекта Supabase (из адреса https://<ID>.supabase.co);
@@ -126,9 +127,12 @@ jobs:
           NOTIFY_SECRET: ${{ secrets.NOTIFY_SECRET }}
           LICENSE_SIGNING_KEY: ${{ secrets.LICENSE_SIGNING_KEY }}
           LICENSE_KEY_ID: ${{ (vars.LICENSE_KEY_ID || secrets.LICENSE_KEY_ID) }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_BOT_USERNAME: ${{ (vars.TELEGRAM_BOT_USERNAME || secrets.TELEGRAM_BOT_USERNAME) }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
         run: |
           args=()
-          for name in VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_SUBJECT NOTIFY_SECRET TS_CABINET_URL LICENSE_SIGNING_KEY LICENSE_KEY_ID; do
+          for name in VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_SUBJECT NOTIFY_SECRET TS_CABINET_URL LICENSE_SIGNING_KEY LICENSE_KEY_ID TELEGRAM_BOT_TOKEN TELEGRAM_BOT_USERNAME TELEGRAM_WEBHOOK_SECRET; do
             if [ -n "${!name}" ]; then args+=("$name=${!name}"); fi
           done
           if [ ${#args[@]} -gt 0 ]; then supabase secrets set --project-ref "$SUPABASE_PROJECT_REF" "${args[@]}"; else echo "секретов для функций нет — push выключен"; fi
@@ -159,6 +163,21 @@ jobs:
           supabase functions deploy --project-ref "$SUPABASE_PROJECT_REF" --use-api
           # Любой запрос к функциям подписывает лицензии, записанные SQL без подписи (ts_seed_demo_cloud); ответ 401 — нормально.
           curl -sS -o /dev/null -w 'platform: HTTP %{http_code}\n' "https://$SUPABASE_PROJECT_REF.supabase.co/functions/v1/platform/platform/me" || true
+
+      # «TS в Telegram»: Telegram шлёт сообщения боту в функцию `telegram` с секретом в заголовке.
+      # Токен не печатается: ответ Telegram сохраняется в файл, в журнал идут только ok и описание.
+      - name: Telegram webhook
+        if: env.LIVE == 'true' && env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != ''
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_WEBHOOK_SECRET" ]; then echo "Telegram-бот не настроен — пропускаю"; exit 0; fi
+          curl -sS -o /tmp/ts-tg.json "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
+            --data-urlencode "url=https://$SUPABASE_PROJECT_REF.supabase.co/functions/v1/telegram" \
+            --data-urlencode "secret_token=${TELEGRAM_WEBHOOK_SECRET}" \
+            --data-urlencode 'allowed_updates=["message"]' || true
+          echo "Telegram webhook: $(jq -c '{ok, description}' /tmp/ts-tg.json 2>/dev/null || echo 'нет ответа')"
 
       # ── Сайты ──────────────────────────────────────────────────────────────
       - name: Build

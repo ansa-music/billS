@@ -1,4 +1,5 @@
 import type { CheckView, OrderStatus, PayRequest, PayResponse } from './api.ts';
+import type { CheckLoyaltyView, LoyaltyApplyRequest } from './loyalty.ts';
 import type { Minor } from './money.ts';
 import { ORDER_MAX_LINES, ORDER_MAX_QTY } from './orders.ts';
 
@@ -293,6 +294,8 @@ export interface CreateCounterOrderRequest {
   note?: string;
   /** Pay right away (the usual case); null — the check stays open, paid later in «Счета». */
   payment: PayRequest | null;
+  /** «Гость» (loyalty.ts): applied to the check before the payment; the payment is for what is left. */
+  loyalty?: LoyaltyApplyRequest | null;
 }
 
 export interface CounterOrderItemView {
@@ -330,6 +333,8 @@ export interface CreateCounterOrderResponse {
   check: CheckView;
   /** null when the order was taken without payment. */
   payment: PayResponse | null;
+  /** The guest's side when `loyalty` was sent: what was applied and earned. */
+  loyalty?: CheckLoyaltyView | null;
 }
 
 /** GET /api/counter/orders — the working day's orders not yet issued, plus the last issued ones. */

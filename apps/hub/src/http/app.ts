@@ -21,8 +21,10 @@ import { registerMoneyRoutes } from './money-routes.ts';
 import { registerBarRoutes } from './routes/bar.ts';
 import { registerCounterRoutes } from './routes/counter.ts';
 import { registerLicenseRoutes } from './routes/license.ts';
+import { registerLoyaltyRoutes } from './routes/loyalty.ts';
 import { registerTemplateRoutes } from './routes/templates.ts';
 import { registerReportRoutes } from './routes/reports.ts';
+import { registerInsightsRoutes } from './routes/insights.ts';
 import { registerSettingsRoutes } from './routes/settings.ts';
 import { registerSetupRoutes } from './routes/setup.ts';
 import type { SetupController } from './routes/setup.ts';
@@ -316,8 +318,10 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   registerSettingsRoutes(app, hub);
   registerBarRoutes(app, hub);
   registerCounterRoutes(app, hub);
+  registerLoyaltyRoutes(app, hub);
   registerStaffRoutes(app, hub);
   registerReportRoutes(app, hub);
+  registerInsightsRoutes(app, hub);
   registerLicenseRoutes(app, hub);
   registerTemplateRoutes(app, hub);
 

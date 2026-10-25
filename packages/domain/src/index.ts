@@ -22,3 +22,5 @@ export * from './tls.ts';
 export * from './hub-setup.ts';
 export * from './cafe.ts';
 export * from './loyalty.ts';
+export * from './insights.ts';
+export * from './stock-forecast.ts';

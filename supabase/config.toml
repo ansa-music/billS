@@ -62,3 +62,8 @@ verify_jwt = false
 # Guarded inside: TS_SIGNUP_DISABLED, a per-IP limit (signup_attempts), one account per e-mail.
 [functions.signup]
 verify_jwt = false
+
+# «TS в Telegram»: the bot's webhook. Telegram calls it without a JWT; every call must carry
+# X-Telegram-Bot-Api-Secret-Token = TELEGRAM_WEBHOOK_SECRET (set by setWebhook), checked inside.
+[functions.telegram]
+verify_jwt = false

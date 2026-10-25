@@ -1,0 +1,307 @@
+/* «Лояльность без приложения»: the guest keypad, the counter chip and offers, the cash desk box, «Гости». */
+
+.loy-pad {
+  display: grid;
+  gap: var(--space-3);
+  width: min(340px, calc(100vw - 32px));
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.loy-pad-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.loy-pad-x {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.loy-phone {
+  display: block;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--fs-2xl);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.loy-phone[data-empty] {
+  color: var(--muted);
+}
+
+.loy-result {
+  min-height: 24px;
+  font-size: var(--fs-md);
+}
+
+.loy-error {
+  color: var(--danger);
+}
+
+.loy-name {
+  min-height: 48px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--fs-base);
+}
+
+.loy-keys {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.loy-keys button {
+  min-height: 56px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.loy-keys button:active {
+  transform: scale(0.97);
+}
+
+.loy-pad-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.loy-pad-actions .btn {
+  min-height: 48px;
+}
+
+/* Counter: the chip next to «Имя гостя», the pad above the footer, the one-tap offer. */
+.loy-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 48px;
+  max-width: 100%;
+  padding: 0 var(--space-3);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-base);
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.loy-chip[data-on] {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.loy-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.loy-anchor {
+  position: relative;
+}
+
+.loy-pop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--space-2));
+  z-index: 30;
+}
+
+.loy-offer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 48px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.loy-offer[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.loy-offer small {
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.loy-line {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--accent-text);
+  font-weight: 650;
+}
+
+/* Cash desk (billiards checks): a small box in the pay dialog. */
+.loy-box {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.loy-box-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.loy-box-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.loy-box .loy-pad {
+  width: 100%;
+  box-shadow: none;
+}
+
+/* Settings → «Лояльность» and «Гости». */
+.loy-settings {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.loy-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.loy-guests-search {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.loy-guests-search input {
+  flex: 1;
+  min-width: 0;
+}
+
+.loy-guests {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.loy-guest {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.loy-guest > button {
+  all: unset;
+  display: contents;
+  cursor: pointer;
+}
+
+.loy-guest-who {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.loy-guest-who strong,
+.loy-guest-who span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.loy-guest-balance {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: right;
+}
+
+.loy-adjust {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-2);
+  align-items: end;
+}
+
+.loy-moves {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-sm);
+}
+
+.loy-moves li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+@media (max-width: 640px) {
+  .loy-guest {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .loy-guest-visits {
+    display: none;
+  }
+}

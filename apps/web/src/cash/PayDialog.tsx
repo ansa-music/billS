@@ -21,6 +21,8 @@ import { groupLines } from './lines.ts';
 import { FormError, Modal } from './Modal.tsx';
 import { printReceipt } from './print/Receipt.tsx';
 import { useHub } from '../useHub.tsx';
+import { CheckLoyalty } from '../loyalty/CheckLoyalty.tsx';
+import { loyaltyOf } from '../loyalty/model.ts';
 
 type Amounts = Record<PaymentMethod, string>;
 const NO_AMOUNTS: Amounts = { CASH: '', CARD: '', QR: '' };
@@ -296,6 +298,16 @@ export function PayDialog({ desk, initial, onClose }: { desk: Desk; initial: Che
           </div>
         </div>
       )}
+
+      {/* «Гость» (loyalty): the guest by phone, the gift or bonuses as the check's discount. */}
+      <CheckLoyalty
+        check={check}
+        settings={loyaltyOf(state.settings)}
+        currency={currency}
+        editable={editable}
+        send={desk.send}
+        onCheck={update}
+      />
 
       {open && can('discount.apply') && <DiscountForm check={check} currency={currency} pending={action.pending} onApply={setDiscount} />}
 

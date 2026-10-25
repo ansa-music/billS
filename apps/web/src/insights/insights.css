@@ -1,0 +1,185 @@
+/* «Умные подсказки» (InsightsPanel), stock badges on the menu and the purchase list. */
+
+.insights {
+  gap: var(--space-3);
+}
+
+.insights-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.insights-head h2 {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.insights-note {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.insights-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.insight {
+  --tone: var(--info);
+  --tone-soft: var(--info-soft);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--tone);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  min-width: 0;
+}
+
+.insight[data-severity='warn'] {
+  --tone: var(--warn);
+  --tone-soft: var(--warn-soft);
+}
+
+.insight[data-severity='good'] {
+  --tone: var(--accent);
+  --tone-soft: var(--accent-soft);
+}
+
+.insight-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-pill);
+  background: var(--tone-soft);
+  color: var(--tone);
+}
+
+.insight-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.insight-title {
+  margin: 0;
+  font-weight: 650;
+  font-size: var(--fs-base);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.insight-detail {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-md);
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.insight-action {
+  align-self: center;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .insight {
+    grid-template-columns: auto 1fr;
+  }
+
+  .insight-action {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+.insights-empty {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  margin: 0;
+  color: var(--muted);
+}
+
+.insights-empty .icon {
+  flex: none;
+  margin-top: 2px;
+}
+
+.insights-empty-title {
+  margin: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.insights-empty-text {
+  margin: 2px 0 0;
+  font-size: var(--fs-md);
+}
+
+.insights-error {
+  margin: 0;
+  color: var(--danger);
+}
+
+/* ── Menu: stock badges and the purchase list ─────────────────────────────── */
+
+.tag.stock-forecast {
+  display: flex;
+  width: fit-content;
+  margin-top: 4px;
+}
+
+.purchase {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.purchase-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.purchase-table th,
+.purchase-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.purchase-table th {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.purchase-table .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.purchase-buy {
+  font-weight: 700;
+}
+
+.purchase-empty,
+.purchase-today {
+  margin: 0;
+}
+
+.purchase-today {
+  color: var(--danger);
+}

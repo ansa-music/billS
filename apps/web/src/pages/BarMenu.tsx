@@ -4,6 +4,9 @@ import type { CategoryView, CreateProductRequest, ProductOptionGroup, ProductVie
 import { formatMoney, normalizeOptionGroups, validateOptionGroups } from '@bills/domain';
 import { businessOf, optionsOf } from '../cafe/cafe.ts';
 import { EmptyState } from '../components.tsx';
+import { formatClock } from '../format.ts';
+import { PurchaseListModal } from '../insights/PurchaseList.tsx';
+import { stockBadge, useInsights } from '../insights/useInsights.ts';
 import { OfflineBanner } from '../OfflineBanner.tsx';
 import { Empty, Field, Loading, Modal, Page, Section, Toast, useToast } from '../ui.tsx';
 import { useCommands, useHub } from '../useHub.tsx';
@@ -23,7 +26,7 @@ type ProductBody = (CreateProductRequest | UpdateProductRequest) & { options?: P
 
 /** Catalog admin (#/bar): categories, products, prices, stock. Owner and manager. */
 export function BarMenuPage() {
-  const { state, online, blockedReason } = useHub();
+  const { state, online, blockedReason, serverNow } = useHub();
   const editBlocked = blockedReason('catalog.edit');
   const { toast, show, clear } = useToast();
   const { run, busy } = useCommands(show);
@@ -31,6 +34,13 @@ export function BarMenuPage() {
   const [filter, setFilter] = useState<Filter>('all');
   const [categoryDraft, setCategoryDraft] = useState<CategoryDraft | null>(null);
   const [productDraft, setProductDraft] = useState<ProductDraft | null>(null);
+  const [purchaseOpen, setPurchaseOpen] = useState(false);
+  // Stock forecast (senior staff: GET /api/insights): badges and the purchase list.
+  const insights = useInsights();
+  const forecast = useMemo(
+    () => new Map((insights.data?.stock ?? []).map((s) => [s.productId, s])),
+    [insights.data],
+  );
 
   const sorted = useMemo(() => (catalog ? sortCatalog(catalog) : null), [catalog]);
   const locked = busy.size > 0 || !online || editBlocked !== null;
@@ -89,6 +99,11 @@ export function BarMenuPage() {
       }
       actions={
         <>
+          {insights.allowed && (
+            <button type="button" className="btn" disabled={!insights.data} onClick={() => setPurchaseOpen(true)}>
+              Список закупки
+            </button>
+          )}
           <button type="button" className="btn" disabled={locked} onClick={() => setCategoryDraft({ mode: 'new' })}>
             Добавить категорию
           </button>
@@ -223,6 +238,7 @@ export function BarMenuPage() {
                       ) : (
                         <span className="bar-money">{p.stock} шт.</span>
                       )}
+                      <StockForecastBadge badge={stockBadge(forecast.get(p.id), serverNow, (ms) => formatClock(ms, state.club.timezone))} />
                     </td>
                     <td className="cell-active">
                       <label className="bar-switch" data-on={p.isActive ? '' : undefined}>
@@ -300,8 +316,22 @@ export function BarMenuPage() {
         />
       )}
 
+      {purchaseOpen && insights.data && (
+        <PurchaseListModal stock={insights.data.stock} club={state.club} now={serverNow} onClose={() => setPurchaseOpen(false)} />
+      )}
+
       <Toast message={toast} onClose={clear} />
     </Page>
+  );
+}
+
+/** «закончится к 15:00» / «осталось на 2 дня» under the stock, from the forecast. */
+function StockForecastBadge({ badge }: { badge: ReturnType<typeof stockBadge> }) {
+  if (!badge) return null;
+  return (
+    <span className={`tag tag-${badge.tone} stock-forecast`} title={badge.title || undefined}>
+      {badge.text}
+    </span>
   );
 }
 

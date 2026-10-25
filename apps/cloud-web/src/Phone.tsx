@@ -28,6 +28,7 @@ import { NtfySection } from './NtfySection.tsx';
 import { forgetNtfy, currentNtfyTopic } from './ntfy.ts';
 import { WebPushSection } from './WebPushSection.tsx';
 import { EnableAlerts } from './EnableAlerts.tsx';
+import { TelegramSection } from './TelegramSection.tsx';
 import { disableWebPush, webPushDeviceId } from './webPush.ts';
 import { usePhonePushStatus } from './phonePush.ts';
 import type { PhonePushStatus } from './phonePush.ts';
@@ -579,6 +580,7 @@ export function Phone() {
             </p>
           )}
           {SUPABASE_MODE ? <EnableAlerts onChange={reload} /> : inApp ? <ThisPhone /> : <GetTheApp />}
+          {SUPABASE_MODE && <TelegramSection />}
           <RulesTable
             rules={settings.rules}
             clubs={clubs}

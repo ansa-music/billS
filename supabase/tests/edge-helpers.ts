@@ -5,6 +5,7 @@ import { DEMO_OWNER, seedDemo } from '../../apps/cloud/src/seed.ts';
 import type { EdgeContext } from '../../apps/cloud/src/edge/context.ts';
 import { edgeContext } from '../../apps/cloud/src/edge/context.ts';
 import type { EdgeRequest } from '../../apps/cloud/src/edge/http.ts';
+import type { TelegramFetch } from '../../apps/cloud/src/telegram.ts';
 import type { SupabaseTestDb } from './harness.ts';
 import { createSupabaseDb } from './harness.ts';
 
@@ -42,7 +43,10 @@ export function recordingSender(channel: string, sent: Array<PushMessage & { cha
 }
 
 /** Supabase-shaped database (PGlite) with the demo seed and an EdgeContext over it. */
-export async function edgeTest(t: { after(fn: () => Promise<void>): void }, options: { sender?: PushSender } = {}): Promise<EdgeTest> {
+export async function edgeTest(
+  t: { after(fn: () => Promise<void>): void },
+  options: { sender?: PushSender; env?: Record<string, string>; telegramFetch?: TelegramFetch } = {},
+): Promise<EdgeTest> {
   const s = await createSupabaseDb();
   t.after(() => s.close());
   await seedDemo(s.db, MONDAY_NOON);
@@ -54,7 +58,11 @@ export async function edgeTest(t: { after(fn: () => Promise<void>): void }, opti
   const sender =
     options.sender ??
     new RoutingSender({ webpush: recordingSender('webpush', sent), ntfy: recordingSender('ntfy', sent) });
-  const ctx = edgeContext(s.db, { NOTIFY_SECRET }, { now: () => clock.now, log: (m) => log.push(m), sender });
+  const ctx = edgeContext(
+    s.db,
+    { NOTIFY_SECRET, ...options.env },
+    { now: () => clock.now, log: (m) => log.push(m), sender, ...(options.telegramFetch ? { telegramFetch: options.telegramFetch } : {}) },
+  );
   return {
     s,
     ctx,

@@ -18,6 +18,7 @@ import {
   voidCheckIfEmpty,
 } from './check-orders.ts';
 import type { Clock } from './clock.ts';
+import { accrueLoyalty, dropLoyaltyDiscount, loyaltyDiscountOn, reverseLoyaltyOnRefund } from './loyalty.ts';
 import type { Db } from './db.ts';
 import { afterCommit, all, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
@@ -206,6 +207,8 @@ export class CheckService {
         throw new HubError(409, 'ORDER_LINE_LOCKED', 'Строку бара нельзя убрать из счёта — отмените заказ на странице «Заказы»');
       }
       this.#assertNoMoney(check.id);
+      // Loyalty: the gift or the bonus share may not fit a smaller check — the cashier applies it again.
+      dropLoyaltyDiscount(db, check.id, input.actor, now, 'line_removed');
       run(db, 'DELETE FROM check_items WHERE id = ?', item.id);
       this.#touch(check.id, now);
       record(db, now, {
@@ -228,6 +231,15 @@ export class CheckService {
     return transaction(db, () => {
       const check = this.#openCheck(input.checkId);
       const d = input.discount;
+      // A loyalty reward is this same discount (loyalty.ts): it is not mixed with a manual one.
+      if (loyaltyDiscountOn(db, check.id) > 0) {
+        if (d !== null) {
+          throw new HubError(409, 'LOYALTY_DISCOUNT', 'На счёте скидка по лояльности — уберите её, чтобы дать другую скидку');
+        }
+        dropLoyaltyDiscount(db, check.id, input.actor, now, 'discount_removed');
+        afterCommit(db, () => this.#events.changed({ kind: 'check' }));
+        return loadCheck(db, check.id);
+      }
       if (d === null) {
         run(
           db,
@@ -369,6 +381,7 @@ export class CheckService {
         entityId: check.id,
         data: { number: check.number, shiftId: shift.id, method: input.method, amount: input.amount, reason, approvedBy },
       });
+      reverseLoyaltyOnRefund(db, check.id, input.actor, now);
       this.#touch(check.id, now);
       afterCommit(db, () => this.#events.changed({ kind: 'check' }));
       return loadCheck(db, check.id);
@@ -397,6 +410,7 @@ export class CheckService {
 
       if (s.check_id) {
         this.#assertNoMoney(s.check_id);
+        dropLoyaltyDiscount(db, s.check_id, input.actor, now, 'game_cancelled');
         run(db, 'DELETE FROM check_items WHERE session_id = ?', s.id);
         this.#touch(s.check_id, now);
         record(db, now, {
@@ -535,6 +549,8 @@ export class CheckService {
       });
     }
     closeOrdersOfCheck(db, checkId, actor, now);
+    // Loyalty: bonuses / stamps are earned once the check is fully paid (loyalty.ts).
+    accrueLoyalty(db, checkId, actor, now);
     const check = loadCheck(db, checkId);
     record(db, now, {
       actor,

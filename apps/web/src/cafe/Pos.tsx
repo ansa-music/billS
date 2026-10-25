@@ -8,7 +8,19 @@ import type {
   ProductOptionGroup,
   ProductView,
 } from '@bills/domain';
-import { COUNTER_SERVICE_LABEL, defaultChoices, formatMoney, GUEST_NAME_MAX, ORDER_MAX_QTY, parseMoney } from '@bills/domain';
+import {
+  COUNTER_SERVICE_LABEL,
+  defaultChoices,
+  formatMoney,
+  GUEST_NAME_MAX,
+  minorPerMajor,
+  ORDER_MAX_QTY,
+  parseMoney,
+  redeemLimit,
+  stampCategories,
+  stampPlan,
+} from '@bills/domain';
+import type { LoyaltyApplyRequest } from '@bills/domain';
 import { newKey } from '../api.ts';
 import { toActionError, useDesk } from '../cash/desk.ts';
 import { METHOD_LABEL } from '../cash/format.ts';
@@ -18,6 +30,9 @@ import { OpenShiftForm } from '../cash/ShiftPanel.tsx';
 import { Icon } from '../icons.tsx';
 import { OfflineBanner } from '../OfflineBanner.tsx';
 import { sellable, sortCatalog } from '../pages/bar/useCatalog.tsx';
+import { GuestPad } from '../loyalty/GuestPad.tsx';
+import type { PickedGuest } from '../loyalty/GuestPad.tsx';
+import { earnedLine, giftOrdinal, guestChip, loyaltyOf } from '../loyalty/model.ts';
 import { Loading } from '../ui.tsx';
 import { useHub } from '../useHub.tsx';
 import { createCounterOrder, optionsOf, useCachedCatalog } from './cafe.ts';
@@ -65,6 +80,8 @@ interface Flash {
   guestName: string;
   res?: CreateCounterOrderResponse;
   error?: string;
+  /** «Гостю начислено 45 ₸ бонусами» after the HUB confirmed. */
+  loyaltyNote?: string | null;
 }
 
 function useMedia(query: string): boolean {
@@ -122,6 +139,11 @@ export function PosPage() {
   // A restored order keeps its idempotency key: paying it again is not a second order.
   const retryKey = useRef<{ body: string; key: string } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  // «Гость» (loyalty): picked on a keypad, the reward is one tap; both reset with the order.
+  const loyalty = useMemo(() => loyaltyOf(state.settings), [state.settings]);
+  const [guest, setGuest] = useState<PickedGuest | null>(null);
+  const [guestOpen, setGuestOpen] = useState(false);
+  const [reward, setReward] = useState(false);
 
   useEffect(() => writeHeld(held), [held]);
 
@@ -156,6 +178,28 @@ export function PosPage() {
     return { line: l, product, ...price };
   });
   const total = priced.reduce((sum, p) => sum + (p.priced ? p.priced.unitPrice * p.line.qty : 0), 0);
+
+  // ── Loyalty: what the guest could get on this order (the HUB checks the same rules) ──
+  const stampCats = useMemo(() => stampCategories(loyalty, sorted?.categories ?? []), [loyalty, sorted]);
+  const offer = (() => {
+    if (!loyalty.enabled || !guest) return null;
+    if (loyalty.program === 'stamps') {
+      const units = priced.flatMap((p) =>
+        p.priced && p.product && stampCats.has(p.product.categoryId) ? Array<Minor>(p.line.qty).fill(p.priced.unitPrice) : [],
+      );
+      const plan = stampPlan({ stamps: guest.card.stamps, every: loyalty.stampsEvery, units, applyFree: true });
+      if (plan.free === 0 || plan.discount === 0) return null;
+      const coffee = (sorted?.categories ?? []).filter((c) => stampCats.has(c.id)).every((c) => /^\s*кофе/i.test(c.name));
+      const what = `${giftOrdinal(loyalty.stampsEvery)} ${coffee ? 'кофе' : 'напиток'}`;
+      return { kind: 'FREE' as const, discount: plan.discount, ask: `${what} в подарок — применить?`, done: `${what} в подарок` };
+    }
+    const max = redeemLimit({ subtotal: total, balance: guest.card.bonus, maxPercent: loyalty.maxRedeemPercent, step: minorPerMajor(currency) });
+    if (max <= 0) return null;
+    return { kind: 'BONUS' as const, discount: max, ask: `Списать ${money(max)} бонусами?`, done: 'Бонусами' };
+  })();
+  const loyaltyDiscount = reward && offer ? offer.discount : 0;
+  /** What the guest pays in money: the order minus the loyalty reward. */
+  const due = total - loyaltyDiscount;
   const count = draft.lines.reduce((n, l) => n + l.qty, 0);
   const broken = priced.some((p) => !p.priced || !p.product?.isActive);
   const empty = draft.lines.length === 0;
@@ -226,8 +270,23 @@ export function PosPage() {
   };
   const updateLine = (id: string, patch: Partial<Line>) => patchLines((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 
+  const dropGuest = () => {
+    setGuest(null);
+    setReward(false);
+    setGuestOpen(false);
+  };
+
+  const pickGuest = (g: PickedGuest) => {
+    setGuest(g);
+    setReward(false);
+    setGuestOpen(false);
+    // The name goes to the guest screen as well, unless the cashier typed one.
+    if (g.name && !draftRef.current.guestName.trim()) setDraft((d) => ({ ...d, guestName: g.name }));
+  };
+
   const clearOrder = () => {
     if (!empty) setCleared(draftRef.current);
+    dropGuest();
     setDraft((d) => emptyDraft(d.service));
     setSelected(null);
     setMode('order');
@@ -246,6 +305,7 @@ export function PosPage() {
   const park = () => {
     if (empty) return;
     setHeld((h) => [{ id: lineId(), at: Date.now(), draft: draftRef.current, ...(retryKey.current ? { key: retryKey.current } : {}) }, ...h].slice(0, HELD_MAX));
+    dropGuest();
     setDraft((d) => emptyDraft(d.service));
     setSelected(null);
     setMode('order');
@@ -276,22 +336,36 @@ export function PosPage() {
       return;
     }
     const d = draftRef.current;
+    const amount = due;
     const cash = opts.tendered ?? null;
-    if (method === 'CASH' && !opts.rest && cash !== null && cash < total) return;
+    if (method === 'CASH' && !opts.rest && cash !== null && cash < amount) return;
     const split = opts.rest && cash !== null ? { cash, rest: opts.rest } : undefined;
-    const payment = paymentParts(total, method, cash, split);
-    const body = buildRequest(d, byId, payment);
+    const payment = paymentParts(amount, method, cash, split);
+    const applied = reward && offer ? offer : null;
+    const pickedGuest = guest;
+    const loyaltyBody: LoyaltyApplyRequest | null =
+      pickedGuest && loyalty.enabled
+        ? {
+            phone: pickedGuest.digits,
+            ...(!pickedGuest.known && pickedGuest.name ? { name: pickedGuest.name } : {}),
+            ...(applied?.kind === 'BONUS' ? { redeem: applied.discount } : {}),
+            ...(applied?.kind === 'FREE' ? { free: true } : {}),
+            expectDiscount: applied ? applied.discount : 0,
+          }
+        : null;
+    const body = { ...buildRequest(d, byId, payment), ...(loyaltyBody ? { loyalty: loyaltyBody } : {}) };
     const json = JSON.stringify(body);
     const key = retryKey.current?.body === json ? retryKey.current.key : newKey();
     const id = key;
-    const change = method === 'CASH' && !split && cash !== null ? Math.max(0, cash - total) : 0;
-    const rest = split && total - Math.min(cash!, total) > 0 ? { method: split.rest as PaymentMethod, amount: total - Math.min(cash!, total) } : null;
+    const change = method === 'CASH' && !split && cash !== null ? Math.max(0, cash - amount) : 0;
+    const rest = split && amount - Math.min(cash!, amount) > 0 ? { method: split.rest as PaymentMethod, amount: amount - Math.min(cash!, amount) } : null;
     const taken = new Map<string, number>();
     for (const l of d.lines) taken.set(l.productId, (taken.get(l.productId) ?? 0) + l.qty);
 
-    setFlash({ id, state: 'sending', method, total, change, rest, service: d.service, guestName: d.guestName.trim() });
+    setFlash({ id, state: 'sending', method, total: amount, change, rest, service: d.service, guestName: d.guestName.trim() });
     setFailure(null);
     setCleared(null);
+    dropGuest();
     setDraft(emptyDraft(d.service));
     setSelected(null);
     setMode('order');
@@ -305,7 +379,7 @@ export function PosPage() {
         writeLast(d);
         recordHits(d.lines);
         setHitsVersion((v) => v + 1);
-        setFlash((f) => (f?.id === id ? { ...f, state: 'ok', res } : f));
+        setFlash((f) => (f?.id === id ? { ...f, state: 'ok', res, loyaltyNote: earnedLine(res.loyalty, loyalty, currency) } : f));
         if (readAutoPrint()) printReceipt(res.check, state.club, undefined, Date.now(), res.order.number);
       })
       .catch((e: unknown) => {
@@ -313,6 +387,8 @@ export function PosPage() {
         const back = { body: json, key };
         if (draftRef.current.lines.length === 0) {
           setDraft(d);
+          setGuest(pickedGuest);
+          setReward(applied !== null);
           retryKey.current = back;
           setFailure(`Заказ не прошёл: ${message}. Он снова в корзине — исправьте и оплатите ещё раз.`);
         } else {
@@ -335,7 +411,7 @@ export function PosPage() {
   // ── Keyboard (desktop counter) ────────────────────────────────────────────
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   keyRef.current = (e: KeyboardEvent) => {
-    if (shiftDialog || document.querySelector('dialog[open]')) return;
+    if (shiftDialog || guestOpen || document.querySelector('dialog[open]')) return;
     const typing = isTyping(e.target);
     if (e.key === 'Escape') {
       if (typing) (e.target as HTMLElement).blur();
@@ -385,7 +461,7 @@ export function PosPage() {
     if (e.key === 'Enter') {
       if (e.target instanceof HTMLButtonElement) return;
       e.preventDefault();
-      if (mode === 'pay' && typed !== null && typed >= total) pay('CASH', { tendered: typed });
+      if (mode === 'pay' && typed !== null && typed >= due) pay('CASH', { tendered: typed });
       else if (mode === 'pay' && typed !== null) return;
       else pay('CASH');
       return;
@@ -630,11 +706,11 @@ export function PosPage() {
 
             {mode === 'pay' ? (
               <PayView
-                total={total}
+                total={due}
                 currency={currency}
                 tendered={tendered}
                 typed={typed}
-                quick={quickTenders(total, currency, 3)}
+                quick={quickTenders(due, currency, 3)}
                 canPay={canPayNow}
                 canSend={canSend}
                 noShift={noShift}
@@ -724,7 +800,7 @@ export function PosPage() {
                 </div>
 
                 <footer className="pos-foot">
-                  <div className="pos-meta">
+                  <div className="pos-meta" style={loyalty.enabled ? { gridTemplateColumns: 'auto minmax(0, 1fr) auto' } : undefined}>
                     <div className="pos-seg" role="radiogroup" aria-label="Где пьёт гость">
                       {(['HERE', 'TAKEAWAY'] as const).map((s) => (
                         <button key={s} type="button" role="radio" aria-checked={draft.service === s} onClick={() => setDraft((d) => ({ ...d, service: s }))}>
@@ -741,6 +817,33 @@ export function PosPage() {
                       aria-label="Имя гостя (на экране заказов)"
                       onChange={(e) => setDraft((d) => ({ ...d, guestName: e.target.value }))}
                     />
+                    {loyalty.enabled && (
+                      <div className="loy-anchor">
+                        <button
+                          type="button"
+                          className="loy-chip"
+                          data-on={guest ? '' : undefined}
+                          aria-expanded={guestOpen}
+                          title="Гость по номеру телефона: бонусы и подарки"
+                          onClick={() => setGuestOpen((o) => !o)}
+                        >
+                          <Icon name="user" size={18} />
+                          <span>{guest ? guestChip(guest.card, loyalty, currency) : 'Гость'}</span>
+                        </button>
+                        {guestOpen && (
+                          <div className="loy-pop">
+                            <GuestPad
+                              settings={loyalty}
+                              currency={currency}
+                              initial={guest}
+                              onDone={pickGuest}
+                              onRemove={guest ? dropGuest : null}
+                              onClose={() => setGuestOpen(false)}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {noShift && canOrder && (
@@ -754,9 +857,15 @@ export function PosPage() {
                     </div>
                   )}
 
+                  {offer && (
+                    <button type="button" className="loy-offer" aria-pressed={reward} onClick={() => setReward((r) => !r)}>
+                      <span>{reward ? `✓ ${offer.done}` : offer.ask}</span>
+                      <small>{reward ? `−${money(offer.discount)} · отменить` : `−${money(offer.discount)}`}</small>
+                    </button>
+                  )}
                   <div className="pos-total">
                     <span>Итого</span>
-                    <strong>{money(total)}</strong>
+                    <strong>{money(due)}</strong>
                   </div>
                   <div className="pos-express" role="group" aria-label="Оплата в одно нажатие">
                     <button type="button" className="pos-express-btn" disabled={!canPayNow} onClick={() => pay('CASH')}>
@@ -771,7 +880,7 @@ export function PosPage() {
                   </div>
                   <button type="button" className="pos-paybar" disabled={empty || broken || !canOrder} onClick={() => setMode('pay')}>
                     <span>Оплатить</span>
-                    <strong>{money(total)}</strong>
+                    <strong>{money(due)}</strong>
                   </button>
                 </footer>
               </>
@@ -798,7 +907,7 @@ export function PosPage() {
               setSheetOpen(true);
             }}
           >
-            {money(total)}
+            {money(due)}
           </button>
         </div>
       )}
@@ -1215,6 +1324,7 @@ function DoneFlash({
             )}
             {flash.method && flash.method !== 'CASH' && <p className="pos-flash-paid">Оплачено: {METHOD_LABEL[flash.method]}</p>}
             {!flash.method && <p className="hint hint-warn">Без оплаты — счёт ждёт в «Счетах».</p>}
+            {flash.loyaltyNote && <p className="pos-flash-paid">{flash.loyaltyNote}</p>}
             <div className="pos-flash-actions">
               <button type="button" className="btn btn-small" disabled={!flash.res} onClick={() => flash.res && onPrint(flash.res)}>
                 Печать чека

@@ -9,6 +9,7 @@ import { BusinessSection } from './settings/BusinessSection.tsx';
 import { ClubSection } from './settings/ClubSection.tsx';
 import { DisplaySettings } from './settings/DisplaySettings.tsx';
 import { LicenseSection } from './settings/LicenseSection.tsx';
+import { LoyaltySection } from './settings/LoyaltySection.tsx';
 import { RulesSettings } from './settings/RulesSettings.tsx';
 import { TablesEditor } from './settings/TablesEditor.tsx';
 import { TariffsEditor } from './settings/TariffEditor.tsx';
@@ -21,6 +22,7 @@ const TABS = [
   { id: 'tariffs', title: 'Тарифы' },
   { id: 'display', title: 'Экран зала' },
   { id: 'rules', title: 'Правила' },
+  { id: 'loyalty', title: 'Лояльность' },
   { id: 'devices', title: 'Установка на планшеты' },
   { id: 'license', title: 'Лицензия' },
 ] as const;
@@ -104,6 +106,8 @@ export function ClubSettingsPage() {
         return <DisplaySettings {...props} canEdit={can('display.edit')} />;
       case 'rules':
         return <RulesSettings {...props} canEdit={can('rules.edit')} />;
+      case 'loyalty':
+        return <LoyaltySection {...props} canEdit={can('club.edit')} />;
       case 'license':
       case 'devices':
         return null; // rendered below: they do not need GET /api/club

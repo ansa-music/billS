@@ -25,6 +25,7 @@ import { detachOrder, netPaidOn, voidCheckIfEmpty } from './check-orders.ts';
 import type { CheckService } from './checks.ts';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
+import { applyLoyalty, checkLoyaltyView, dropLoyaltyDiscount } from './loyalty.ts';
 import { afterCommit, all, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import type { HubEvents } from './events.ts';
@@ -134,12 +135,19 @@ export class CounterService {
       });
 
       const check = this.#checks.create({ sessionIds: [], orderIds: [id], actor: input.actor });
+      // «Гость» on the counter: guest, gift or bonuses go on the check before it is paid (loyalty.ts).
+      if (input.loyalty) applyLoyalty(db, { ...input.loyalty, checkId: check.id, actor: input.actor, now });
       let payment: PayResponse | null = null;
       if (input.payment) {
         payment = this.#checks.pay({ checkId: check.id, parts: input.payment.parts, actor: input.actor });
       }
       afterCommit(db, () => this.#events.changed({ kind: 'counter' }));
-      return { order: this.get(id), check: payment ? payment.check : loadCheck(db, check.id), payment };
+      return {
+        order: this.get(id),
+        check: payment ? payment.check : loadCheck(db, check.id),
+        payment,
+        loyalty: input.loyalty ? checkLoyaltyView(db, check.id, now) : null,
+      };
     });
   }
 
@@ -291,6 +299,7 @@ export class CounterService {
       });
       // A check paid and fully refunded keeps its lines as history; an open one lets the order go.
       if (order.check_id && order.status === 'OPEN') {
+        dropLoyaltyDiscount(db, order.check_id, input.actor, now, 'order_cancelled');
         detachOrder(db, order.id, input.actor, now);
         if (!voidCheckIfEmpty(db, order.check_id, input.actor, now)) loadCheck(db, order.check_id);
         afterCommit(db, () => this.#events.changed({ kind: 'check' }));

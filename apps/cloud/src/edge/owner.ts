@@ -1,5 +1,12 @@
-import type { HubCodeResponse, RegisterDeviceRequest, UpdatePushRulesRequest, UpdateTariffsRequest } from '@bills/domain';
-import { DEVICE_PLATFORMS, encodeHubSetupCode, isNtfyTopicUrl, isPushKind, parseWebPushToken } from '@bills/domain';
+import type {
+  HubCodeResponse,
+  RegisterDeviceRequest,
+  TelegramLinkResponse,
+  TelegramStatusView,
+  UpdatePushRulesRequest,
+  UpdateTariffsRequest,
+} from '@bills/domain';
+import { DEVICE_PLATFORMS, encodeHubSetupCode, isNtfyTopicUrl, isPushKind, parseWebPushToken, telegramStartLink } from '@bills/domain';
 import {
   companyLicense,
   createBranch,
@@ -19,6 +26,7 @@ import { b64urlDecode, registerDevice, removeDevice, saveRules } from '../push.t
 import { clubOfCompany } from '../reports.ts';
 import type { ClubRow } from '../settings.ts';
 import { updateTariffs } from '../sync.ts';
+import { createLinkCode, listChats, unlinkChat } from '../telegram.ts';
 import type { EdgeContext } from './context.ts';
 import { reportPushConfigured, signPendingQuietly } from './context.ts';
 import type { EdgeRequest, Schema } from './http.ts';
@@ -36,6 +44,12 @@ import { bearerToken, errorResponse, json, notFound, readJson, readOptionalJson,
  *   PUT    /owner/push/rules          UpdatePushRulesRequest → PushSettingsView
  *   POST   /owner/devices             RegisterDeviceRequest → DeviceView
  *   DELETE /owner/devices/:id         → { ok: true }
+ *
+ * «TS в Telegram» (apps/cloud/src/telegram.ts):
+ *   GET    /owner/telegram                 → TelegramStatusView (configured: false without TELEGRAM_BOT_TOKEN)
+ *   POST   /owner/telegram/link            → TelegramLinkResponse: t.me link with a one-time code, 15 minutes
+ *                                            (503 TELEGRAM_NOT_CONFIGURED)
+ *   DELETE /owner/telegram/chats/:chatId   → { ok: true } (404 TELEGRAM_CHAT_NOT_FOUND)
  *
  * The manager cabinet (owners rows are the client's managers), as /api/company/… of apps/cloud:
  *   GET  /owner/company/license                → { license: LicenseView | null }
@@ -270,6 +284,37 @@ export async function handleOwner(req: EdgeRequest, ctx: EdgeContext): Promise<R
       const body = validate<RegisterDeviceRequest>(await readJson(req), deviceSchema);
       checkDeviceToken(body);
       return json(200, await registerDevice(ctx.db, ctx.now(), owner.id, body), cors);
+    }
+
+    const telegramChat = /^\/owner\/telegram\/chats\/([^/]+)$/.exec(path);
+
+    if (m === 'GET' && path === '/owner/telegram') {
+      const owner = await requireOwner(req, ctx);
+      const view: TelegramStatusView = ctx.telegram
+        ? { configured: true, botUsername: await ctx.telegram.username(), chats: await listChats(ctx.db, owner.id) }
+        : { configured: false, botUsername: null, chats: [] };
+      return json(200, view, { ...cors, 'cache-control': 'no-store' });
+    }
+
+    if (m === 'POST' && path === '/owner/telegram/link') {
+      const owner = await requireOwner(req, ctx);
+      const bot = ctx.telegram;
+      const username = bot ? await bot.username() : null;
+      if (!bot || !username) throw new CloudError(503, 'TELEGRAM_NOT_CONFIGURED', 'Telegram пока не подключён к TS');
+      const { code, expiresAt } = await createLinkCode(ctx.db, ctx.now(), owner.id);
+      const res: TelegramLinkResponse = { url: telegramStartLink(username, code), expiresAt };
+      return json(200, res, { ...cors, 'cache-control': 'no-store' });
+    }
+
+    if (m === 'DELETE' && telegramChat) {
+      const owner = await requireOwner(req, ctx);
+      const chatId = decodeURIComponent(telegramChat[1]!);
+      if (!(await unlinkChat(ctx.db, chatId, owner.id))) throw new CloudError(404, 'TELEGRAM_CHAT_NOT_FOUND', 'Этот чат не подключён');
+      if (ctx.telegram) {
+        const bye = await ctx.telegram.sendMessage(chatId, 'Этот чат отключён от TS в кабинете. Тревоги и сводка больше не придут сюда.');
+        if (!bye.ok) ctx.log(`Telegram: ${bye.description}`);
+      }
+      return json(200, { ok: true }, cors);
     }
 
     if (m === 'DELETE' && device) {

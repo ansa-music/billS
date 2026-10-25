@@ -28,6 +28,8 @@ import type {
   OwnerView,
   PushRule,
   PushSettingsView,
+  TelegramLinkResponse,
+  TelegramStatusView,
   TestPushResponse,
   UpdateTariffsRequest,
   UpdateTariffsResponse,
@@ -139,6 +141,22 @@ export async function removeDevice(id: string): Promise<void> {
 
 export async function sendTestPush(): Promise<TestPushResponse> {
   return SUPABASE_MODE ? (await sb()).sendTestPush() : http.sendTestPush();
+}
+
+// --- «TS в Telegram» (Supabase only: the self-hosted cloud has no bot) --------
+
+export async function fetchTelegram(): Promise<TelegramStatusView> {
+  return SUPABASE_MODE ? (await sb()).fetchTelegram() : { configured: false, botUsername: null, chats: [] };
+}
+
+export async function linkTelegram(): Promise<TelegramLinkResponse> {
+  if (!SUPABASE_MODE) throw new CloudRequestError(503, 'TELEGRAM_NOT_CONFIGURED', 'Telegram пока не подключён к TS');
+  return (await sb()).linkTelegram();
+}
+
+export async function unlinkTelegram(chatId: string): Promise<void> {
+  if (!SUPABASE_MODE) return;
+  return (await sb()).unlinkTelegram(chatId);
 }
 
 /** Supabase only: new alerts via Realtime. The self-hosted cabinet just polls. */

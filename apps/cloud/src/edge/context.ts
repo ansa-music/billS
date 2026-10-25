@@ -5,6 +5,8 @@ import type { LicenseSigner } from '../license.ts';
 import { licenseSignerFromEnv, signPendingLicenses } from '../license.ts';
 import type { Log, PushSender, WatchdogOptions } from '../push.ts';
 import { PushDispatcher, pushSenderFromEnv, RoutingSender } from '../push.ts';
+import type { TelegramFetch } from '../telegram.ts';
+import { TelegramBot, TelegramChannel } from '../telegram.ts';
 
 /** Everything an Edge Function handler needs; built once per isolate and reused across requests. */
 export interface EdgeContext {
@@ -46,6 +48,13 @@ export interface EdgeContext {
   cloudUrl: string | null;
   /** Self sign-up (`signup`): TS_SIGNUP_DISABLED=1 turns it off; TS_SIGNUP_PER_HOUR attempts per IP (5). */
   signup: { disabled: boolean; perHour: number };
+  /**
+   * «TS в Telegram»: the bot (TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME); null without a token —
+   * the cabinet then hides the Telegram button and alerts go only to devices.
+   */
+  telegram: TelegramBot | null;
+  /** The `telegram` webhook accepts only calls with this X-Telegram-Bot-Api-Secret-Token (TELEGRAM_WEBHOOK_SECRET). */
+  telegramWebhookSecret: string | null;
 }
 
 export const DEFAULT_CABINET_URL = 'https://ts-cabinet.pages.dev';
@@ -86,6 +95,8 @@ export interface EdgeContextOptions {
   now?: () => number;
   /** Replaces the senders built from the environment (tests). */
   sender?: PushSender;
+  /** `fetch` of the Telegram bot (tests stub the Bot API). */
+  telegramFetch?: TelegramFetch;
 }
 
 /**
@@ -96,15 +107,22 @@ export interface EdgeContextOptions {
  * LICENSE_SIGNING_KEY (PKCS#8 Ed25519; the dev key when missing), LICENSE_KEY_ID ('ts-2026'),
  * SUPABASE_URL + SUPABASE_ANON_KEY (Auth API lookups), SUPABASE_SERVICE_ROLE_KEY (Auth admin API),
  * TS_CLOUD_URL (connection codes; `${SUPABASE_URL}/functions/v1` by default),
- * TS_SIGNUP_DISABLED (=1 turns self sign-up off), TS_SIGNUP_PER_HOUR (5 sign-up attempts per IP an hour).
+ * TS_SIGNUP_DISABLED (=1 turns self sign-up off), TS_SIGNUP_PER_HOUR (5 sign-up attempts per IP an hour),
+ * TELEGRAM_BOT_TOKEN + TELEGRAM_BOT_USERNAME + TELEGRAM_WEBHOOK_SECRET («TS в Telegram», all optional).
  */
 export function edgeContext(db: SqlDriver, env: Env, options: EdgeContextOptions = {}): EdgeContext {
   const log = options.log ?? ((m: string) => console.log(m));
   const now = options.now ?? (() => Date.now());
   const sender = options.sender ?? pushSenderFromEnv(env, log);
+  const cabinetUrl = (env.TS_CABINET_URL?.trim() || DEFAULT_CABINET_URL).replace(/\/+$/, '');
+  const telegramToken = env.TELEGRAM_BOT_TOKEN?.trim();
+  const telegram = telegramToken
+    ? new TelegramBot({ token: telegramToken, username: env.TELEGRAM_BOT_USERNAME ?? null, log, ...(options.telegramFetch ? { fetch: options.telegramFetch } : {}) })
+    : null;
   const push = new PushDispatcher(db, sender, now, {
     maxAgeMs: minutes(env.CLOUD_PUSH_MAX_AGE_MINUTES, 120) * 60_000,
     log,
+    ownerChannel: telegram ? new TelegramChannel(db, telegram, cabinetUrl, log) : null,
   });
   const pushChannels = sender instanceof RoutingSender ? sender.channels : sender.enabled ? ['custom'] : [];
   return {
@@ -132,12 +150,14 @@ export function edgeContext(db: SqlDriver, env: Env, options: EdgeContextOptions
       env.SUPABASE_URL?.trim() && env.SUPABASE_SERVICE_ROLE_KEY?.trim()
         ? authAdminApi(env.SUPABASE_URL.trim(), env.SUPABASE_SERVICE_ROLE_KEY.trim())
         : null,
-    cabinetUrl: (env.TS_CABINET_URL?.trim() || DEFAULT_CABINET_URL).replace(/\/+$/, ''),
+    cabinetUrl,
     cloudUrl: cloudUrlOf(env),
     signup: {
       disabled: /^(1|true|yes|on)$/i.test(env.TS_SIGNUP_DISABLED?.trim() ?? ''),
       perHour: Math.floor(minutes(env.TS_SIGNUP_PER_HOUR, DEFAULT_SIGNUP_PER_HOUR)),
     },
+    telegram,
+    telegramWebhookSecret: env.TELEGRAM_WEBHOOK_SECRET?.trim() || null,
   };
 }
 

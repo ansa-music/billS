@@ -179,6 +179,31 @@ node scripts/supabase-sql.ts club --company <COMPANY_ID> --name "Клуб на �
 - Почему не FCM: Android-push через Firebase требует консоль Firebase и аккаунт Google Cloud, а оплатить Google в будущем может не получиться. FCM остаётся только в самостоятельном облаке `apps/cloud` (бесплатный режим на мини-ПК) — для тех, у кого уже есть Firebase.
 - **Проверка «HUB пропал»** каждые 5 минут. В Supabase → **SQL Editor** один раз выполните блок из комментария в `supabase/migrations/20261020000300_cron.sql`: он записывает адрес проекта и `NOTIFY_SECRET` в Vault. Дальше `pg_cron` сам вызывает функцию `notify`. О новых тревогах из клубов push уходит сразу, без этой проверки.
 
+### 4а. Telegram-бот (необязательно)
+
+Владелец получает в Telegram тревоги из заведений (те же, что в push, по тем же правилам из «Уведомлений») и в 21:00 по времени заведения — «Итоги дня»: выручка, игры или заказы, средний чек и сравнение с тем же днём прошлой недели. Бот делается один раз на всю платформу TS, бесплатно.
+
+1. В Telegram откройте **@BotFather** → `/newbot`. Имя — например, «TS — тревоги», username — любое свободное, оканчивается на `bot` (например, `ts_alerts_bot`). BotFather пришлёт **токен** вида `123456789:AA…` — это пароль бота, никому его не показывайте.
+2. Там же можно задать описание и команды (`/setcommands`):
+   ```
+   today - сводка за сегодня
+   mute - пауза: не присылать сообщения
+   unmute - снова присылать
+   stop - отключить этот чат
+   ```
+3. В GitHub → **Settings → Secrets and variables → Actions → Secrets** добавьте:
+   - `TELEGRAM_BOT_TOKEN` — токен от BotFather;
+   - `TELEGRAM_WEBHOOK_SECRET` — любая длинная случайная строка (не короче 16 символов; буквы, цифры, `_` и `-`), например `openssl rand -hex 24`.
+
+   И в **Variables** (или Secrets) — `TELEGRAM_BOT_USERNAME`: username бота без `@`. Без него облако спросит имя у Telegram само.
+4. Запустите **deploy**. Робот передаст секреты в Supabase, выложит функцию `telegram` и сам сообщит Telegram её адрес (`setWebhook` на `https://<ID>.supabase.co/functions/v1/telegram` с секретом). В журнале шага «Telegram webhook» должно быть `ok`.
+
+   Без GitHub — руками: `supabase secrets set TELEGRAM_BOT_TOKEN=… TELEGRAM_BOT_USERNAME=… TELEGRAM_WEBHOOK_SECRET=…`, затем откройте в браузере
+   `https://api.telegram.org/bot<токен>/setWebhook?url=https://<ID>.supabase.co/functions/v1/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>`.
+5. Владелец в кабинете: **Уведомления → «Получать в Telegram»** → «Открыть Telegram» → «Запустить». Ссылка одноразовая и живёт 15 минут. В кабинете появится «Подключено: @имя · отключить».
+
+Сводка дня приходит из той же проверки, что «HUB пропал» (`pg_cron` каждые 5 минут, шаг 4), — без неё сводки не будет, тревоги придут всё равно. Пока токена нет, в кабинете написано «Telegram пока не подключён к TS». Если владелец заблокировал бота, чат отключается сам.
+
 ### 5. Запуск
 
 GitHub → **Actions → deploy → Run workflow**, или просто пуш в `main`. Через 3–5 минут:
@@ -213,8 +238,9 @@ GitHub → **Actions → deploy → Run workflow**, или просто пуш �
   - `…0100_owner_access.sql` — связь с Auth, RLS, RPC отчётов, Realtime;
   - `…0200_push.sql` — Web Push и ntfy;
   - `…0300_cron.sql` — pg_cron, в тестах пропускается;
-  - `…0400_keepalive.sql`.
-- Edge Functions (`supabase/functions/*`) — тонкие обёртки на Deno. Логика лежит в `apps/cloud/src/edge/` и переиспользует `sync.ts`, `projection.ts`, `push.ts` облака. В Deno её приносит бандл `npm run bundle:edge` (`supabase/functions/_shared/core.js`, собирается в CI).
+  - `…0400_keepalive.sql`;
+  - `…20261025000000_telegram.sql` — чаты Telegram владельцев, одноразовые коды привязки, отметки о сводке дня.
+- Edge Functions (`supabase/functions/*`) — тонкие обёртки на Deno; `telegram` — вебхук бота (логика в `apps/cloud/src/telegram.ts`). Логика лежит в `apps/cloud/src/edge/` и переиспользует `sync.ts`, `projection.ts`, `push.ts` облака. В Deno её приносит бандл `npm run bundle:edge` (`supabase/functions/_shared/core.js`, собирается в CI).
 - Переменные сборки:
   - кабинет — `VITE_SUPABASE_URL` и `VITE_SUPABASE_ANON_KEY` (режим Supabase; без них кабинет ходит в `apps/cloud` по `/api`), `VITE_VAPID_PUBLIC_KEY`;
   - демо — `VITE_DEMO_LOCAL=1`;

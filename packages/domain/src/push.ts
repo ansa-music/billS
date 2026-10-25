@@ -190,6 +190,55 @@ export interface PushData {
 }
 
 // ---------------------------------------------------------------------------
+// «TS в Telegram»: alerts and the evening summary in a Telegram chat (Supabase cloud)
+// ---------------------------------------------------------------------------
+
+/** A Telegram chat linked to the owner. */
+export interface TelegramChatView {
+  /** Telegram chat id as text (group ids do not fit in 32 bits). */
+  chatId: string;
+  /** "@username", the group title or the person's first name. */
+  name: string;
+  linkedAt: number;
+  /** Paused from the chat with /mute: nothing is sent until /unmute. */
+  muted: boolean;
+}
+
+/** GET /owner/telegram. */
+export interface TelegramStatusView {
+  /** False when the cloud has no bot (TELEGRAM_BOT_TOKEN missing): the cabinet hides the button. */
+  configured: boolean;
+  /** Bot username without "@", null when unknown. */
+  botUsername: string | null;
+  chats: TelegramChatView[];
+}
+
+/** POST /owner/telegram/link: open `url` on the phone, Telegram sends `/start <code>` to the bot. */
+export interface TelegramLinkResponse {
+  url: string;
+  expiresAt: number;
+}
+
+/** How long a link code from the cabinet works. */
+export const TELEGRAM_LINK_TTL_MS = 15 * 60_000;
+
+/** Telegram allows 1–64 characters A–Z a–z 0–9 _ - in a start parameter. */
+export function isTelegramStartCode(code: string): boolean {
+  return /^[A-Za-z0-9_-]{1,64}$/.test(code);
+}
+
+/** "@TS_bot" / "TS_bot" → "TS_bot"; null when it is not a valid bot username. */
+export function normalizeBotUsername(input: string | null | undefined): string | null {
+  const name = (input ?? '').trim().replace(/^@/, '').replace(/^https:\/\/t\.me\//, '');
+  return /^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(name) ? name : null;
+}
+
+/** Deep link that opens the bot and sends `/start <code>`: `https://t.me/<bot>?start=<code>`. */
+export function telegramStartLink(botUsername: string, code: string): string {
+  return `https://t.me/${encodeURIComponent(botUsername)}?start=${encodeURIComponent(code)}`;
+}
+
+// ---------------------------------------------------------------------------
 // Sign-in by an owner key (phone)
 // ---------------------------------------------------------------------------
 

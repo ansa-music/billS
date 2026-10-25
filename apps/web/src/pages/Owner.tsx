@@ -8,6 +8,7 @@ import { Link } from '../router.tsx';
 import { Empty, Loading, Page, Section, Toast, formatDateTime, localDate, useToast } from '../ui.tsx';
 import { useCommands, useHub, useServerNow } from '../useHub.tsx';
 import { businessOf } from '../cafe/cafe.ts';
+import { InsightsPanel } from '../insights/InsightsPanel.tsx';
 import { OccupancyChart, RevenueChart, TopTablesChart, plural } from './owner/Charts.tsx';
 import { CABINET_URL } from './settings/LicenseSection.tsx';
 import './owner.css';
@@ -183,6 +184,8 @@ export function OwnerPage() {
           )}
         </>
       )}
+
+      <InsightsPanel frame="panel" />
 
       <div className="grid-2">
         <Section title="Тревоги" aside={state && state.alerts.length > 0 ? <span className="tag tag-danger">{state.alerts.length}</span> : undefined}>

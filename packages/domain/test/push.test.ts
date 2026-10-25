@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { loginQrText, normalizeCloudUrl, parseLoginQr, pushKindOfAlert, PUSH_KINDS } from '../src/index.ts';
+import {
+  isTelegramStartCode,
+  loginQrText,
+  normalizeBotUsername,
+  normalizeCloudUrl,
+  parseLoginQr,
+  pushKindOfAlert,
+  PUSH_KINDS,
+  telegramStartLink,
+} from '../src/index.ts';
 
 test('login QR: round trip, bare key, junk', () => {
   const qr = loginQrText('https://cloud.ts.kz', 'OWNER-7K3Q-M2PX-9HWD-4RTB');
@@ -25,4 +34,17 @@ test('HUB alert kinds map to push kinds', () => {
   assert.equal(pushKindOfAlert('LAMP_OFF_FAILED'), 'LAMP_FAILED');
   assert.equal(pushKindOfAlert('SOMETHING_NEW'), 'OTHER');
   assert.equal(new Set(PUSH_KINDS.map((k) => k.kind)).size, PUSH_KINDS.length);
+});
+
+test('Telegram: bot username, start code and deep link', () => {
+  assert.equal(normalizeBotUsername('@TS_alerts_bot'), 'TS_alerts_bot');
+  assert.equal(normalizeBotUsername(' https://t.me/TS_alerts_bot '), 'TS_alerts_bot');
+  assert.equal(normalizeBotUsername('ts'), null);
+  assert.equal(normalizeBotUsername('1bot'), null);
+  assert.equal(normalizeBotUsername(undefined), null);
+  assert.ok(isTelegramStartCode('aB3_-x'));
+  assert.ok(!isTelegramStartCode(''));
+  assert.ok(!isTelegramStartCode('a b'));
+  assert.ok(!isTelegramStartCode('x'.repeat(65)));
+  assert.equal(telegramStartLink('TS_alerts_bot', 'Ab_9-z'), 'https://t.me/TS_alerts_bot?start=Ab_9-z');
 });

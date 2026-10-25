@@ -1,5 +1,6 @@
 import { CloudError } from '../errors.ts';
 import { runWatchdogs } from '../push.ts';
+import { runDailySummaries } from '../telegram.ts';
 import type { EdgeContext } from './context.ts';
 import { reportPushConfigured } from './context.ts';
 import type { EdgeRequest } from './http.ts';
@@ -7,8 +8,9 @@ import { errorResponse, json, notFound, routeOf } from './http.ts';
 
 /**
  * Edge Function `notify` (verify_jwt = false): the cloud's watchdogs (HUB silent,
- * shift left open) plus a retry of anything still PENDING in push_queue. Called by
- * pg_cron every 5 minutes (supabase/migrations/*_cron.sql) with `x-ts-cron: <NOTIFY_SECRET>`.
+ * shift left open) plus a retry of anything still PENDING in push_queue, and — with the Telegram
+ * bot configured — the evening summary of the day (21:00 club time, once per chat and day).
+ * Called by pg_cron every 5 minutes (supabase/migrations/*_cron.sql) with `x-ts-cron: <NOTIFY_SECRET>`.
  */
 
 /** Compares in time independent of where the strings differ. */
@@ -33,8 +35,16 @@ export async function handleNotify(req: EdgeRequest, ctx: EdgeContext): Promise<
     const now = ctx.now();
     const queued = await runWatchdogs(ctx.db, now, ctx.watchdog);
     const flushed = await ctx.push.flush();
+    let summaries = 0;
+    if (ctx.telegram) {
+      try {
+        summaries = await runDailySummaries(ctx.db, now, ctx.telegram, ctx.cabinetUrl, ctx.log);
+      } catch (e) {
+        ctx.log(`Telegram: сводка дня не разослана: ${(e as Error).message}`);
+      }
+    }
     await reportPushConfigured(ctx);
-    return json(200, { ok: true, now, queued, ...flushed, pushEnabled: ctx.push.enabled });
+    return json(200, { ok: true, now, queued, ...flushed, summaries, pushEnabled: ctx.push.enabled });
   } catch (e) {
     return errorResponse(e, ctx.log);
   }

@@ -3,6 +3,7 @@ import type { CounterCancelRequest, CounterStageRequest, CreateCounterOrderReque
 import { COUNTER_STAGES, OPTION_GROUPS_MAX, OPTION_CHOICES_MAX, ORDER_MAX_LINES, PAYMENT_METHODS } from '@bills/domain';
 import type { Hub } from '../../hub.ts';
 import { guard, runCommand } from '../command.ts';
+import { loyaltyApplySchema } from './loyalty.ts';
 
 const id = { type: 'string', minLength: 1, maxLength: 100 } as const;
 // Lengths, quantities and the service are checked by the service: a readable 422, not a schema 400.
@@ -29,6 +30,8 @@ const createSchema = {
     service: { type: 'string', maxLength: 20 },
     guestName: { type: 'string', maxLength: 200 },
     note: { type: 'string', maxLength: 1000 },
+    // «Гость» (loyalty): phone, and the gift or bonuses to apply before the payment.
+    loyalty: { anyOf: [loyaltyApplySchema, { type: 'null' }] },
     payment: {
       type: ['object', 'null'],
       additionalProperties: false,

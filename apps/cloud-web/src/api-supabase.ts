@@ -37,6 +37,8 @@ import type {
   OwnerView,
   PushRule,
   PushSettingsView,
+  TelegramLinkResponse,
+  TelegramStatusView,
   TestPushResponse,
   UpdateTariffsRequest,
   UpdateTariffsResponse,
@@ -437,6 +439,20 @@ export async function removeDevice(id: string): Promise<void> {
 
 export function sendTestPush(): Promise<TestPushResponse> {
   return edge<TestPushResponse>('POST', '/owner/push/test');
+}
+
+// --- «TS в Telegram» ----------------------------------------------------------
+
+export function fetchTelegram(): Promise<TelegramStatusView> {
+  return edge<TelegramStatusView>('GET', '/owner/telegram');
+}
+
+export function linkTelegram(): Promise<TelegramLinkResponse> {
+  return edge<TelegramLinkResponse>('POST', '/owner/telegram/link');
+}
+
+export async function unlinkTelegram(chatId: string): Promise<void> {
+  await edge<{ ok: true }>('DELETE', `/owner/telegram/chats/${encodeURIComponent(chatId)}`);
 }
 
 // --- realtime ---------------------------------------------------------------

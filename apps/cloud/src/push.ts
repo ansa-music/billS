@@ -213,10 +213,22 @@ interface QueueRow {
   at: number;
 }
 
+/**
+ * A channel that reaches an owner directly instead of through a device row: Telegram chats
+ * linked to the owner (apps/cloud/src/telegram.ts, Supabase cloud only). The dispatcher calls it
+ * after the owner's push rules let the kind through, next to the owner's devices.
+ */
+export interface OwnerChannel {
+  /** Sends to every chat of the owner; 0/0 when the owner has none. */
+  deliver(ownerId: string, message: Omit<PushMessage, 'token' | 'platform'>): Promise<{ delivered: number; failed: number }>;
+}
+
 export interface DispatcherOptions {
   /** Alerts older than this when first seen (a HUB catching up after a day offline) are not pushed. */
   maxAgeMs?: number;
   log?: Log;
+  /** Telegram: alerts also go to the owner's linked chats (by the same rules). */
+  ownerChannel?: OwnerChannel | null;
 }
 
 export interface FlushResult {
@@ -231,6 +243,7 @@ export class PushDispatcher {
   readonly #now: () => number;
   readonly #maxAgeMs: number;
   readonly #log: Log;
+  readonly #owners: OwnerChannel | null;
   #chain: Promise<unknown> = Promise.resolve();
 
   constructor(db: SqlDriver, sender: PushSender, now: () => number, options: DispatcherOptions = {}) {
@@ -239,10 +252,12 @@ export class PushDispatcher {
     this.#now = now;
     this.#maxAgeMs = options.maxAgeMs ?? 2 * 60 * 60 * 1000;
     this.#log = options.log ?? (() => {});
+    this.#owners = options.ownerChannel ?? null;
   }
 
+  /** Some channel will send: a device channel (Web Push, ntfy) or Telegram. */
   get enabled(): boolean {
-    return this.#sender.enabled;
+    return this.#sender.enabled || this.#owners !== null;
   }
 
   /** Sends what is PENDING. Calls run one after another, so a row is never sent twice. */
@@ -269,27 +284,29 @@ export class PushDispatcher {
         await this.#finish(row.id, 'STALE', now, 0, 0);
         continue;
       }
-      if (!this.#sender.enabled) {
+      if (!this.enabled) {
         this.#log(`Push выключен, не отправлено: «${row.title}» — ${row.body}`);
         await this.#finish(row.id, 'DISABLED', now, 0, 0);
         continue;
       }
       const kind = isPushKind(row.kind) ? row.kind : 'OTHER';
-      const devices = await this.#recipients(row.club_id, kind);
+      const data: PushData = { kind, clubId: row.club_id, ...(row.alert_id ? { alertId: row.alert_id } : {}) };
       let delivered = 0;
       let failed = 0;
-      for (const d of devices) {
-        const ok = await this.#deliver(d, {
-          token: d.token,
-          platform: d.platform,
-          title: row.title,
-          body: row.body,
-          data: { kind, clubId: row.club_id, ...(row.alert_id ? { alertId: row.alert_id } : {}) },
-        });
-        if (ok) delivered++;
-        else failed++;
+      for (const ownerId of await this.#allowedOwners(row.club_id, kind)) {
+        if (this.#sender.enabled) {
+          for (const d of await this.#devicesOf(ownerId)) {
+            if (await this.#deliver(d, { token: d.token, platform: d.platform, title: row.title, body: row.body, data })) delivered++;
+            else failed++;
+          }
+        }
+        if (this.#owners) {
+          const r = await this.#viaOwnerChannel(ownerId, { title: row.title, body: row.body, data });
+          delivered += r.delivered;
+          failed += r.failed;
+        }
       }
-      await this.#finish(row.id, devices.length ? 'SENT' : 'SKIPPED', now, delivered, failed);
+      await this.#finish(row.id, delivered + failed > 0 ? 'SENT' : 'SKIPPED', now, delivered, failed);
       result.delivered += delivered;
       result.failed += failed;
     }
@@ -306,18 +323,29 @@ export class PushDispatcher {
     ]);
   }
 
-  /** Devices of every owner of the club's company whose rules let this kind through. */
-  async #recipients(clubId: string, kind: PushKind): Promise<DeviceRow[]> {
+  /** Every owner of the club's company whose rules let this kind through. */
+  async #allowedOwners(clubId: string, kind: PushKind): Promise<string[]> {
     const owners = await this.#db.all<{ id: string }>(
       'SELECT o.id FROM owners o JOIN clubs c ON c.company_id = o.company_id WHERE c.id = ? ORDER BY o.created_at',
       [clubId],
     );
-    const out: DeviceRow[] = [];
-    for (const o of owners) {
-      if (!pushRuleAllows(await loadRules(this.#db, o.id), kind, clubId)) continue;
-      out.push(...(await this.#db.all<DeviceRow>('SELECT * FROM owner_devices WHERE owner_id = ? ORDER BY created_at', [o.id])));
-    }
+    const out: string[] = [];
+    for (const o of owners) if (pushRuleAllows(await loadRules(this.#db, o.id), kind, clubId)) out.push(o.id);
     return out;
+  }
+
+  #devicesOf(ownerId: string): Promise<DeviceRow[]> {
+    return this.#db.all<DeviceRow>('SELECT * FROM owner_devices WHERE owner_id = ? ORDER BY created_at', [ownerId]);
+  }
+
+  /** Telegram: a failure there never stops the device pushes. */
+  async #viaOwnerChannel(ownerId: string, message: Omit<PushMessage, 'token' | 'platform'>): Promise<{ delivered: number; failed: number }> {
+    try {
+      return await this.#owners!.deliver(ownerId, message);
+    } catch (e) {
+      this.#log(`Telegram: ${(e as Error).message}`);
+      return { delivered: 0, failed: 1 };
+    }
   }
 
   async #deliver(device: DeviceRow, message: PushMessage): Promise<boolean> {
@@ -338,23 +366,25 @@ export class PushDispatcher {
 
   /** "Send a test push" from the cabinet: straight to the owner's devices, rules ignored. */
   async test(ownerId: string, clubId: string): Promise<TestPushResponse> {
-    const devices = await this.#db.all<DeviceRow>('SELECT * FROM owner_devices WHERE owner_id = ? ORDER BY created_at', [ownerId]);
-    if (!this.#sender.enabled) {
+    if (!this.enabled) {
       this.#log('Push выключен: тестовое уведомление не отправлено');
       return { pushEnabled: false, sent: 0, failed: 0 };
     }
+    const title = 'TS: проверка уведомлений';
+    const body = 'Если вы это видите — тревоги клуба будут приходить на этот телефон.';
+    const data: PushData = { kind: 'OTHER', clubId };
     let sent = 0;
     let failed = 0;
-    for (const d of devices) {
-      const ok = await this.#deliver(d, {
-        token: d.token,
-        platform: d.platform,
-        title: 'TS: проверка уведомлений',
-        body: 'Если вы это видите — тревоги клуба будут приходить на этот телефон.',
-        data: { kind: 'OTHER', clubId },
-      });
-      if (ok) sent++;
-      else failed++;
+    if (this.#sender.enabled) {
+      for (const d of await this.#devicesOf(ownerId)) {
+        if (await this.#deliver(d, { token: d.token, platform: d.platform, title, body, data })) sent++;
+        else failed++;
+      }
+    }
+    if (this.#owners) {
+      const r = await this.#viaOwnerChannel(ownerId, { title, body: 'Если вы это видите — тревоги заведений будут приходить в этот чат.', data });
+      sent += r.delivered;
+      failed += r.failed;
     }
     return { pushEnabled: true, sent, failed };
   }
