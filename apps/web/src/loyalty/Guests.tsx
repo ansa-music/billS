@@ -209,14 +209,18 @@ function GuestDialog({
                 <span>Имя</span>
                 <input value={name} maxLength={30} onChange={(e) => setName(e.target.value)} />
               </label>
-              <label className="field">
-                <span>Бонусы, ₸ (+ или −)</span>
-                <input inputMode="decimal" value={bonus} placeholder="+500" onChange={(e) => setBonus(e.target.value)} />
-              </label>
-              <label className="field">
-                <span>Штампы (+ или −)</span>
-                <input inputMode="numeric" value={stamps} placeholder="+1" onChange={(e) => setStamps(e.target.value)} />
-              </label>
+              {settings.program === 'cashback' || g.bonus > 0 ? (
+                <label className="field">
+                  <span>Бонусы, ₸ (+ или −)</span>
+                  <input inputMode="decimal" value={bonus} placeholder="+500" onChange={(e) => setBonus(e.target.value)} />
+                </label>
+              ) : null}
+              {settings.program === 'stamps' || g.stamps > 0 ? (
+                <label className="field">
+                  <span>Штампы (+ или −)</span>
+                  <input inputMode="numeric" value={stamps} placeholder="+1" onChange={(e) => setStamps(e.target.value)} />
+                </label>
+              ) : null}
             </div>
             <label className="field loy-reason">
               <span>Причина</span>
