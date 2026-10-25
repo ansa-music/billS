@@ -1,5 +1,7 @@
 import type { BusinessType } from './cafe.ts';
 import { BUSINESS_TYPES } from './cafe.ts';
+import type { LoyaltySettings } from './loyalty.ts';
+import { DEFAULT_LOYALTY_SETTINGS, normalizeLoyaltySettings } from './loyalty.ts';
 
 /**
  * Club settings beyond name, time zone and currency: how the hall screen looks
@@ -52,6 +54,8 @@ export interface ClubSettings {
   display: DisplaySettings;
   rules: RuleSettings;
   business: BusinessSettings;
+  /** «Лояльность без приложения» (loyalty.ts): off by default, the manager switches it on. */
+  loyalty: LoyaltySettings;
 }
 
 export const DEFAULT_CLUB_SETTINGS: ClubSettings = {
@@ -64,6 +68,7 @@ export const DEFAULT_CLUB_SETTINGS: ClubSettings = {
     defaultRoundingMinor: 1000,
   },
   business: { type: 'billiards' },
+  loyalty: DEFAULT_LOYALTY_SETTINGS,
 };
 
 /** What a screen may send: any subset; null clears a nullable text. */
@@ -71,6 +76,7 @@ export interface ClubSettingsPatch {
   display?: Partial<DisplaySettings>;
   rules?: Partial<RuleSettings>;
   business?: Partial<BusinessSettings>;
+  loyalty?: Partial<LoyaltySettings>;
 }
 
 function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
@@ -130,6 +136,7 @@ export function normalizeClubSettings(input: unknown, base: ClubSettings = DEFAU
       defaultRoundingMinor: int(r.defaultRoundingMinor, base.rules.defaultRoundingMinor, 1, 1_000_000),
     },
     business: { type: pick(b.type, BUSINESS_TYPES, base.business.type) },
+    loyalty: normalizeLoyaltySettings(src.loyalty, base.loyalty ?? DEFAULT_LOYALTY_SETTINGS),
   };
 }
 
