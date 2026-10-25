@@ -102,9 +102,9 @@ function SidebarImpl({
       <div className="sidebar-links">
         <NavLinks routes={routes} active={active} badges={badges} />
       </div>
-      <div className="sidebar-foot" data-online={online || undefined} title={online ? 'HUB на связи' : 'Нет связи с HUB'}>
+      <div className="sidebar-foot" data-online={online || undefined} title={online ? 'Касса на связи' : 'Нет связи с кассой'}>
         <span className="conn-dot" aria-hidden="true" />
-        <span className="nav-label">{online ? 'HUB на связи' : 'Нет связи с HUB'}</span>
+        <span className="nav-label">{online ? 'Касса на связи' : 'Нет связи с кассой'}</span>
       </div>
     </nav>
   );
@@ -307,9 +307,9 @@ export function Topbar(props: {
         <span
           className="topbar-conn"
           data-online={props.online || undefined}
-          title={props.online ? 'HUB на связи' : 'Нет связи с HUB'}
+          title={props.online ? 'Касса на связи' : 'Нет связи с кассой'}
           role="status"
-          aria-label={props.online ? 'HUB на связи' : 'Нет связи с HUB'}
+          aria-label={props.online ? 'Касса на связи' : 'Нет связи с кассой'}
         >
           <span className="conn-dot" aria-hidden="true" />
           <span className="topbar-conn-text">{props.online ? 'На связи' : 'Нет связи'}</span>

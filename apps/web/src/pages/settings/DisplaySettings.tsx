@@ -25,6 +25,7 @@ export function DisplaySettings({ club, online, isBusy, run, onSaved, canEdit }:
           theme: draft.theme,
           cardSize: draft.cardSize,
           waiterSees: draft.waiterSees,
+          showRoster: draft.showRoster,
         },
       },
     });
@@ -128,6 +129,17 @@ export function DisplaySettings({ club, online, isBusy, run, onSaved, canEdit }:
               { value: 'time', label: 'Только время' },
             ]}
             onChange={(waiterSees) => setDraft((d) => ({ ...d, waiterSees }))}
+          />
+        </Field>
+        <Field label="Экран входа" hint="Список имён удобнее; без него каждый вводит свой ключ на цифровой клавиатуре">
+          <Segmented<'on' | 'off'>
+            value={draft.showRoster ? 'on' : 'off'}
+            disabled={disabled}
+            options={[
+              { value: 'on', label: 'Список имён' },
+              { value: 'off', label: 'Только клавиатура' },
+            ]}
+            onChange={(v) => setDraft((d) => ({ ...d, showRoster: v === 'on' }))}
           />
         </Field>
         <SaveBar dirty={dirty} canSave={dirty && logoValid} busy={busy} disabled={disabled} onSave={() => void save()} onReset={reset} />

@@ -139,7 +139,7 @@ export function ClubSettingsPage() {
       {tab === 'devices' && <TlsCard />}
       {standalone && !club && !loadError && <Loading online={online} />}
       {standalone && !club && loadError && <p className="empty">Не удалось загрузить настройки: {loadError}</p>}
-      {club && !online && <p className="settings-offline">Нет связи с HUB — изменения пока нельзя сохранить.</p>}
+      {club && !online && <p className="settings-offline">Нет связи с кассой — изменения пока нельзя сохранить.</p>}
       {section}
       <Toast message={toast} onClose={clear} />
     </Page>

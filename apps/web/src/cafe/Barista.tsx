@@ -133,7 +133,7 @@ export function BaristaPage() {
         </div>
       </div>
       {blocked && <p className="blocked-note">{blocked}</p>}
-      {data && error && <p className="hint hint-warn">Нет связи с HUB, показан последний список: {error}</p>}
+      {data && error && <p className="hint hint-warn">Нет связи с кассой, показан последний список: {error}</p>}
 
       <div className="barista-cols">
         {COLUMNS.map((col) => {

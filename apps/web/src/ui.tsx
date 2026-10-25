@@ -83,7 +83,7 @@ export function SkeletonList({ rows = 3, label = 'Загрузка…' }: { rows
 }
 
 export function Loading({ online = true }: { online?: boolean }) {
-  if (!online) return <p className="empty">Нет связи с HUB — ждём, данные появятся сами.</p>;
+  if (!online) return <p className="empty">Нет связи с кассой — ждём, данные появятся сами.</p>;
   return <SkeletonList />;
 }
 
