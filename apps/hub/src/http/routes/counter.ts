@@ -7,7 +7,7 @@ import { loyaltyApplySchema } from './loyalty.ts';
 
 const id = { type: 'string', minLength: 1, maxLength: 100 } as const;
 // Lengths, quantities and the service are checked by the service: a readable 422, not a schema 400.
-const createSchema = {
+export const createSchema = {
   type: 'object',
   additionalProperties: false,
   // `payment` may be left out: the same as null — the check stays open.

@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  cancelsAboveNormal,
+  cashDiscrepancyAlert,
+  DEFAULT_GUARD_SETTINGS,
+  discountTooLarge,
+  GUARD_ALERT_KINDS,
   isTelegramStartCode,
+  normalizeGuardSettings,
+  pushRuleAllows,
+  refundReasons,
   loginQrText,
   normalizeBotUsername,
   normalizeCloudUrl,
@@ -47,4 +55,67 @@ test('Telegram: bot username, start code and deep link', () => {
   assert.ok(!isTelegramStartCode('a b'));
   assert.ok(!isTelegramStartCode('x'.repeat(65)));
   assert.equal(telegramStartLink('TS_alerts_bot', 'Ab_9-z'), 'https://t.me/TS_alerts_bot?start=Ab_9-z');
+});
+
+test('«Сторож»: every guard alert kind is a push kind, on by default and marked', () => {
+  for (const kind of GUARD_ALERT_KINDS) {
+    assert.equal(pushKindOfAlert(kind), kind);
+    const info = PUSH_KINDS.find((k) => k.kind === kind);
+    assert.ok(info, kind);
+    assert.equal(info.guard, true);
+    assert.equal(info.defaultOn, true);
+    assert.equal(pushRuleAllows([], kind, 'club-1'), true);
+  }
+  assert.equal(PUSH_KINDS.filter((k) => k.guard).length, GUARD_ALERT_KINDS.length);
+});
+
+test('«Сторож»: settings are normalised, bad values fall back', () => {
+  assert.deepEqual(normalizeGuardSettings(undefined), DEFAULT_GUARD_SETTINGS);
+  assert.deepEqual(normalizeGuardSettings('junk'), DEFAULT_GUARD_SETTINGS);
+  const s = normalizeGuardSettings({ refund: { minAmount: 1000_00, minPercent: 0, lateMinutes: 1.5 }, cancels: { enabled: false }, reopen: { minutes: 61 } });
+  assert.equal(s.refund.minAmount, 1000_00);
+  assert.equal(s.refund.minPercent, DEFAULT_GUARD_SETTINGS.refund.minPercent);
+  assert.equal(s.refund.lateMinutes, DEFAULT_GUARD_SETTINGS.refund.lateMinutes);
+  assert.equal(s.cancels.enabled, false);
+  assert.equal(s.reopen.minutes, DEFAULT_GUARD_SETTINGS.reopen.minutes);
+  // Defaults: 5 000 ₸ / 30 % / 30 min; 3 and 10 %; 1 000 ₸; 15 min; 30 % and 3; 2 min.
+  assert.deepEqual(DEFAULT_GUARD_SETTINGS, {
+    refund: { enabled: true, minAmount: 500_000, minPercent: 30, lateMinutes: 30 },
+    cancels: { enabled: true, minCount: 3, minPercent: 10 },
+    cash: { enabled: true, minDifference: 100_000 },
+    manualMode: { enabled: true, minutes: 15 },
+    discounts: { enabled: true, maxPercent: 30, perShift: 3 },
+    reopen: { enabled: true, minutes: 2 },
+  });
+});
+
+test('«Сторож»: refund, cancellation, cash and discount rules — trigger and stay quiet below the threshold', () => {
+  const r = DEFAULT_GUARD_SETTINGS.refund;
+  const at = 1_000_000_000;
+  assert.deepEqual(refundReasons(r, { amount: 1000_00, paid: 10000_00, paidAt: at, at }), []);
+  assert.deepEqual(refundReasons(r, { amount: 3000_00, paid: 10000_00, paidAt: at, at }), ['share']);
+  assert.deepEqual(refundReasons(r, { amount: 5000_00, paid: 50000_00, paidAt: at, at }), ['amount']);
+  assert.deepEqual(refundReasons(r, { amount: 100_00, paid: 10000_00, paidAt: at, at: at + 30 * 60_000 }), []);
+  assert.deepEqual(refundReasons(r, { amount: 100_00, paid: 10000_00, paidAt: at, at: at + 31 * 60_000 }), ['late']);
+  assert.deepEqual(refundReasons({ ...r, enabled: false }, { amount: 9000_00, paid: 9000_00, paidAt: at, at }), []);
+
+  const c = DEFAULT_GUARD_SETTINGS.cancels;
+  assert.equal(cancelsAboveNormal(c, { cancelled: 2, created: 2 }), false);
+  assert.equal(cancelsAboveNormal(c, { cancelled: 3, created: 3 }), true);
+  assert.equal(cancelsAboveNormal(c, { cancelled: 3, created: 31 }), false);
+  assert.equal(cancelsAboveNormal(c, { cancelled: 3, created: 30 }), true);
+  assert.equal(cancelsAboveNormal(c, { cancelled: 3, created: 0 }), true, 'cancelling other people’s orders');
+  assert.equal(cancelsAboveNormal({ ...c, enabled: false }, { cancelled: 9, created: 9 }), false);
+
+  const m = DEFAULT_GUARD_SETTINGS.cash;
+  assert.equal(cashDiscrepancyAlert(m, -999_00), false);
+  assert.equal(cashDiscrepancyAlert(m, -1000_00), true);
+  assert.equal(cashDiscrepancyAlert(m, 1500_00), true);
+  assert.equal(cashDiscrepancyAlert(m, null), false);
+  assert.equal(cashDiscrepancyAlert({ enabled: true, minDifference: 0 }, 0), false, 'no difference, no alert');
+
+  const d = DEFAULT_GUARD_SETTINGS.discounts;
+  assert.equal(discountTooLarge(d, { amount: 290_00, subtotal: 1000_00 }), false);
+  assert.equal(discountTooLarge(d, { amount: 300_00, subtotal: 1000_00 }), true);
+  assert.equal(discountTooLarge(d, { amount: 300_00, subtotal: 0 }), false);
 });

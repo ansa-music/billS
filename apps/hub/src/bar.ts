@@ -18,6 +18,7 @@ import type { Db } from './db.ts';
 import { afterCommit, all, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import type { HubEvents } from './events.ts';
+import { guardCancel } from './guard.ts';
 import { record } from './journal.ts';
 import type { ProductRow } from './order-lines.ts';
 import { auditLines, insertOrderLines, parseOptions, priceOrderLines, returnOrderStock } from './order-lines.ts';
@@ -384,6 +385,7 @@ export class BarService {
         entityId: order.id,
         data: { sessionId: order.session_id, tableId: order.table_id, total: order.total, reason, checkId: order.check_id },
       });
+      guardCancel(db, now, input.actor);
       if (order.check_id) {
         detachOrder(db, order.id, input.actor, now);
         if (!voidCheckIfEmpty(db, order.check_id, input.actor, now)) loadCheck(db, order.check_id);

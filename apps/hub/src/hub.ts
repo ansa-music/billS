@@ -7,6 +7,8 @@ import type { Db } from './db.ts';
 import { afterCommit, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import { HubEvents } from './events.ts';
+import type { GuardSettings, GuardSettingsPatch } from '@bills/domain';
+import { getGuardSettings, guardManualMode, guardStaffNames, guardTableOpened, setGuardSettings } from './guard.ts';
 import type { LicenseOptions } from './license.ts';
 import { LicenseService } from './license.ts';
 import { purgeIdempotencyKeys } from './idempotency.ts';
@@ -64,6 +66,8 @@ export interface HubDeps {
   license?: LicenseOptions;
   /** Public demo club: four-digit demo keys and a softer login throttle (never on a real club). */
   demo?: boolean;
+  /** How often «Сторож» checks timed rules (manual lamp mode left on). 0 disables the timer. Default 30 s. */
+  guardIntervalMs?: number;
 }
 
 /** The club server: wires storage, lamps and game rules together. */
@@ -95,13 +99,16 @@ export class Hub {
   readonly license: LicenseService;
   readonly #reconcileIntervalMs: number;
   readonly #isManager: (actor: string) => boolean;
+  readonly #guardIntervalMs: number;
   #reconcileTimer: NodeJS.Timeout | undefined;
+  #guardTimer: NodeJS.Timeout | undefined;
 
   constructor(deps: HubDeps) {
     this.db = deps.db;
     this.clock = deps.clock;
     this.#reconcileIntervalMs = deps.reconcileIntervalMs ?? 60_000;
     this.#isManager = deps.isManager ?? managerMatcher(['Управляющий']);
+    this.#guardIntervalMs = deps.guardIntervalMs ?? 30_000;
     this.events.setMaxListeners(0);
     const quiet = () => isManualMode(this.db);
     this.lamps = new LampController({
@@ -157,6 +164,30 @@ export class Hub {
     this.staff = new StaffService({ ...common, limits });
     this.reports = new ReportService(common);
     this.auth = new AuthService({ ...common, demo: deps.demo === true });
+    // «Сторож»: a game opened on a table right after the previous one stopped.
+    this.events.on('changed', (e) => {
+      if (e.kind === 'session' && e.tableId) this.#guardTable(e.tableId);
+    });
+  }
+
+  /** «Сторож»: timed rules (manual lamp mode left on too long). The timer calls it; tests may too. */
+  guardTick(): string | null {
+    const raised = transaction(this.db, () => guardManualMode(this.db, this.clock.now()));
+    if (raised) this.events.changed({ kind: 'alert' });
+    return raised;
+  }
+
+  #guardTable(tableId: string): void {
+    const raised = transaction(this.db, () => guardTableOpened(this.db, this.clock.now(), tableId));
+    if (raised) this.events.changed({ kind: 'alert', tableId });
+  }
+
+  guardSettings(): GuardSettings {
+    return getGuardSettings(this.db);
+  }
+
+  setGuardSettings(actor: string, patch: GuardSettingsPatch): GuardSettings {
+    return setGuardSettings(this.db, this.clock.now(), this.events, actor, patch);
   }
 
   /** Restores lamps and pending commands after a (re)start. */
@@ -167,6 +198,10 @@ export class Hub {
     this.#reconcileTimer = setInterval(() => this.lamps.reconcile(), this.#reconcileIntervalMs);
     // `?.`: the in-browser demo (apps/web/src/demo-hub) runs the HUB with browser timers, which have no unref.
     this.#reconcileTimer.unref?.();
+    if (this.#guardIntervalMs > 0) {
+      this.#guardTimer = setInterval(() => this.guardTick(), this.#guardIntervalMs);
+      this.#guardTimer.unref?.();
+    }
     this.monitor.start();
     this.power.start();
     this.sync?.start();
@@ -181,14 +216,18 @@ export class Hub {
     });
   }
 
-  state(): HubState {
-    return buildState(
+  /** `staffNames`: managers also see who is behind a «Сторож» alert (never part of the push text). */
+  state(options: { staffNames?: boolean } = {}): HubState {
+    const state = buildState(
       this.db,
       this.clock.now(),
       this.power.view(),
       this.sync ? this.sync.status() : syncStatus(this.db, false),
       this.license.shown(),
     );
+    if (!options.staffNames || state.alerts.length === 0) return state;
+    const names = guardStaffNames(this.db);
+    return { ...state, alerts: state.alerts.map((a) => (names.has(a.id) ? { ...a, staff: names.get(a.id) ?? null } : a)) };
   }
 
   resolveAlert(alertId: string, actor: string): { id: string } {
@@ -275,6 +314,7 @@ export class Hub {
 
   close(): void {
     clearInterval(this.#reconcileTimer);
+    clearInterval(this.#guardTimer);
     this.prepaid.close();
     this.power.close();
     this.monitor.close();

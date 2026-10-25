@@ -16,7 +16,9 @@ export interface ChangeEvent {
     | 'staff'
     | 'license'
     /** Counter orders of a coffee shop: taken, moved to a stage, cancelled (GET /api/counter/orders, /board). */
-    | 'counter';
+    | 'counter'
+    /** Guest requests from the QR page (guest.ts): created, accepted, rejected; QR settings. */
+    | 'guest';
   tableId?: string;
 }
 

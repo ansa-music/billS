@@ -99,6 +99,11 @@ function RulesTable({
       <p className="hint">
         «Везде» включает уведомление для всех заведений сразу; галочка в колонке заведения — своя настройка для него.
       </p>
+      <p className="hint">
+        «Сторож» — касса сама замечает подозрительные операции: крупные и поздние возвраты, много отмен или скидок, расхождение кассы,
+        стол закрыли и сразу открыли снова. В тексте нет имён: кто это был, управляющий видит на кассе заведения. Пороги — в настройках
+        кассы, раздел «Сторож».
+      </p>
       <div className="grid-wrap rules-wrap">
         <table className="grid rules-grid">
           <thead>
@@ -117,7 +122,9 @@ function RulesTable({
               const all = allClubsValue(rules, k.kind);
               return (
                 <tr key={k.kind}>
-                  <td className="rules-kind">{k.label}</td>
+                  <td className="rules-kind">
+                    {k.guard && <span className="tag tag-warn">Сторож</span>} {k.label}
+                  </td>
                   <td className="rules-cell">
                     <input
                       type="checkbox"

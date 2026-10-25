@@ -338,7 +338,11 @@ export function Topbar(props: {
                     <Icon name="alert" size={18} className="alert-item-icon" />
                     <div>
                       <p>{a.message}</p>
-                      <span className="muted">{formatClock(a.at, state.club.timezone)}</span>
+                      <span className="muted">
+                        {formatClock(a.at, state.club.timezone)}
+                        {/* «Сторож»: the HUB names the employee to managers only; push texts never do. */}
+                        {a.staff ? ` · Сотрудник: ${a.staff}` : ''}
+                      </span>
                     </div>
                     {props.canResolveAlerts && (
                       <button type="button" className="btn btn-small" disabled={props.busy} onClick={() => props.onResolveAlert(a.id)}>

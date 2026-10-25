@@ -23,6 +23,7 @@ import type { Db } from './db.ts';
 import { afterCommit, all, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import type { HubEvents } from './events.ts';
+import { guardCancel, guardDiscount, guardRefund } from './guard.ts';
 import { record } from './journal.ts';
 import type { SessionService } from './sessions.ts';
 import { clubId, requireOpenShift } from './shifts.ts';
@@ -280,6 +281,7 @@ export class CheckService {
           entityId: check.id,
           data: { kind: d.kind, value: d.value, amount, reason, subtotal: before.subtotal },
         });
+        guardDiscount(db, now, { checkId: check.id, number: check.number, amount, subtotal: before.subtotal, actor: input.actor });
       }
       afterCommit(db, () => this.#events.changed({ kind: 'check' }));
       return loadCheck(db, check.id);
@@ -381,6 +383,7 @@ export class CheckService {
         entityId: check.id,
         data: { number: check.number, shiftId: shift.id, method: input.method, amount: input.amount, reason, approvedBy },
       });
+      guardRefund(db, now, { checkId: check.id, amount: input.amount, actor: input.actor, approvedBy });
       reverseLoyaltyOnRefund(db, check.id, input.actor, now);
       this.#touch(check.id, now);
       afterCommit(db, () => this.#events.changed({ kind: 'check' }));
@@ -445,6 +448,7 @@ export class CheckService {
         entityId: s.id,
         data: { tableId: s.table_id, amount: s.amount, checkId: s.check_id, reason, approvedBy },
       });
+      guardCancel(db, now, input.actor);
       afterCommit(db, () => this.#events.changed({ kind: 'session', tableId: s.table_id }));
       return loadSession(db, s.id, now);
     });

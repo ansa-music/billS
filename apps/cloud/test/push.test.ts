@@ -4,6 +4,7 @@ import type { CloudLoginResponse, CreateOwnerKeyResponse, DeviceView, PushSettin
 import { parseLoginQr } from '@bills/domain';
 import type { PushMessage, PushSender } from '../src/push.ts';
 import { LEGACY_DEVICE_ERROR, pushSenderFromEnv, runWatchdogs } from '../src/push.ts';
+import { alertText } from '../src/telegram.ts';
 import type { TestCloud } from './helpers.ts';
 import { clubIdOf, cloud, event, HOUR, HUB1, HUB2, login, MONDAY_NOON, sendEvents } from './helpers.ts';
 
@@ -100,6 +101,53 @@ test('an alert from the HUB reaches the phone once', async (t) => {
     ['LIGHT_WITHOUT_GAME', 'POWER_ON_BATTERY', 'POWER_CRITICAL'],
   );
   assert.deepEqual(await queueStatuses(c), ['LIGHT_WITHOUT_GAME:SENT', 'POWER_CRITICAL:SENT', 'POWER_ON_BATTERY:SENT']);
+});
+
+/** What a HUB queues for «Сторож» (apps/hub/src/guard.ts): the text has no names. */
+const GUARD_ALERTS: Array<[kind: string, tableId: string | null, message: string, title: string]> = [
+  ['REFUND_SUSPICIOUS', null, 'Счёт №12: возврат 6 000 ₸ (100% оплаты). Проверьте причину возврата — возможно, ошибка при вводе.', 'Крупный или поздний возврат'],
+  ['CANCELS_ABOVE_NORMAL', null, 'Много отмен за смену у одного сотрудника: отменено 4 из 20 заказов и игр. Возможно, ошибка при вводе — проверьте причины в журнале.', 'Много отмен за смену'],
+  ['CASH_DISCREPANCY', null, 'Смена №7 закрыта с расхождением: не хватает 1 500 ₸ (ожидалось 10 000 ₸, посчитано 8 500 ₸). Возможно, ошибка при пересчёте — проверьте Z-отчёт.', 'Расхождение кассы при закрытии смены'],
+  ['MANUAL_MODE_LONG', null, 'Ручной режим ламп включён уже 16 мин: пока он включён, свет над столами не проверяется.', 'Ручной режим ламп включён давно'],
+  ['DISCOUNTS_ABOVE_NORMAL', null, 'Счёт №3: скидка 800 ₸ — 40% счёта, больше лимита 30%.', 'Большая скидка или много скидок'],
+  ['TABLE_REOPENED_QUICKLY', 'table-1', 'Стол 1: игру остановили и через 40 с открыли снова (до этого играли 50 мин).', 'Стол закрыли и сразу открыли снова'],
+];
+
+test('«Сторож»: every guard alert from the HUB is projected to the push queue and reaches the phone once, with its own title', async (t) => {
+  const push = recordingSender();
+  const c = await cloud(t, { sender: push.sender });
+  const token = await appLogin(c);
+  await registerPhone(c, token);
+  const clubId = await clubIdOf(c, HUB1.id);
+
+  const batch = GUARD_ALERTS.map(([kind, tableId, message], i) =>
+    event(i + 1, MONDAY_NOON + i, 'alert.raised', `g-${i + 1}`, { kind, tableId, sessionId: null, message, guard: true }, { actor: 'system' }),
+  );
+  await sendEvents(c, HUB1, batch);
+  await sendEvents(c, HUB1, batch); // a resent batch: no second push
+  await c.push.flush();
+  assert.deepEqual(
+    push.sent.map((m) => [m.data.kind, m.title, m.body]),
+    GUARD_ALERTS.map(([kind, , message, title]) => [kind, `Клуб «Демо»: ${title}`, message]),
+  );
+  for (const [i, m] of push.sent.entries()) assert.deepEqual(m.data, { kind: GUARD_ALERTS[i]![0], clubId, alertId: `g-${i + 1}` });
+  const alerts = await c.db.all<{ kind: string; table_id: string | null }>('SELECT kind, table_id FROM alerts ORDER BY at');
+  assert.deepEqual(alerts.map((a) => [a.kind, a.table_id]), GUARD_ALERTS.map(([kind, tableId]) => [kind, tableId]));
+
+  // The owner can switch a guard kind off like any other.
+  const put = await bearer<PushSettingsView>(c, token, 'PUT', '/api/owner/push/rules', { rules: [{ kind: 'DISCOUNTS_ABOVE_NORMAL', clubId: null, enabled: false }] });
+  assert.equal(put.status, 200);
+  assert.ok(put.body.kinds.filter((k) => k.guard).length === GUARD_ALERTS.length);
+  await sendEvents(c, HUB1, [event(20, MONDAY_NOON + HOUR, 'alert.raised', 'g-20', { kind: 'DISCOUNTS_ABOVE_NORMAL', tableId: null, message: 'Много ручных скидок за смену у одного сотрудника: 3.' }, { actor: 'system' })]);
+  await c.push.flush();
+  assert.equal(push.sent.length, GUARD_ALERTS.length);
+
+  // Telegram: money and the till are 🟠, the rest 🟡; the text is the HUB's, without names.
+  assert.deepEqual(
+    push.sent.map((m) => alertText(m).slice(0, 2)),
+    ['🟠', '🟡', '🟠', '🟠', '🟡', '🟡'],
+  );
+  assert.equal(alertText(push.sent[2]!), `🟠 <b>Клуб «Демо»: Расхождение кассы при закрытии смены</b>\n${GUARD_ALERTS[2]![2]}`);
 });
 
 test('rules: per kind for all clubs, a club rule overrides, quiet kinds are off by default', async (t) => {

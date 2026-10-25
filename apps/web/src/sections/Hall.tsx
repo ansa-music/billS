@@ -27,6 +27,7 @@ import { Popover } from '../Shell.tsx';
 import { TableCard } from '../TableCard.tsx';
 import { ShiftBanner } from '../cash/ShiftBanner.tsx';
 import { useHub, useLive } from '../useHub.tsx';
+import { GuestRequestsPanel } from '../guest/GuestRequestsPanel.tsx';
 
 type HallView = 'plan' | 'cards';
 const VIEW_KEY = 'bills.hallView';
@@ -435,6 +436,7 @@ export function HallSection() {
         </EmptyState>
       )}
       <HallSummary dayRevenue={dayRevenue} />
+      <GuestRequestsPanel />
 
       <div className="hall-bar">
         <HallFilterChips tables={state.tables} alerts={alerts} filter={filter} onFilter={setFilter} />

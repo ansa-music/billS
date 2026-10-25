@@ -33,6 +33,8 @@ export interface Draft {
   lines: Line[];
   service: CounterService;
   guestName: string;
+  /** Loaded from an order ahead (guest QR page): paying it takes that request. */
+  guestRequestId?: string | undefined;
 }
 
 export const emptyDraft = (service: CounterService = 'TAKEAWAY'): Draft => ({ lines: [], service, guestName: '' });

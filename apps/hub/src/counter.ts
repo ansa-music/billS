@@ -29,6 +29,7 @@ import { applyLoyalty, checkLoyaltyView, dropLoyaltyDiscount } from './loyalty.t
 import { afterCommit, all, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import type { HubEvents } from './events.ts';
+import { guardCancel } from './guard.ts';
 import { record } from './journal.ts';
 import { auditLines, insertOrderLines, parseOptionNames, priceOrderLines, returnOrderStock } from './order-lines.ts';
 import { addDays } from './reports.ts';
@@ -297,6 +298,7 @@ export class CounterService {
           checkId: order.check_id,
         },
       });
+      guardCancel(db, now, input.actor);
       // A check paid and fully refunded keeps its lines as history; an open one lets the order go.
       if (order.check_id && order.status === 'OPEN') {
         dropLoyaltyDiscount(db, order.check_id, input.actor, now, 'order_cancelled');

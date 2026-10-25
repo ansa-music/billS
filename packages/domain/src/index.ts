@@ -24,3 +24,4 @@ export * from './cafe.ts';
 export * from './loyalty.ts';
 export * from './insights.ts';
 export * from './stock-forecast.ts';
+export * from './guest.ts';

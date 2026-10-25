@@ -36,6 +36,8 @@ import { earnedLine, giftOrdinal, guestChip, loyaltyOf } from '../loyalty/model.
 import { Loading } from '../ui.tsx';
 import { useHub } from '../useHub.tsx';
 import { createCounterOrder, optionsOf, useCachedCatalog } from './cafe.ts';
+import { takeGuestCounterOrder } from '../guest/api.ts';
+import { draftOfGuestOrder, PosGuestOrders } from '../guest/PosGuestOrders.tsx';
 import type { Draft, Held, Line } from './pos-model.ts';
 import {
   buildRequest,
@@ -374,9 +376,9 @@ export function PosPage() {
     retryKey.current = null;
     setPendingStock((m) => addStock(m, taken, 1));
 
-    createCounterOrder(actor, body, key)
+    (d.guestRequestId ? takeGuestCounterOrder(actor, d.guestRequestId, body, key) : createCounterOrder(actor, body, key))
       .then((res) => {
-        writeLast(d);
+        writeLast({ ...d, guestRequestId: undefined });
         recordHits(d.lines);
         setHitsVersion((v) => v + 1);
         setFlash((f) => (f?.id === id ? { ...f, state: 'ok', res, loyaltyNote: earnedLine(res.loyalty, loyalty, currency) } : f));
@@ -683,6 +685,15 @@ export function PosPage() {
               )}
             </header>
 
+            {mode === 'order' && (
+              <PosGuestOrders
+                loaded={new Set([draft.guestRequestId, ...held.map((h) => h.draft.guestRequestId)].filter((x): x is string => !!x))}
+                onLoad={(r) => {
+                  if (!empty) park();
+                  loadDraft(draftOfGuestOrder(r, draft.service));
+                }}
+              />
+            )}
             {held.length > 0 && mode === 'order' && (
               <div className="pos-held" role="group" aria-label="Отложенные заказы">
                 {held.map((h) => (

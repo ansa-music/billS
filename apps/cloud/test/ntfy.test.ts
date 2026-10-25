@@ -68,3 +68,25 @@ test('headerText keeps ASCII as is', () => {
   assert.equal(headerText('Hello'), 'Hello');
   assert.equal(decodeHeader(headerText('Привет')), 'Привет');
 });
+
+test('ntfy: «Сторож» kinds get their own emoji tag and priority', async () => {
+  const headers: Array<Record<string, string>> = [];
+  const fetch: PushFetch = async (_url, init) => {
+    headers.push(init.headers);
+    return { status: 200, text: async () => '{}' };
+  };
+  const sender = new NtfySender({ fetch });
+  const kinds: PushKind[] = ['REFUND_SUSPICIOUS', 'CASH_DISCREPANCY', 'MANUAL_MODE_LONG', 'CANCELS_ABOVE_NORMAL', 'DISCOUNTS_ABOVE_NORMAL', 'TABLE_REOPENED_QUICKLY'];
+  for (const kind of kinds) await sender.send({ token: TOPIC, platform: 'ntfy', title: 'Клуб', body: 'Проверьте', data: { kind, clubId: 'c' } });
+  assert.deepEqual(
+    headers.map((h) => [h.tags, h.priority]),
+    [
+      ['leftwards_arrow_with_hook', '4'],
+      ['moneybag', '4'],
+      ['wrench', '4'],
+      ['x', '3'],
+      ['label', '3'],
+      ['repeat', '3'],
+    ],
+  );
+});

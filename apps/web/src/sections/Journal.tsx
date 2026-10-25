@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { HubState, JournalCategory, JournalEntry, TableKind } from '@bills/domain';
-import { formatMoney, isRole, rolesLabel } from '@bills/domain';
+import type { GuestRequestKind, HubState, JournalCategory, JournalEntry, TableKind } from '@bills/domain';
+import { formatMoney, GUEST_REQUEST_KINDS, guestRequestSummary, isRole, rolesLabel } from '@bills/domain';
 import type { Role } from '@bills/domain';
 import { fetchJournal } from '../api.ts';
 import { EmptyState, SectionCard } from '../components.tsx';
@@ -131,6 +131,25 @@ function describe(e: JournalEntry, state: HubState): Described {
       const who = d.counterNumber !== undefined && d.counterNumber !== null ? `Заказ ${num(d.counterNumber)}` : `${table}: заказ`;
       return { title: `${who} отменён`, detail: `${money(d.total)}${str(d.reason) ? ` · ${str(d.reason)}` : ''}`, icon: 'close', cat: 'bar' };
     }
+    // «Страница гостя по QR» (guest.ts)
+    case 'guest.request_created':
+    case 'guest.request_accepted':
+    case 'guest.request_rejected': {
+      const kind = str(d.kind) as GuestRequestKind;
+      const what = guestRequestSummary({
+        kind: GUEST_REQUEST_KINDS.includes(kind) ? kind : 'WAITER',
+        minutes: typeof d.minutes === 'number' ? d.minutes : null,
+        itemCount: Array.isArray(d.items) ? (d.items as Array<{ qty?: unknown }>).reduce((s, i) => s + num(i.qty), 0) : 0,
+        guestName: str(d.guestName) || null,
+      });
+      const where = d.tableId ? `${table}: ` : '';
+      const verb = e.action === 'guest.request_created' ? 'гость просит' : e.action === 'guest.request_accepted' ? 'принято' : 'отклонено';
+      return { title: `${where}${what}`, detail: `${verb}${str(d.reason) ? ` · ${str(d.reason)}` : ''}`, icon: 'bell', cat: 'bar' };
+    }
+    case 'guest.link_rotated':
+      return { title: `${d.tableId ? table : 'Стойка'}: новый QR-код для гостей`, detail: 'старая наклейка больше не работает', icon: 'settings', cat: 'club' };
+    case 'guest.settings':
+      return { title: d.enabled ? 'Страница гостя по QR включена' : 'Страница гостя по QR выключена', icon: 'settings', cat: 'club' };
     case 'counter.stage': {
       const stage: Record<string, string> = { NEW: 'снова новый', PREPARING: 'готовится', READY: 'готов', ISSUED: 'выдан' };
       return { title: `Заказ ${num(d.counterNumber ?? d.number)}: ${stage[str(d.stage ?? d.to)] ?? str(d.stage ?? d.to)}`, icon: 'orders', cat: 'bar' };

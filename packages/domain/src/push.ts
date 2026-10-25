@@ -26,6 +26,7 @@ export type PushKind =
   | 'UPS_UNREACHABLE'
   | 'LAMP_FAILED'
   | 'PREPAID_NOT_STARTED'
+  | GuardAlertKind
   | 'OTHER';
 
 export interface PushKindInfo {
@@ -33,6 +34,8 @@ export interface PushKindInfo {
   label: string;
   /** Sent unless the owner switched it off. */
   defaultOn: boolean;
+  /** Raised by «Сторож» (suspicious operations at the till): the cabinet marks these. */
+  guard?: true;
 }
 
 /** In the order the cabinet lists them. */
@@ -46,6 +49,12 @@ export const PUSH_KINDS: readonly PushKindInfo[] = [
   { kind: 'UPS_UNREACHABLE', label: 'ИБП не отвечает', defaultOn: false },
   { kind: 'LAMP_FAILED', label: 'Лампа не включилась или не выключилась', defaultOn: false },
   { kind: 'PREPAID_NOT_STARTED', label: 'Оплаченная игра не началась', defaultOn: false },
+  { kind: 'REFUND_SUSPICIOUS', label: 'Крупный или поздний возврат', defaultOn: true, guard: true },
+  { kind: 'CANCELS_ABOVE_NORMAL', label: 'Много отмен за смену', defaultOn: true, guard: true },
+  { kind: 'CASH_DISCREPANCY', label: 'Расхождение кассы при закрытии смены', defaultOn: true, guard: true },
+  { kind: 'MANUAL_MODE_LONG', label: 'Ручной режим ламп включён давно', defaultOn: true, guard: true },
+  { kind: 'DISCOUNTS_ABOVE_NORMAL', label: 'Большая скидка или много скидок', defaultOn: true, guard: true },
+  { kind: 'TABLE_REOPENED_QUICKLY', label: 'Стол закрыли и сразу открыли снова', defaultOn: true, guard: true },
   { kind: 'OTHER', label: 'Прочие тревоги', defaultOn: false },
 ];
 
@@ -62,6 +71,12 @@ export function pushKindOfAlert(alertKind: string): PushKind {
     case 'POWER_CRITICAL':
     case 'UPS_UNREACHABLE':
     case 'PREPAID_NOT_STARTED':
+    case 'REFUND_SUSPICIOUS':
+    case 'CANCELS_ABOVE_NORMAL':
+    case 'CASH_DISCREPANCY':
+    case 'MANUAL_MODE_LONG':
+    case 'DISCOUNTS_ABOVE_NORMAL':
+    case 'TABLE_REOPENED_QUICKLY':
       return alertKind;
     case 'LAMP_ON_FAILED':
     case 'LAMP_OFF_FAILED':
@@ -69,6 +84,153 @@ export function pushKindOfAlert(alertKind: string): PushKind {
     default:
       return 'OTHER';
   }
+}
+
+// ---------------------------------------------------------------------------
+// «Сторож»: rules on the HUB about suspicious operations and lost money
+// ---------------------------------------------------------------------------
+
+/**
+ * Alert kinds raised by «Сторож» (apps/hub/src/guard.ts). They are counted offline on the
+ * HUB and reach the owner through the outbox → cloud → push / Telegram like any alert.
+ * Texts never accuse and never name a person: «проверьте», «возможно, ошибка при вводе».
+ */
+export type GuardAlertKind =
+  | 'REFUND_SUSPICIOUS'
+  | 'CANCELS_ABOVE_NORMAL'
+  | 'CASH_DISCREPANCY'
+  | 'MANUAL_MODE_LONG'
+  | 'DISCOUNTS_ABOVE_NORMAL'
+  | 'TABLE_REOPENED_QUICKLY';
+
+export const GUARD_ALERT_KINDS: readonly GuardAlertKind[] = [
+  'REFUND_SUSPICIOUS',
+  'CANCELS_ABOVE_NORMAL',
+  'CASH_DISCREPANCY',
+  'MANUAL_MODE_LONG',
+  'DISCOUNTS_ABOVE_NORMAL',
+  'TABLE_REOPENED_QUICKLY',
+];
+
+export function isGuardAlertKind(value: string): value is GuardAlertKind {
+  return (GUARD_ALERT_KINDS as readonly string[]).includes(value);
+}
+
+/** Club thresholds of «Сторож» (manager-only, «Настройки» → «Сторож»). Money in minor units. */
+export interface GuardSettings {
+  /** Refund after payment: at least `minAmount`, or at least `minPercent` % of what was paid, or `lateMinutes` after the payment. */
+  refund: { enabled: boolean; minAmount: number; minPercent: number; lateMinutes: number };
+  /** Cancelled orders and games by one employee in a shift: at least `minCount` and at least `minPercent` % of their orders. */
+  cancels: { enabled: boolean; minCount: number; minPercent: number };
+  /** Cash counted at shift close differs from the expected by at least `minDifference`. */
+  cash: { enabled: boolean; minDifference: number };
+  /** Emergency manual lamp mode stays on longer than `minutes` (lamps are not checked meanwhile). */
+  manualMode: { enabled: boolean; minutes: number };
+  /** A manual discount of at least `maxPercent` % of the check, or `perShift` manual discounts by one person in a shift. */
+  discounts: { enabled: boolean; maxPercent: number; perShift: number };
+  /** A table stopped and opened again within `minutes` (billiards): time may have been reset. */
+  reopen: { enabled: boolean; minutes: number };
+}
+
+export const DEFAULT_GUARD_SETTINGS: GuardSettings = {
+  refund: { enabled: true, minAmount: 5_000_00, minPercent: 30, lateMinutes: 30 },
+  cancels: { enabled: true, minCount: 3, minPercent: 10 },
+  cash: { enabled: true, minDifference: 1_000_00 },
+  manualMode: { enabled: true, minutes: 15 },
+  discounts: { enabled: true, maxPercent: 30, perShift: 3 },
+  reopen: { enabled: true, minutes: 2 },
+};
+
+/** Allowed ranges of the numbers (the HUB rejects anything outside, the form shows them). */
+export const GUARD_LIMITS = {
+  minAmount: [0, 100_000_000_00],
+  percent: [1, 100],
+  lateMinutes: [1, 24 * 60],
+  minCount: [1, 100],
+  minDifference: [0, 100_000_000_00],
+  manualMinutes: [1, 24 * 60],
+  perShift: [1, 100],
+  reopenMinutes: [1, 60],
+} as const satisfies Record<string, readonly [number, number]>;
+
+const intIn = (v: unknown, [lo, hi]: readonly [number, number], fallback: number): number =>
+  typeof v === 'number' && Number.isInteger(v) && v >= lo && v <= hi ? v : fallback;
+const bool = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
+const obj = (v: unknown): Record<string, unknown> => (typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : {});
+
+/** Fills gaps and drops bad values with the defaults (stored JSON may be old or hand-edited). */
+export function normalizeGuardSettings(raw: unknown, base: GuardSettings = DEFAULT_GUARD_SETTINGS): GuardSettings {
+  const r = obj(raw);
+  const refund = obj(r.refund);
+  const cancels = obj(r.cancels);
+  const cash = obj(r.cash);
+  const manual = obj(r.manualMode);
+  const discounts = obj(r.discounts);
+  const reopen = obj(r.reopen);
+  const L = GUARD_LIMITS;
+  return {
+    refund: {
+      enabled: bool(refund.enabled, base.refund.enabled),
+      minAmount: intIn(refund.minAmount, L.minAmount, base.refund.minAmount),
+      minPercent: intIn(refund.minPercent, L.percent, base.refund.minPercent),
+      lateMinutes: intIn(refund.lateMinutes, L.lateMinutes, base.refund.lateMinutes),
+    },
+    cancels: {
+      enabled: bool(cancels.enabled, base.cancels.enabled),
+      minCount: intIn(cancels.minCount, L.minCount, base.cancels.minCount),
+      minPercent: intIn(cancels.minPercent, L.percent, base.cancels.minPercent),
+    },
+    cash: {
+      enabled: bool(cash.enabled, base.cash.enabled),
+      minDifference: intIn(cash.minDifference, L.minDifference, base.cash.minDifference),
+    },
+    manualMode: {
+      enabled: bool(manual.enabled, base.manualMode.enabled),
+      minutes: intIn(manual.minutes, L.manualMinutes, base.manualMode.minutes),
+    },
+    discounts: {
+      enabled: bool(discounts.enabled, base.discounts.enabled),
+      maxPercent: intIn(discounts.maxPercent, L.percent, base.discounts.maxPercent),
+      perShift: intIn(discounts.perShift, L.perShift, base.discounts.perShift),
+    },
+    reopen: {
+      enabled: bool(reopen.enabled, base.reopen.enabled),
+      minutes: intIn(reopen.minutes, L.reopenMinutes, base.reopen.minutes),
+    },
+  };
+}
+
+/** Deep partial for PUT /api/guard/settings. */
+export type GuardSettingsPatch = { [K in keyof GuardSettings]?: Partial<GuardSettings[K]> };
+
+/** Why a refund looks unusual; empty when it does not. `paid` = money taken on the check, `paidAt` = last payment. */
+export function refundReasons(
+  s: GuardSettings['refund'],
+  refund: { amount: number; paid: number; paidAt: number | null; at: number },
+): Array<'amount' | 'share' | 'late'> {
+  if (!s.enabled || refund.amount <= 0) return [];
+  const out: Array<'amount' | 'share' | 'late'> = [];
+  if (refund.amount >= s.minAmount) out.push('amount');
+  if (refund.paid > 0 && refund.amount * 100 >= s.minPercent * refund.paid) out.push('share');
+  if (refund.paidAt !== null && refund.at - refund.paidAt > s.lateMinutes * 60_000) out.push('late');
+  return out;
+}
+
+/** Cancellations by one person in a shift are above normal: both the count and the share of their own orders. */
+export function cancelsAboveNormal(s: GuardSettings['cancels'], c: { cancelled: number; created: number }): boolean {
+  if (!s.enabled || c.cancelled < s.minCount) return false;
+  return c.cancelled * 100 >= s.minPercent * Math.max(c.created, c.cancelled);
+}
+
+/** Cash discrepancy at shift close is at or above the threshold (shortage or surplus). */
+export function cashDiscrepancyAlert(s: GuardSettings['cash'], difference: number | null): boolean {
+  return s.enabled && difference !== null && difference !== 0 && Math.abs(difference) >= s.minDifference;
+}
+
+/** A manual discount is large: its amount is at least `maxPercent` % of the check before the discount. */
+export function discountTooLarge(s: GuardSettings['discounts'], d: { amount: number; subtotal: number }): boolean {
+  if (!s.enabled || d.amount <= 0 || d.subtotal <= 0) return false;
+  return d.amount * 100 >= s.maxPercent * d.subtotal;
 }
 
 // ---------------------------------------------------------------------------

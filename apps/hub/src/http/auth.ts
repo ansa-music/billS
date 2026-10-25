@@ -27,8 +27,13 @@ const PUBLIC = new Set([
   // The coffee shop's guest screen: order numbers and first names, nothing else.
   '/api/counter/board',
 ]);
-/** Endpoints a browser cannot send headers to (SSE) or that exist only with the simulator. */
-const PUBLIC_PREFIXES = ['/api/events', '/api/dev/'];
+/** Endpoints a browser cannot send headers to (SSE), that exist only with the simulator, or the guest QR page. */
+const PUBLIC_PREFIXES = [
+  '/api/events',
+  '/api/dev/',
+  // «Страница гостя по QR»: the unguessable token in the path is the key (routes/guest.ts); one table, requests only.
+  '/api/guest/',
+];
 
 function isPublic(url: string): boolean {
   const path = url.split('?', 1)[0] ?? url;

@@ -1,7 +1,7 @@
 import type { OutgoingHttpHeaders } from 'node:http';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
-import { BillingError, DEMO_KEYS, originAllowed } from '@bills/domain';
+import { BillingError, can, DEMO_KEYS, originAllowed } from '@bills/domain';
 import type { DemoInfo } from '@bills/domain';
 import { HubError } from '../errors.ts';
 import type { Hub } from '../hub.ts';
@@ -15,16 +15,18 @@ import type { VersionInfo } from '../version.ts';
 import { versionInfo } from '../version.ts';
 import { registerAuth } from './auth.ts';
 import type { AuthHookOptions } from './auth.ts';
-import { emptyBody, guard, runCommand } from './command.ts';
+import { actorOf, emptyBody, guard, runCommand } from './command.ts';
 import { registerHallRoutes } from './hall-routes.ts';
 import { registerMoneyRoutes } from './money-routes.ts';
 import { registerBarRoutes } from './routes/bar.ts';
 import { registerCounterRoutes } from './routes/counter.ts';
+import { registerGuestRoutes } from './routes/guest.ts';
 import { registerLicenseRoutes } from './routes/license.ts';
 import { registerLoyaltyRoutes } from './routes/loyalty.ts';
 import { registerTemplateRoutes } from './routes/templates.ts';
 import { registerReportRoutes } from './routes/reports.ts';
 import { registerInsightsRoutes } from './routes/insights.ts';
+import { registerGuardRoutes } from './routes/guard.ts';
 import { registerSettingsRoutes } from './routes/settings.ts';
 import { registerSetupRoutes } from './routes/setup.ts';
 import type { SetupController } from './routes/setup.ts';
@@ -130,7 +132,8 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
 
   registerHallRoutes(app, hub, runCommand);
 
-  app.get('/api/state', { preHandler: guard('hall.view') }, async () => hub.state());
+  // Managers also see who is behind a «Сторож» alert (club.edit); everyone else — the text only.
+  app.get('/api/state', { preHandler: guard('hall.view') }, async (req) => hub.state({ staffNames: can(actorOf(req).roles, 'club.edit') }));
 
   app.post<{ Params: { tableId: string }; Body: { tariffId?: string; prepaidMinutes?: number } }>(
     '/api/tables/:tableId/open',
@@ -318,10 +321,12 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   registerSettingsRoutes(app, hub);
   registerBarRoutes(app, hub);
   registerCounterRoutes(app, hub);
+  registerGuestRoutes(app, hub);
   registerLoyaltyRoutes(app, hub);
   registerStaffRoutes(app, hub);
   registerReportRoutes(app, hub);
   registerInsightsRoutes(app, hub);
+  registerGuardRoutes(app, hub);
   registerLicenseRoutes(app, hub);
   registerTemplateRoutes(app, hub);
 

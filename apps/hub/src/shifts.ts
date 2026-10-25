@@ -13,6 +13,7 @@ import type { Db } from './db.ts';
 import { afterCommit, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import type { HubEvents } from './events.ts';
+import { guardShiftClosed } from './guard.ts';
 import { record } from './journal.ts';
 import type { ShiftRow } from './views.ts';
 import { cashMovements, loadChecksWhere, openShiftRow, shiftLedger, toShiftView } from './views.ts';
@@ -232,6 +233,14 @@ export class ShiftService {
           note,
           net: report.net,
         },
+      });
+      guardShiftClosed(db, now, {
+        shiftId: shift.id,
+        number: shift.number,
+        expectedCash: report.expectedCash,
+        countedCash: input.countedCash,
+        difference: report.difference,
+        actor: input.actor,
       });
       afterCommit(db, () => this.#events.changed({ kind: 'shift' }));
       return { shift: toShiftView(db, loadShiftRow(db, shift.id)), report };

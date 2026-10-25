@@ -10,10 +10,12 @@ import { ClubSection } from './settings/ClubSection.tsx';
 import { DisplaySettings } from './settings/DisplaySettings.tsx';
 import { LicenseSection } from './settings/LicenseSection.tsx';
 import { LoyaltySection } from './settings/LoyaltySection.tsx';
+import { GuardSection } from './settings/GuardSection.tsx';
 import { RulesSettings } from './settings/RulesSettings.tsx';
 import { TablesEditor } from './settings/TablesEditor.tsx';
 import { TariffsEditor } from './settings/TariffEditor.tsx';
 import { TlsCard } from '../sections/TlsCard.tsx';
+import { GuestQrSection } from '../guest/GuestQrSection.tsx';
 import './settings.css';
 
 const TABS = [
@@ -23,6 +25,7 @@ const TABS = [
   { id: 'display', title: 'Экран зала' },
   { id: 'rules', title: 'Правила' },
   { id: 'loyalty', title: 'Лояльность' },
+  { id: 'guard', title: 'Сторож' },
   { id: 'devices', title: 'Установка на планшеты' },
   { id: 'license', title: 'Лицензия' },
 ] as const;
@@ -42,6 +45,7 @@ export function ClubSettingsPage() {
   const tabs = TABS.filter(
     (t) =>
       (t.id !== 'license' || roleCan('license.view')) &&
+      (t.id !== 'guard' || roleCan('club.edit')) &&
       (t.id !== 'devices' || can('equipment.view')) &&
       !(cafe && BILLIARDS_ONLY.includes(t.id)),
   ).map(
@@ -96,6 +100,7 @@ export function ClubSettingsPage() {
           <>
             <ClubSection {...props} canEdit={can('club.edit')} />
             <BusinessSection {...props} canEdit={can('club.edit')} />
+            <GuestQrSection />
           </>
         );
       case 'tables':
@@ -108,6 +113,8 @@ export function ClubSettingsPage() {
         return <RulesSettings {...props} canEdit={can('rules.edit')} />;
       case 'loyalty':
         return <LoyaltySection {...props} canEdit={can('club.edit')} />;
+      case 'guard':
+        return <GuardSection {...props} canEdit={can('club.edit')} />;
       case 'license':
       case 'devices':
         return null; // rendered below: they do not need GET /api/club

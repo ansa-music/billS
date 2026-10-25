@@ -279,3 +279,33 @@ test('telegram summary: at 21:00 club time once a day — revenue, games, checks
   e.clock.now = MONDAY_NOON + 48 * HOUR + 9 * HOUR; // Wednesday 21:00
   assert.equal((await notify()).body.summaries, 0);
 });
+
+test('telegram «Сторож»: guard alerts from the HUB reach the chat with severity and the HUB text (no names); the light-without-game alert reads clearly', async (t) => {
+  const { e, tg, owner } = await setup(t);
+  await hook(e, 1001, `/start ${await linkCode(e, owner)}`);
+  const sync = (events: SyncEvent[]) =>
+    e.call(handleSync, 'POST', '/sync/events', { headers: { authorization: `Bearer ${HUB1.key}` }, body: { hubId: HUB1.id, settingsVersion: 0, events } });
+
+  const guard: Array<[string, string | null, string]> = [
+    ['REFUND_SUSPICIOUS', null, 'Счёт №12: возврат 6 000 ₸ (100% оплаты). Проверьте причину возврата — возможно, ошибка при вводе.'],
+    ['CASH_DISCREPANCY', null, 'Смена №7 закрыта с расхождением: не хватает 1 500 ₸ (ожидалось 10 000 ₸, посчитано 8 500 ₸). Возможно, ошибка при пересчёте — проверьте Z-отчёт.'],
+    ['CANCELS_ABOVE_NORMAL', null, 'Много отмен за смену у одного сотрудника: отменено 4 из 20 заказов и игр. Возможно, ошибка при вводе — проверьте причины в журнале.'],
+    ['TABLE_REOPENED_QUICKLY', 't2', 'Стол 2: игру остановили и через 40 с открыли снова (до этого играли 50 мин). Проверьте, что прошлая игра оплачена, — возможно, ошибка при вводе.'],
+    ['MANUAL_MODE_LONG', null, 'Ручной режим ламп включён уже 16 мин: пока он включён, свет над столами не проверяется.'],
+    ['DISCOUNTS_ABOVE_NORMAL', null, 'Много ручных скидок за смену у одного сотрудника: 3. Возможно, так и задумано — проверьте причины скидок в журнале.'],
+    ['LIGHT_WITHOUT_GAME', 't3', 'Стол 3: свет горит без игры уже 2 мин — проверьте стол'],
+  ];
+  const before = tg.messages('1001').length;
+  await sync(guard.map(([kind, tableId, message], i) => ev(i + 1, MONDAY_NOON + i, 'alert.raised', `g-${i + 1}`, { kind, tableId, sessionId: null, message, guard: true })));
+  assert.deepEqual(tg.messages('1001').slice(before).map((m) => m.text), [
+    `🟠 <b>Клуб «Демо»: Крупный или поздний возврат</b>\n${guard[0]![2]}`,
+    `🟠 <b>Клуб «Демо»: Расхождение кассы при закрытии смены</b>\n${guard[1]![2]}`,
+    `🟡 <b>Клуб «Демо»: Много отмен за смену</b>\n${guard[2]![2]}`,
+    `🟡 <b>Клуб «Демо»: Стол закрыли и сразу открыли снова</b>\n${guard[3]![2]}`,
+    `🟠 <b>Клуб «Демо»: Ручной режим ламп включён давно</b>\n${guard[4]![2]}`,
+    `🟡 <b>Клуб «Демо»: Большая скидка или много скидок</b>\n${guard[5]![2]}`,
+    `🟠 <b>Клуб «Демо»: Свет горит без игры</b>\n${guard[6]![2]}`,
+  ]);
+  const rows = await e.s.db.all<{ kind: string; status: string }>("SELECT kind, status FROM push_queue WHERE alert_id LIKE 'g-%' ORDER BY at");
+  assert.deepEqual(rows.map((r) => `${r.kind}:${r.status}`), guard.map(([kind]) => `${kind}:SENT`));
+});

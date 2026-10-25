@@ -73,6 +73,8 @@ export interface AlertView {
   kind: string;
   tableId: string | null;
   message: string;
+  /** «Сторож»: who did it — only for managers on the HUB, never in push texts. */
+  staff?: string | null;
 }
 
 /** Emergency mode: lamps are switched by hand, games start at the button press. */

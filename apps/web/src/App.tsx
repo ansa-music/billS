@@ -38,6 +38,7 @@ import { BaristaPage } from './cafe/Barista.tsx';
 import { BoardPage } from './cafe/Board.tsx';
 import { CafeReports } from './cafe/Reports.tsx';
 import { PosPage } from './cafe/Pos.tsx';
+import { GuestPage } from './guest/GuestPage.tsx';
 import { ConnectPage } from './onboarding/Connect.tsx';
 import { CafeNeedsCounterModule } from './onboarding/CafeLicense.tsx';
 import { useSetupGate } from './onboarding/setup.ts';
@@ -79,7 +80,7 @@ export function App() {
   const commands = useHallCommands(actor, hub.refresh, setToast);
   useWakeLock();
   // A fresh club HUB, not connected to the cabinet yet: «Подключите кассу к кабинету» comes before the login.
-  const setup = useSetupGate(!staff && path !== '/board');
+  const setup = useSetupGate(!staff && path !== '/board' && !path.startsWith('/g/'));
 
   // Old addresses from bookmarks and notes.
   useEffect(() => {
@@ -132,6 +133,9 @@ export function App() {
   const signOut = useCallback(() => {
     void logout().finally(() => navigate('/login'));
   }, [logout]);
+
+  // «Страница гостя по QR» (#/g/<token>): a guest's phone, public, outside the shell.
+  if (path.startsWith('/g/')) return <GuestPage token={path.slice(3)} />;
 
   // The guest board for a TV in the coffee shop: read-only, full screen, works without a key.
   if (path === '/board') {

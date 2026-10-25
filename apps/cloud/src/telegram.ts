@@ -140,6 +140,13 @@ const SEVERITY: Partial<Record<PushKind, string>> = {
   UPS_UNREACHABLE: '🟡',
   LAMP_FAILED: '🟡',
   PREPAID_NOT_STARTED: '🟡',
+  // «Сторож»: money and the till come first, then what is worth a look.
+  REFUND_SUSPICIOUS: '🟠',
+  CASH_DISCREPANCY: '🟠',
+  MANUAL_MODE_LONG: '🟠',
+  CANCELS_ABOVE_NORMAL: '🟡',
+  DISCOUNTS_ABOVE_NORMAL: '🟡',
+  TABLE_REOPENED_QUICKLY: '🟡',
 };
 
 /** One alert: "🟠 <b>Клуб «Демо»: Свет горит без игры</b>\nСтол 3 …". The title already names the venue. */

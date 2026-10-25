@@ -763,6 +763,12 @@ const NTFY_PRIORITY: Partial<Record<PushKind, number>> = {
   UPS_UNREACHABLE: 4,
   LAMP_FAILED: 4,
   PREPAID_NOT_STARTED: 4,
+  REFUND_SUSPICIOUS: 4,
+  CASH_DISCREPANCY: 4,
+  MANUAL_MODE_LONG: 4,
+  CANCELS_ABOVE_NORMAL: 3,
+  DISCOUNTS_ABOVE_NORMAL: 3,
+  TABLE_REOPENED_QUICKLY: 3,
 };
 
 /** ntfy tags that are emoji short codes, shown in front of the title. */
@@ -776,6 +782,12 @@ const NTFY_TAGS: Partial<Record<PushKind, string>> = {
   UPS_UNREACHABLE: 'battery',
   LAMP_FAILED: 'bulb',
   PREPAID_NOT_STARTED: 'hourglass',
+  REFUND_SUSPICIOUS: 'leftwards_arrow_with_hook',
+  CASH_DISCREPANCY: 'moneybag',
+  MANUAL_MODE_LONG: 'wrench',
+  CANCELS_ABOVE_NORMAL: 'x',
+  DISCOUNTS_ABOVE_NORMAL: 'label',
+  TABLE_REOPENED_QUICKLY: 'repeat',
 };
 
 /** HTTP headers are Latin-1: non-ASCII text goes as an RFC 2047 encoded-word, which ntfy decodes. */

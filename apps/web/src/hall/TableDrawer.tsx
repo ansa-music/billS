@@ -406,7 +406,10 @@ export function TableDrawer({
       {(alert || table.lamp.reported === 'UNKNOWN') && (
         <div className="drawer-alert" role="alert">
           <Icon name="alert" size={18} />
-          <p>{alert?.message ?? 'Лампа не ответила — проверьте свет на столе'}</p>
+          <p>
+            {alert?.message ?? 'Лампа не ответила — проверьте свет на столе'}
+            {alert?.staff && <span className="muted"> Сотрудник: {alert.staff}</span>}
+          </p>
           {alert && hub.can('alert.resolve') && (
             <button
               type="button"

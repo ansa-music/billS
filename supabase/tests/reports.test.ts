@@ -186,6 +186,7 @@ test('owner_push_settings / owner_set_push_rules equal push.ts settings() / save
     { kind: 'HUB_OFFLINE', clubId: CLUB_ALMATY.id, enabled: false },
     { kind: 'POWER_ON_BATTERY', clubId: null, enabled: true }, // duplicate: the first one wins
     { kind: 'LAMP_FAILED', clubId: null, enabled: true },
+    { kind: 'REFUND_SUSPICIOUS', clubId: CLUB_ALMATY.id, enabled: false }, // «Сторож» kinds are rules like any other
   ];
   await saveRules(sqlite, OWNER_A.id, rules);
   const expected = json(await push.settings(OWNER_A.id));
