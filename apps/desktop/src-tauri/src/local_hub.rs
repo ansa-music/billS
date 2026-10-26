@@ -3,7 +3,7 @@
 //!
 //! The installers carry `hub-bundle/` (scripts/bundle-hub.mjs): the official Node.js binary and
 //! the HUB bundled into one file, plus its SQL migrations and the hall screen. The app starts
-//!   <bundle>/node --env-file-if-exists=<data>/hub.env <bundle>/src/main.mjs
+//!   <bundle>/node [--env-file-if-exists=<data>/hub.env] <bundle>/src/main.mjs
 //! with HUB_DB_PATH=<data>/hub.db, HUB_HOST=0.0.0.0, HUB_PORT=4310, HUB_WEB_DIST=<bundle>/web.
 //! <data> is %LOCALAPPDATA%\TS\hub on Windows (the NSIS uninstaller never removes it) and
 //! ~/.local/share/TS/hub on Linux; the HUB log goes to <data>/logs/hub.log.
@@ -120,10 +120,14 @@ pub fn env_vars(bundle: &Bundle, data: &Path) -> Vec<(&'static str, OsString)> {
 
 /// The one command line of the built-in HUB (the app, --hub-only and the CI smoke test).
 pub fn command(bundle: &Bundle, node: &Path, data: &Path) -> Command {
-  let mut env_file = OsString::from("--env-file-if-exists=");
-  env_file.push(data.join("hub.env"));
   let mut cmd = Command::new(node);
-  cmd.arg(env_file).arg(&bundle.main).current_dir(data).env_remove("NODE_OPTIONS").stdin(Stdio::null());
+  // Only when the file exists: otherwise Node logs «hub.env not found» on every start.
+  if data.join("hub.env").is_file() {
+    let mut env_file = OsString::from("--env-file-if-exists=");
+    env_file.push(data.join("hub.env"));
+    cmd.arg(env_file);
+  }
+  cmd.arg(&bundle.main).current_dir(data).env_remove("NODE_OPTIONS").stdin(Stdio::null());
   for (key, value) in env_vars(bundle, data) {
     cmd.env(key, value);
   }
@@ -562,15 +566,20 @@ mod tests {
 
   #[test]
   fn command_runs_the_bundle_with_the_env_file_of_the_data_folder() {
-    let data = PathBuf::from("/data/hub");
+    let data = std::env::temp_dir().join(format!("ts-hub-cmd-test-{}", std::process::id()));
+    fs::create_dir_all(&data).unwrap();
     let b = bundle();
     let cmd = command(&b, &b.node, &data);
     assert_eq!(cmd.get_program(), b.node.as_os_str());
+    assert_eq!(cmd.get_args().collect::<Vec<_>>(), vec![b.main.as_os_str()]);
+    assert_eq!(cmd.get_current_dir(), Some(data.as_path()));
+    assert!(cmd.get_envs().any(|(k, v)| k == "NODE_OPTIONS" && v.is_none()));
+    fs::write(data.join("hub.env"), b"HUB_LAMP_DRIVER=simulator\n").unwrap();
+    let cmd = command(&b, &b.node, &data);
     let args: Vec<_> = cmd.get_args().collect();
     assert_eq!(args[0], OsString::from(format!("--env-file-if-exists={}", data.join("hub.env").display())));
     assert_eq!(args[1], b.main.as_os_str());
-    assert_eq!(cmd.get_current_dir(), Some(data.as_path()));
-    assert!(cmd.get_envs().any(|(k, v)| k == "NODE_OPTIONS" && v.is_none()));
+    fs::remove_dir_all(&data).unwrap();
   }
 
   #[test]
