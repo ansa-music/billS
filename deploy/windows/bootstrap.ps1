@@ -35,6 +35,8 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+# Полоса прогресса Invoke-WebRequest в PowerShell 5.1 замедляет скачивание в десятки раз.
+$ProgressPreference = 'SilentlyContinue'
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $work = Join-Path $env:TEMP "bills-bootstrap-$stamp"

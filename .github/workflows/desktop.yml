@@ -1,4 +1,14 @@
-# TS для ПК (apps/desktop, Tauri): установщики .msi (Windows) и .deb (Ubuntu/Debian).
+# TS для ПК (apps/desktop, Tauri): установщики setup.exe и .msi (Windows), .deb (Ubuntu/Debian).
+# В каждом установщике — встроенный HUB (scripts/bundle-hub.mjs): официальный Node.js 24 и HUB одним
+# файлом. «Это главный компьютер — запустить HUB здесь» работает без интернета, git, npm и прав администратора.
+#
+# Проверки на настоящих Windows и Ubuntu (раз реального ПК клуба под рукой нет):
+# - windows-smoke: тихая установка setup.exe (/S), файлы на месте, встроенный HUB запускается ровно как
+#   в приложении (TS.exe --hub-only), /api/health и /api/setup/status, перезапуск после падения и после
+#   мастера настройки, HUB умирает вместе с приложением, правило брандмауэра, удаление не трогает базу;
+# - linux-smoke: то же для .deb (dpkg/apt, ts-desktop --hub-only);
+# - windows-service: запасной путь «HUB как служба» (deploy/windows/install.ps1: Node, git, npm ci, задача
+#   Планировщика) на чистом Windows-раннере. Выпуск ждёт build и обе smoke-проверки.
 #
 # - pull request / ручной запуск: сборка и тесты, установщики — в артефактах запуска (без выпуска);
 # - тег desktop-v<версия> (например desktop-v0.1.1): версия берётся из тега (править файлы не нужно),
@@ -22,6 +32,15 @@ on:
       - 'apps/web/src/cash/print/**'
       - 'deploy/**'
       - 'scripts/tauri-signing-key.mjs'
+      - 'scripts/bundle-hub.mjs'
+      - 'apps/hub/package.json'
+      - 'apps/hub/src/main.ts'
+      - 'apps/hub/src/config.ts'
+      - 'apps/hub/src/db.ts'
+      - 'apps/hub/src/setup.ts'
+      - 'apps/hub/src/version.ts'
+      - 'apps/hub/src/demo.ts'
+      - 'apps/hub/src/cli.ts'
       - '.github/workflows/desktop.yml'
   workflow_dispatch:
 
@@ -41,9 +60,11 @@ jobs:
           - os: windows-latest
             bundles: nsis,msi
             dirs: nsis msi
+            node: win-x64
           - os: ubuntu-22.04
             bundles: deb
             dirs: deb
+            node: linux-x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -66,6 +87,11 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
 
       - run: npm ci
+
+      # apps/desktop/hub-bundle: HUB одним файлом + миграции + экран зала + node(.exe) (версия и SHA-256
+      # закреплены в скрипте); --check запускает его с пустой базой и ждёт /api/health.
+      - name: Встроенный HUB
+        run: node scripts/bundle-hub.mjs --node ${{ matrix.node }} --check
 
       - name: Тесты скриптов выпуска
         run: node --test "apps/desktop/scripts/*.test.mjs"
@@ -122,10 +148,240 @@ jobs:
             apps/desktop/src-tauri/target/release/bundle/deb/*.deb.sig
           if-no-files-found: error
 
-  # Один выпуск на тег — только после того, как собрались оба установщика.
+  # Установщик Windows на чистом раннере: всё, что сделает владелец, плюс то, чего он не увидит.
+  windows-smoke:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ts-desktop-windows-latest
+          path: dist
+
+      - name: Тихая установка setup.exe и файлы
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Get-ChildItem dist -Recurse -Filter '*-setup.exe' | Select-Object -First 1
+          if (-not $setup) { throw 'В артефакте нет *-setup.exe' }
+          Write-Host "Устанавливаю $($setup.Name)"
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Установщик завершился с кодом $($p.ExitCode)" }
+          $dir = Join-Path $env:LOCALAPPDATA 'TS'
+          $exe = Get-ChildItem -LiteralPath $dir -Filter '*.exe' | Where-Object { $_.Name -notmatch '^uninstall' } | Select-Object -First 1
+          if (-not $exe) { throw "Нет программы TS в $dir" }
+          foreach ($f in @('hub-bundle\node.exe', 'hub-bundle\package.json', 'hub-bundle\src\main.mjs', 'hub-bundle\src\migrations\001_init.sql',
+                           'hub-bundle\web\index.html', 'deploy\windows\install.ps1', 'deploy\windows\run-hub.cmd', 'uninstall.exe')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $dir $f))) { throw "После установки нет $f" }
+          }
+          $node = & (Join-Path $dir 'hub-bundle\node.exe') --version
+          Write-Host "Программа: $($exe.FullName); встроенный Node.js $node"
+          if ($node -notmatch '^v24\.') { throw "Встроенный Node.js не 24: $node" }
+          "TS_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TS_EXE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Встроенный HUB (TS.exe --hub-only — как кнопка «Запустить HUB здесь»)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $base = 'http://127.0.0.1:4310'
+          $data = Join-Path $env:LOCALAPPDATA 'TS\hub'
+          $bundle = Join-Path $env:TS_DIR 'hub-bundle'
+          function Wait-Health([int]$Seconds = 60) {
+            $deadline = (Get-Date).AddSeconds($Seconds)
+            while ((Get-Date) -lt $deadline) {
+              try { $r = Invoke-RestMethod "$base/api/health" -TimeoutSec 3; if ($r.ok) { return $r } } catch { }
+              Start-Sleep -Milliseconds 500
+            }
+            throw "HUB не ответил на /api/health за $Seconds с"
+          }
+          function Get-HubNode { @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" | Where-Object { $_.ExecutablePath -like "$bundle\*" }) }
+          function Wait-Gone([int]$Seconds = 15) {
+            $deadline = (Get-Date).AddSeconds($Seconds)
+            while ((Get-Date) -lt $deadline) {
+              if ((Get-HubNode).Count -eq 0 -and @(Get-NetTCPConnection -LocalPort 4310 -State Listen -ErrorAction SilentlyContinue).Count -eq 0) { return }
+              Start-Sleep -Milliseconds 500
+            }
+            throw 'HUB остался работать после закрытия TS (node.exe или порт 4310)'
+          }
+          $ts = $null
+          try {
+            $ts = Start-Process -FilePath $env:TS_EXE -ArgumentList '--hub-only' -PassThru
+            $h = Wait-Health 60
+            Write-Host "health: version=$($h.version) schema=$($h.schemaVersion) db=$($h.dbPath)"
+            if ($h.dbPath -ne (Join-Path $data 'hub.db')) { throw "База не там: $($h.dbPath)" }
+            $setup = Invoke-RestMethod "$base/api/setup/status"
+            if (-not $setup.open) { throw "Мастер /setup закрыт: $($setup | ConvertTo-Json -Compress)" }
+            $page = Invoke-WebRequest "$base/" -UseBasicParsing
+            if ($page.StatusCode -ne 200 -or $page.Content -notmatch '<html') { throw 'На / нет экрана зала' }
+            foreach ($f in @('hub.db', 'logs\hub.log')) { if (-not (Test-Path -LiteralPath (Join-Path $data $f))) { throw "Нет $data\$f" } }
+
+            Write-Host '— падение HUB: TS запускает его снова'
+            $first = Get-HubNode
+            if ($first.Count -ne 1) { throw "Ожидался один node.exe HUB, найдено $($first.Count)" }
+            Stop-Process -Id $first[0].ProcessId -Force
+            Start-Sleep -Seconds 1
+            [void](Wait-Health 30)
+            if ((Get-HubNode)[0].ProcessId -eq $first[0].ProcessId) { throw 'HUB не перезапущен' }
+
+            Write-Host '— мастер настройки сохраняет подключение: HUB выходит с кодом 75, TS запускает его снова'
+            $body = @{ hubId = 'ci-smoke-hub'; apiKey = 'ci-smoke-key-0123456789abcdef'; cloudUrl = 'http://127.0.0.1:9'; skipCheck = $true } | ConvertTo-Json
+            [void](Invoke-RestMethod "$base/api/setup" -Method Post -ContentType 'application/json' -Body $body)
+            Start-Sleep -Seconds 4
+            [void](Wait-Health 30)
+            $setup = Invoke-RestMethod "$base/api/setup/status"
+            if ($setup.open -or $setup.hubId -ne 'ci-smoke-hub') { throw "После мастера: $($setup | ConvertTo-Json -Compress)" }
+
+            Write-Host '— TS закрыт: HUB закрывается вместе с ним (job object)'
+            Stop-Process -Id $ts.Id -Force
+            Wait-Gone
+
+            Write-Host '— повторный запуск на той же базе'
+            $ts = Start-Process -FilePath $env:TS_EXE -ArgumentList '--hub-only' -PassThru
+            [void](Wait-Health 60)
+            Stop-Process -Id $ts.Id -Force
+            Wait-Gone
+            $ts = $null
+            Write-Host 'Встроенный HUB: всё в порядке'
+          } finally {
+            if ($ts -and -not $ts.HasExited) { Stop-Process -Id $ts.Id -Force -ErrorAction SilentlyContinue }
+            $log = Join-Path $data 'logs\hub.log'
+            if (Test-Path -LiteralPath $log) { Write-Host '--- hub.log (хвост)'; Get-Content -LiteralPath $log -Tail 60 }
+          }
+
+      # Зависит от настроек UAC раннера (Start-Process -Verb RunAs без окна), поэтому не блокирует.
+      - name: Правило брандмауэра (TS.exe --open-firewall)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath $env:TS_EXE -ArgumentList '--open-firewall' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "--open-firewall: код $($p.ExitCode)" }
+          $rule = Get-NetFirewallRule -DisplayName 'TS HUB' -ErrorAction Stop
+          $app = $rule | Get-NetFirewallApplicationFilter
+          Write-Host "Правило: $($rule.DisplayName), $($rule.Profile), $($app.Program)"
+          if ($app.Program -notlike '*\hub-bundle\node.exe') { throw "Правило не для встроенного node.exe: $($app.Program)" }
+
+      - name: Удаление TS не трогает базу заведения
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Start-Process -FilePath (Join-Path $env:TS_DIR 'uninstall.exe') -ArgumentList '/S' -Wait
+          $deadline = (Get-Date).AddSeconds(60)
+          while ((Test-Path -LiteralPath (Join-Path $env:TS_DIR 'hub-bundle\node.exe')) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
+          if (Test-Path -LiteralPath (Join-Path $env:TS_DIR 'hub-bundle\node.exe')) { throw 'Удаление не убрало встроенный HUB' }
+          $db = Join-Path $env:LOCALAPPDATA 'TS\hub\hub.db'
+          if (-not (Test-Path -LiteralPath $db)) { throw "Удаление стёрло базу $db" }
+          Write-Host "База на месте: $db"
+
+  # .deb на чистой Ubuntu: apt ставит зависимости, встроенный HUB запускается без окна.
+  linux-smoke:
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ts-desktop-ubuntu-22.04
+          path: dist
+
+      - name: Установка .deb и встроенный HUB (ts-desktop --hub-only)
+        run: |
+          set -euo pipefail
+          deb=$(find dist -name '*.deb' | head -1)
+          [ -n "$deb" ] || { echo 'В артефакте нет .deb'; exit 1; }
+          sudo apt-get update -q
+          sudo apt-get install -y "./$deb"
+          pkg=$(dpkg-deb -f "$deb" Package)
+          bin=$(dpkg -L "$pkg" | grep '^/usr/bin/' | head -1)
+          main=$(dpkg -L "$pkg" | grep '/hub-bundle/src/main.mjs$' | head -1)
+          if [ -z "$bin" ] || [ -z "$main" ]; then echo "Нет программы или встроенного HUB в пакете $pkg"; dpkg -L "$pkg"; exit 1; fi
+          bundle=$(dirname "$(dirname "$main")")
+          echo "Программа: $bin; HUB: $bundle"
+          ls -l "$bundle/node"
+          "$bundle/node" --version | grep -q '^v24\.' || { echo "Встроенный Node.js не 24: $("$bundle/node" --version)"; exit 1; }
+          for f in src/migrations/001_init.sql web/index.html package.json; do [ -e "$bundle/$f" ] || { echo "нет $bundle/$f"; exit 1; }; done
+          data="$HOME/.local/share/TS/hub"
+          base=http://127.0.0.1:4310
+          wait_health() {
+            for _ in $(seq 1 "${1:-120}"); do curl -sf "$base/api/health" -o /tmp/health.json && return 0; sleep 0.5; done
+            echo 'HUB не ответил на /api/health'; tail -60 "$data/logs/hub.log" || true; return 1
+          }
+          hub_node() { pgrep -f "^$bundle/node " || pgrep -f "^$data/runtime/node " || true; }
+          "$bin" --hub-only & ts=$!
+          wait_health
+          cat /tmp/health.json; echo
+          grep -q "\"dbPath\":\"$data/hub.db\"" /tmp/health.json
+          curl -sf "$base/api/setup/status" | grep -q '"open":true'
+          curl -sf "$base/" | grep -qi '<html'
+          test -f "$data/hub.db" && test -f "$data/logs/hub.log"
+          echo '— падение HUB: TS запускает его снова'
+          old=$(hub_node); kill -9 "$old"; sleep 1; wait_health 60
+          [ "$(hub_node)" != "$old" ]
+          echo '— мастер настройки: выход 75 и перезапуск'
+          curl -sf -X POST -H 'content-type: application/json' \
+            -d '{"hubId":"ci-smoke-hub","apiKey":"ci-smoke-key-0123456789abcdef","cloudUrl":"http://127.0.0.1:9","skipCheck":true}' "$base/api/setup"
+          echo; sleep 4; wait_health 60
+          curl -sf "$base/api/setup/status" | grep -q '"hubId":"ci-smoke-hub"'
+          echo '— TS убит: HUB закрывается вместе с ним'
+          kill -9 $ts; sleep 3
+          [ -z "$(hub_node)" ] || { echo 'HUB остался работать'; exit 1; }
+          if curl -sf "$base/api/health" -o /dev/null; then echo 'HUB отвечает после закрытия TS'; exit 1; fi
+          echo '— повторный запуск на той же базе'
+          "$bin" --hub-only & ts=$!
+          wait_health
+          kill $ts; sleep 3
+          [ -z "$(hub_node)" ]
+          tail -20 "$data/logs/hub.log"
+          echo 'Встроенный HUB (.deb): всё в порядке'
+
+  # Запасной путь «HUB как служба»: install.ps1 ставит код из этого коммита (git clone + npm ci) и
+  # задачу Планировщика от SYSTEM. Нужен интернет — на раннере он есть. Выпуск его не ждёт.
+  windows-service:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Синтаксис скриптов PowerShell 5.1
+        shell: powershell
+        run: |
+          $bad = 0
+          foreach ($f in Get-ChildItem deploy\windows -Filter *.ps1) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errors)
+            foreach ($e in $errors) { Write-Host "::error file=deploy/windows/$($f.Name),line=$($e.Extent.StartLineNumber)::$($e.Message)"; $bad++ }
+          }
+          if ($bad) { exit 1 }
+
+      - name: install.ps1 (служба HUB)
+        shell: powershell
+        env:
+          REF: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File deploy\windows\install.ps1 -Ref $env:REF
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $h = Invoke-RestMethod http://127.0.0.1:4310/api/health -UseBasicParsing
+          if (-not $h.ok) { exit 1 }
+          Write-Host "Служба HUB работает: git $($h.gitSha), схема $($h.schemaVersion)"
+          powershell -NoProfile -ExecutionPolicy Bypass -File C:\bills\bin\hub.ps1 status
+
+      - name: Журналы установки
+        if: always()
+        shell: powershell
+        run: |
+          foreach ($f in Get-ChildItem C:\bills\logs -Filter *.log -ErrorAction SilentlyContinue) {
+            Write-Host "--- $($f.Name)"; Get-Content -LiteralPath $f.FullName -Tail 80
+          }
+
+  # Один выпуск на тег — только после того, как оба установщика собрались и прошли проверку.
   release:
     if: startsWith(github.ref, 'refs/tags/desktop-v')
-    needs: build
+    needs: [build, windows-smoke, linux-smoke]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

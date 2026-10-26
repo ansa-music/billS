@@ -3056,3 +3056,178 @@ input[aria-invalid='true'] {
     font-size: 28px;
   }
 }
+
+/* ===== «Брони» of a venue (Bookings.tsx); the guest's page has its own book.css ===== */
+
+.booking-layout {
+  align-items: start;
+}
+
+.booking-days {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  margin-bottom: 8px;
+  scrollbar-width: thin;
+}
+
+.booking-day {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.booking-day[aria-selected='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.booking-day-n {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in oklab, currentColor 18%, transparent);
+  font-size: 12px;
+  text-align: center;
+}
+
+.booking-group h3 {
+  margin: 14px 0 6px;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.booking-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.booking-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.booking-row[data-status='CANCELLED'] {
+  opacity: 0.55;
+}
+
+.booking-row-time {
+  display: grid;
+  min-width: 62px;
+}
+
+.booking-row-time strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.booking-row-time span,
+.booking-row-who span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.booking-row-who {
+  flex: 1 1 200px;
+  display: grid;
+  min-width: 0;
+}
+
+.booking-row-tools {
+  margin-left: auto;
+}
+
+.booking-settings {
+  display: grid;
+  gap: 14px;
+}
+
+.booking-switch {
+  white-space: normal;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.booking-fields .field {
+  flex: 1 1 130px;
+}
+
+.booking-slug input {
+  flex: 1;
+  min-width: 0;
+}
+
+.booking-saved {
+  color: var(--accent);
+}
+
+.booking-share {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.booking-share .qr {
+  width: 148px;
+  flex: none;
+}
+
+.booking-share .qr img {
+  width: 100%;
+  display: block;
+  border-radius: 10px;
+}
+
+.booking-share-text {
+  flex: 1 1 220px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.booking-link {
+  overflow-wrap: anywhere;
+  color: var(--accent);
+}
+
+@media print {
+  body:has(.booking-share) .topbar,
+  body:has(.booking-share) .cab-nav,
+  body:has(.booking-share) .club-page-head,
+  body:has(.booking-share) .booking-layout > :first-child,
+  body:has(.booking-share) .booking-settings > :not(.booking-share),
+  body:has(.booking-share) .booking-share button,
+  body:has(.booking-share) .panel-head {
+    display: none !important;
+  }
+
+  body:has(.booking-share) .booking-share {
+    border: 0;
+    justify-content: center;
+    text-align: center;
+  }
+
+  body:has(.booking-share) .booking-share .qr {
+    width: 60mm;
+  }
+}

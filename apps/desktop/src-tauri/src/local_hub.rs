@@ -70,6 +70,9 @@ fn candidates(resource_dir: Option<&Path>) -> Vec<PathBuf> {
   if let Some(exe_dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) {
     dirs.push(exe_dir.join(BUNDLE_DIR));
     dirs.push(exe_dir.join("..").join("lib").join("TS").join(BUNDLE_DIR));
+    if let Some(name) = std::env::current_exe().ok().and_then(|exe| exe.file_name().map(PathBuf::from)) {
+      dirs.push(exe_dir.join("..").join("lib").join(name).join(BUNDLE_DIR));
+    }
   }
   if cfg!(debug_assertions) {
     dirs.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(BUNDLE_DIR));

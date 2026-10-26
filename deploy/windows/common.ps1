@@ -11,6 +11,15 @@ $script:FirewallRuleName = 'billS HUB (LAN)'
 $script:RepoUrl = 'https://github.com/ansa-music/billS.git'
 $script:BillsLogFile = $null
 
+# Windows PowerShell 5.1 по умолчанию может не включать TLS 1.2 — без него nodejs.org и GitHub не отвечают.
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+} catch {
+    # очень старый .NET — дальше скажет сама загрузка
+}
+# Полоса прогресса Invoke-WebRequest в PowerShell 5.1 замедляет скачивание в десятки раз.
+$ProgressPreference = 'SilentlyContinue'
+
 function Write-Step {
     param([Parameter(Mandatory = $true)][string]$Message)
     Write-Host ''
@@ -251,10 +260,20 @@ function Start-Hub {
     Write-Info "Задача '$($script:HubTaskName)' запущена."
 }
 
+function Get-PortOwner {
+    # Процесс, который слушает порт (или $null): занятый порт — частая причина «HUB не поднялся».
+    param([Parameter(Mandatory = $true)][int]$Port)
+    $conn = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    if ($conn.Count -eq 0) { return $null }
+    $proc = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $($conn[0].OwningProcess)" -ErrorAction SilentlyContinue
+    if ($proc) { return $proc }
+    return [pscustomobject]@{ ProcessId = $conn[0].OwningProcess; Name = '?'; CommandLine = '' }
+}
+
 function Get-HubHealth {
     param([Parameter(Mandatory = $true)][int]$Port)
     try {
-        $r = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/health" -TimeoutSec 3
+        $r = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/health" -TimeoutSec 3 -UseBasicParsing
         if ($r -and $r.PSObject.Properties['ok'] -and $r.ok) { return $r }
     } catch {
         # ещё не поднялся

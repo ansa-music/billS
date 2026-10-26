@@ -68,6 +68,34 @@ function Test-Winget {
     return $false
 }
 
+# Запасной путь без winget (нет App Installer, Windows LTSC, другой администратор): официальный MSI
+# Node.js с nodejs.org, версия закреплена, SHA-256 проверяется.
+$script:NodeMsiVersion = '24.22.1'
+$script:NodeMsiSha256 = '3bda4baf1ee709b33cf920dd633106ddb23951e322bff9c03ec9f64ab8981b01'
+
+function Install-NodeMsi {
+    $url = "https://nodejs.org/dist/v$($script:NodeMsiVersion)/node-v$($script:NodeMsiVersion)-x64.msi"
+    $msi = Join-Path ([IO.Path]::GetTempPath()) "node-v$($script:NodeMsiVersion)-x64.msi"
+    Write-Info "Скачиваю Node.js $($script:NodeMsiVersion): $url"
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $msi -UseBasicParsing
+    } catch {
+        Write-Warn "Не удалось скачать Node.js: $($_.Exception.Message)"
+        return 1
+    }
+    $actual = (Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $script:NodeMsiSha256) {
+        Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue
+        Write-Warn "Скачанный файл Node.js не прошёл проверку SHA-256 ($actual) — не устанавливаю."
+        return 1
+    }
+    Write-Info 'Устанавливаю Node.js (msiexec, без окон)'
+    $p = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart') -Wait -PassThru
+    Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue
+    Update-PathFromRegistry
+    return $p.ExitCode
+}
+
 function Install-WithWinget {
     param([string]$Id, [switch]$Upgrade)
     $verb = 'install'
@@ -87,6 +115,10 @@ if ($nodeMajor -ge 24) {
     if (Test-Winget) {
         if ($nodeMajor -gt 0) { [void](Install-WithWinget -Id 'OpenJS.NodeJS.LTS' -Upgrade) }
         if ((Get-NodeMajor) -lt 24) { [void](Install-WithWinget -Id 'OpenJS.NodeJS.LTS') }
+        $nodeMajor = Get-NodeMajor
+    }
+    if ($nodeMajor -lt 24) {
+        [void](Install-NodeMsi)
         $nodeMajor = Get-NodeMajor
     }
     if ($nodeMajor -lt 24) {
@@ -285,6 +317,13 @@ Write-Info "powershell.exe $backupArgs"
 # 8. Запуск и проверка
 # ---------------------------------------------------------------------------
 Write-Step 'Запуск HUB'
+# Порт уже занят (встроенный HUB приложения TS, другая программа): иначе проверка ниже «увидит»
+# чужой HUB и скажет, что всё хорошо, а служба будет падать с EADDRINUSE.
+$owner = Get-PortOwner -Port $Port
+if ($owner) {
+    Fail ("Порт $Port уже занят: $($owner.Name) (PID $($owner.ProcessId)). Если это встроенный HUB приложения TS — " +
+          "остановите его (TS → Настройки → «Остановить HUB на этом компьютере») и запустите установку ещё раз.")
+}
 Start-Hub -Paths $Paths
 $health = Wait-HubHealth -Port $Port -TimeoutSec 60
 if (-not $health) {
