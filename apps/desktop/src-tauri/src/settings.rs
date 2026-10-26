@@ -16,6 +16,10 @@ pub struct Settings {
   pub printer: String,
   /// Start TS when the user signs in to the PC.
   pub autostart: bool,
+  /// This PC is the club's main computer: TS runs the built-in HUB here (local_hub.rs) on every start.
+  pub hub_here: bool,
+  /// Windows Firewall lets the club network reach the built-in HUB (asked once, with UAC).
+  pub firewall_done: bool,
 }
 
 fn path(app: &AppHandle) -> Option<PathBuf> {

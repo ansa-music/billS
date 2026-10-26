@@ -57,6 +57,12 @@ export interface SyncEventsResponse {
    * from what the HUB applied, the HUB pulls GET /sync/access. Absent from an older cloud.
    */
   accessVersion?: number;
+  /**
+   * «Онлайн-бронь столов» (Supabase cloud only): version of the club's bookings. When it differs
+   * from what the HUB applied, the HUB pulls GET /sync/bookings (SyncBookingsResponse in
+   * booking.ts). Absent while the club never set up online booking, and from the self-hosted cloud.
+   */
+  bookingsVersion?: number;
 }
 
 // ---------------------------------------------------------------------------

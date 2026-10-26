@@ -107,6 +107,18 @@ wait_for_clock() {
   log "время: $(date -Is)"
 }
 
+# apt-daily/apt-daily-upgrade на первой загрузке держат блокировку dpkg: install.sh упал бы на apt-get.
+# Ждём до 15 минут (дальше apt сам подождёт ещё до 10 минут: DPkg::Lock::Timeout от late.sh).
+wait_for_apt() {
+  local i
+  for ((i = 0; i < 180; i++)); do
+    systemctl is-active --quiet apt-daily.service apt-daily-upgrade.service 2>/dev/null || return 0
+    [ "$i" -eq 0 ] && { set_state installing "Жду, пока система обновит списки пакетов"; log "apt-daily работает — жду"; }
+    sleep 5
+  done
+  log "apt-daily не закончился за 15 минут — продолжаю"
+}
+
 # ---------- 3. Установка ----------
 run_install() {
   local args=(--ref "$TS_REF" --mdns-name hub) line reason="" rc
@@ -139,4 +151,5 @@ log "первая загрузка TS: версия ${TS_VERSION:-?}, ref $TS_RE
 ensure_admin_password
 wait_for_internet
 wait_for_clock
+wait_for_apt
 run_install

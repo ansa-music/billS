@@ -3,6 +3,7 @@ import type {
   BusinessType,
   ClubSnapshot,
   SyncAccessResponse,
+  SyncBookingsResponse,
   SyncEvent,
   SyncEventPayload,
   SyncEventsRequest,
@@ -17,6 +18,7 @@ import type {
 } from '@bills/domain';
 import { BUSINESS_TYPES, isValidTimeZone, normalizeRoles, primaryRole, validateTariff } from '@bills/domain';
 import { scopeOf } from './auth.ts';
+import { appliedBookingsVersion, applyBookings } from './bookings.ts';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
 import { afterCommit, all, one, run, transaction } from './db.ts';
@@ -32,6 +34,10 @@ import { clubId, loadSettings } from './views.ts';
  *  3. GET /sync/settings when the cloud reports a newer settings version, then `applySettings`;
  *  4. GET /sync/access when the cloud's access version differs from the one applied, then
  *     `applyAccess` (people and keys of this branch) and the license from the package.
+ *  5. GET /sync/bookings when the cloud's bookingsVersion (Supabase cloud with «Онлайн-бронь»)
+ *     differs from the one applied, then `applyBookings` (bookings.ts). Chosen over extending
+ *     /sync/access: bookings change far more often than people and keys, and the access package
+ *     stays the same for the self-hosted cloud, which never sends bookingsVersion.
  * Errors back off exponentially (interval × 2^n, at most 5 minutes); a success resets the pause.
  */
 
@@ -578,6 +584,7 @@ export class SyncWorker {
     let state = readSyncState(this.#db);
     let cloudVersion: number | null = null;
     let accessVersion: number | undefined;
+    let bookingsVersion: number | undefined;
     let sent = false;
 
     // 1. Settings snapshot, when ours changed since the cloud last accepted them.
@@ -606,6 +613,7 @@ export class SyncWorker {
       sent = true;
       cloudVersion = res.body.settingsVersion;
       accessVersion = res.body.accessVersion;
+      bookingsVersion = res.body.bookingsVersion;
       const accepted = res.body.lastAcceptedId;
       if (accepted !== null && rows.length > 0) {
         run(this.#db, 'UPDATE outbox SET delivered_at = ? WHERE delivered_at IS NULL AND id <= ?', now, accepted);
@@ -630,7 +638,20 @@ export class SyncWorker {
     if (typeof accessVersion === 'number' && accessVersion !== appliedAccessVersion(this.#db)) {
       await this.pullAccess();
     }
+
+    // 5. Online bookings of this club changed in the cloud.
+    if (typeof bookingsVersion === 'number' && bookingsVersion !== appliedBookingsVersion(this.#db)) {
+      await this.pullBookings();
+    }
     return sent;
+  }
+
+  /** GET /sync/bookings and keep them here (the hall works with them offline). */
+  async pullBookings(): Promise<number> {
+    const res = await this.#request<SyncBookingsResponse>('GET', '/sync/bookings');
+    const count = applyBookings(this.#db, this.#clock.now(), res.body, this.#events);
+    this.#logger?.info(`Облако: брони версии ${res.body.version}: ${count}`);
+    return count;
   }
 
   /** GET /sync/access and apply it: people and keys, then the license. */

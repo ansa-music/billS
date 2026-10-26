@@ -16,6 +16,32 @@ import { loadPauseSpans } from './views.ts';
  * Lives apart from `sessions.ts` so the lamp controller can call it without a cycle.
  */
 export function shiftPrepaidDeadline(db: Db, sessionId: string, now: number): void {
+  const d = computePrepaidDeadline(db, sessionId, now);
+  if (!d || d.deadline === d.current) return;
+  // A pause never changes the play time left, so a warning already given stands
+  // (the lamp blinked at "5 minutes of play left" and that is still true).
+  run(db, 'UPDATE prepaid_games SET deadline_at = ? WHERE session_id = ?', d.deadline, sessionId);
+  if (d.current !== null) {
+    record(db, now, {
+      actor: SYSTEM,
+      action: 'session.prepaid_deadline_shifted',
+      entityType: 'session',
+      entityId: sessionId,
+      data: { from: d.current, to: d.deadline, unpaidMs: d.unpaidMs, warnedAt: d.warnedAt },
+    });
+  }
+}
+
+/**
+ * Where the deadline of a running prepaid game should be: lamp-confirmed start + paid
+ * minutes (extensions included) + the unpaid time of every closed pause. Null for a game
+ * that is not prepaid, not started yet or already over. Writes nothing.
+ */
+export function computePrepaidDeadline(
+  db: Db,
+  sessionId: string,
+  now: number,
+): { deadline: number; current: number | null; warnedAt: number | null; unpaidMs: number } | null {
   const row = one<{
     minutes: number;
     deadline_at: number | null;
@@ -29,23 +55,15 @@ export function shiftPrepaidDeadline(db: Db, sessionId: string, now: number): vo
      WHERE p.session_id = ? AND p.settled_at IS NULL AND p.ended_at IS NULL`,
     sessionId,
   );
-  if (!row || row.started_at === null) return;
+  if (!row || row.started_at === null) return null;
   const tariff = JSON.parse(row.tariff_snapshot) as TariffConfig;
   // Only closed pauses move the deadline; an open one is handled when it closes.
   const closed = loadPauseSpans(db, sessionId).filter((p) => p.to !== null);
   const unpaidMs = unpaidSpans(closed, tariff, now).reduce((sum, s) => sum + (s.to - s.from), 0);
-  const deadline = prepaidDeadline(row.started_at, row.minutes) + unpaidMs;
-  if (deadline === row.deadline_at) return;
-  // A pause never changes the play time left, so a warning already given stands
-  // (the lamp blinked at "5 minutes of play left" and that is still true).
-  run(db, 'UPDATE prepaid_games SET deadline_at = ? WHERE session_id = ?', deadline, sessionId);
-  if (row.deadline_at !== null) {
-    record(db, now, {
-      actor: SYSTEM,
-      action: 'session.prepaid_deadline_shifted',
-      entityType: 'session',
-      entityId: sessionId,
-      data: { from: row.deadline_at, to: deadline, unpaidMs, warnedAt: row.warned_at },
-    });
-  }
+  return {
+    deadline: prepaidDeadline(row.started_at, row.minutes) + unpaidMs,
+    current: row.deadline_at,
+    warnedAt: row.warned_at,
+    unpaidMs,
+  };
 }

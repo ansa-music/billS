@@ -1,8 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  assertPrepaidExtension,
   assertPrepaidMinutes,
   BillingError,
+  calculateCharge,
+  PREPAID_EXTEND_MINUTES,
+  prepaidExtensionPrice,
+  roundToStep,
   isPrepaidEnding,
   PREPAID_WARNING_MS,
   prepaidDeadline,
@@ -56,4 +61,37 @@ test('the prepaid price follows the tariff: windows, minimum and rounding', () =
   // 17:30–18:30 crosses into the evening rate.
   assert.equal(prepaidPrice(almaty(12, 17, 30), 60, tariff, TZ), 1000_00 + 1500_00);
   assert.throws(() => prepaidPrice(almaty(12, 12), 3, tariff, TZ), code('INVALID_PREPAID_MINUTES'));
+});
+
+// ─── Extending a prepaid game («Продлить на N минут») ───────────────────────
+
+test('extra minutes are whole minutes from 5, and the total stays within 12 hours', () => {
+  for (const ok of [5, 30, 60]) assertPrepaidExtension(ok, 60);
+  assertPrepaidExtension(660, 60);
+  for (const bad of [0, 4, 30.5, Number.NaN]) assert.throws(() => assertPrepaidExtension(bad, 60), code('INVALID_PREPAID_MINUTES'));
+  assert.throws(() => assertPrepaidExtension(30, 700), code('PREPAID_TOO_LONG'));
+  assert.deepEqual([...PREPAID_EXTEND_MINUTES], [30, 60]);
+});
+
+test('extension price: the extra minutes at the rate in force after the current deadline', () => {
+  // 60 minutes ending at 14:00 on Monday, +30: base rate 2000/h → 1000.
+  const deadline = almaty(12, 14, 0);
+  assert.equal(prepaidExtensionPrice(deadline, 60, 30, tariff, TZ), 1000_00);
+  assert.equal(prepaidExtensionPrice(deadline, 60, 60, tariff, TZ), 2000_00);
+});
+
+test('extension price across a tariff boundary: day rate until 18:00, evening rate after', () => {
+  // Ends at 17:45, +30: 15 min × 2000/h + 15 min × 3000/h = 500 + 750 = 1250.
+  const deadline = almaty(12, 17, 45);
+  assert.equal(prepaidExtensionPrice(deadline, 60, 30, tariff, TZ), 1250_00);
+  // The same as charging the whole game longer: the earlier part is already paid.
+  const whole = (m: number) => calculateCharge(deadline - 60 * MIN, deadline - 60 * MIN + m * MIN, tariff, TZ).amount;
+  assert.equal(prepaidExtensionPrice(deadline, 60, 30, tariff, TZ), whole(90) - whole(60));
+});
+
+test('extension price ignores the minimum and the free minutes of a new game', () => {
+  // minimumMinutes 30 and freeMinutes 3 apply to a game, not to 5 extra minutes of one.
+  const deadline = almaty(12, 14, 0);
+  assert.equal(prepaidExtensionPrice(deadline, 60, 5, tariff, TZ), roundToStep((5 * 2000_00) / 60, 10_00));
+  assert.ok(prepaidExtensionPrice(deadline, 60, 5, tariff, TZ) < prepaidPrice(deadline, 30, tariff, TZ));
 });

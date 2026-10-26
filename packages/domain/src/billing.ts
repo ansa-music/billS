@@ -95,11 +95,12 @@ export function checkTotals(
 }
 
 /**
- * What a paid check earned from time and from the bar. The discount is spread in
- * proportion to the two parts (half up for the bar), so time + bar = subtotal − discount.
+ * What a paid check earned from time (games and their extensions) and from the bar. The
+ * discount is spread in proportion to the two parts (half up for the bar), so
+ * time + bar = subtotal − discount.
  */
 export function splitRevenue(
-  lines: ReadonlyArray<{ kind: 'GAME' | 'ORDER'; amount: Minor }>,
+  lines: ReadonlyArray<{ kind: 'GAME' | 'ORDER' | 'EXTENSION'; amount: Minor }>,
   discount: Minor,
 ): { time: Minor; bar: Minor } {
   let time = 0;

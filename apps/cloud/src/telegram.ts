@@ -147,6 +147,8 @@ const SEVERITY: Partial<Record<PushKind, string>> = {
   CANCELS_ABOVE_NORMAL: '🟡',
   DISCOUNTS_ABOVE_NORMAL: '🟡',
   TABLE_REOPENED_QUICKLY: '🟡',
+  // «Онлайн-бронь»: good news, not an alarm.
+  BOOKING_NEW: '🟢',
 };
 
 /** One alert: "🟠 <b>Клуб «Демо»: Свет горит без игры</b>\nСтол 3 …". The title already names the venue. */

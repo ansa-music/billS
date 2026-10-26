@@ -141,11 +141,12 @@ fi
 
 # ---------- 4. Ответы разметке и загрузчику ----------
 log "ставлю TS на $best ($((best_size / 2097152)) ГиБ); все диски:$summary"
-# Как в официальном example-preseed.txt: debconf-set из partman/early_command.
+# Как в официальном example-preseed.txt: debconf-set из partman/early_command. Отметка «seen»
+# обязательна: без неё grub-installer (BIOS) может всё равно спросить «куда ставить загрузчик»
+# и установка встанет на вопросе.
 for q in partman-auto/disk grub-installer/bootdev; do
-  if ! debconf-set "$q" "$best"; then
-    db_set "$q" "$best" || true
-    db_fset "$q" seen true || true
-  fi
+  debconf-set "$q" "$best" 2>/dev/null || db_set "$q" "$best" || true
+  db_fset "$q" seen true || true
+  log "$q = $best"
 done
 exit 0

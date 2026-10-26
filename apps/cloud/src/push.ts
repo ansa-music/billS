@@ -769,6 +769,7 @@ const NTFY_PRIORITY: Partial<Record<PushKind, number>> = {
   CANCELS_ABOVE_NORMAL: 3,
   DISCOUNTS_ABOVE_NORMAL: 3,
   TABLE_REOPENED_QUICKLY: 3,
+  BOOKING_NEW: 3,
 };
 
 /** ntfy tags that are emoji short codes, shown in front of the title. */
@@ -788,6 +789,7 @@ const NTFY_TAGS: Partial<Record<PushKind, string>> = {
   CANCELS_ABOVE_NORMAL: 'x',
   DISCOUNTS_ABOVE_NORMAL: 'label',
   TABLE_REOPENED_QUICKLY: 'repeat',
+  BOOKING_NEW: 'calendar',
 };
 
 /** HTTP headers are Latin-1: non-ASCII text goes as an RFC 2047 encoded-word, which ntfy decodes. */

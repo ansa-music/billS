@@ -72,11 +72,11 @@ pub fn run(_: &Path) -> Result<(), String> {
 
 /// Exit code of the elevation step when the UAC prompt was declined (ERROR_CANCELLED).
 #[cfg_attr(not(windows), allow(dead_code))]
-const ERROR_CANCELLED: i32 = 1223;
+pub(crate) const ERROR_CANCELLED: i32 = 1223;
 
 /// PowerShell string literal.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn ps_quote(s: &str) -> String {
+pub(crate) fn ps_quote(s: &str) -> String {
   format!("'{}'", s.replace('\'', "''"))
 }
 
@@ -109,6 +109,29 @@ fn elevate_script(script: &Path) -> String {
   )
 }
 
+/// Runs `script` as administrator without a window (one UAC prompt) and returns its exit code;
+/// ERROR_CANCELLED when the prompt was declined.
+#[cfg(windows)]
+pub(crate) fn run_elevated_hidden(script: &str) -> Result<i32, String> {
+  use std::os::windows::process::CommandExt;
+  const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+  let outer = format!(
+    "try {{ $p = Start-Process -FilePath powershell.exe -Verb RunAs -WindowStyle Hidden -PassThru \
+     -ArgumentList '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand','{}' }} catch {{ exit {ERROR_CANCELLED} }}\n\
+     $null = $p.Handle\n\
+     $p.WaitForExit()\n\
+     exit $p.ExitCode",
+    encode_command(script)
+  );
+  let status = std::process::Command::new("powershell.exe")
+    .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand"])
+    .arg(encode_command(&outer))
+    .creation_flags(CREATE_NO_WINDOW)
+    .status()
+    .map_err(|e| format!("Не удалось запустить PowerShell: {e}"))?;
+  Ok(status.code().unwrap_or(1))
+}
+
 /// Argument of `powershell -EncodedCommand`: base64 of the UTF-16LE script.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn encode_command(script: &str) -> String {
@@ -131,8 +154,7 @@ fn base64(bytes: &[u8]) -> String {
 
 /// "\\?\C:\Program Files\TS" → "C:\Program Files\TS": Windows PowerShell 5.1 does not take
 /// extended-length paths everywhere.
-#[cfg_attr(not(windows), allow(dead_code))]
-fn plain_path(path: &Path) -> PathBuf {
+pub(crate) fn plain_path(path: &Path) -> PathBuf {
   let s = path.to_string_lossy();
   if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
     PathBuf::from(format!(r"\\{rest}"))

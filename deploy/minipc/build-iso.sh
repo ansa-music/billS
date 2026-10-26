@@ -4,10 +4,17 @@
 #
 #   deploy/minipc/build-iso.sh [--version 1.0.0] [--ref <sha|тег|ветка>] [--debian current|13.1.0]
 #                              [--iso debian-….iso] [--out dist/minipc] [--timeout 15] [--gpg auto|require|off]
+#                              [--serial]
 #
 # Нужно: bash, curl, xorriso, cpio, gzip, sha512sum/sha256sum, openssl; для проверки подписи — gpg.
 #   Ubuntu/Debian: sudo apt-get install -y xorriso cpio gzip curl openssl gnupg grub-common
 # Права root не нужны. Подробности и причины выбора Debian — deploy/minipc/README.md.
+#
+# --serial — образ для автоматической проверки установки в QEMU (deploy/minipc/test/vm-test.sh):
+#   TS-minipc-<версия>-serial.iso, отличается от обычного ТОЛЬКО консолью и журналами: меню флешки
+#   дублируется на COM-порт, ядру пунктов TS добавлено «console=ttyS0,115200n8 console=tty0»
+#   (установщик по-прежнему на экране; установленная система получает те же параметры), а журнал
+#   установщика уходит по сети QEMU на машину проверки (log_host=10.0.2.2, DEBCONF_DEBUG=5).
 #
 # Что делает:
 #   1. Скачивает SHA512SUMS (+ подпись Debian CD) и netinst ISO, проверяет контрольную сумму.
@@ -35,6 +42,12 @@ OUT_DIR="${OUT_DIR:-$ROOT/dist/minipc}"
 WORK_DIR="${WORK_DIR:-}"
 CACHE_DIR="${CACHE_DIR:-}"
 BOOT_TIMEOUT="${BOOT_TIMEOUT:-15}"
+SERIAL=0
+# Образ --serial: журнал установщика — на 10.0.2.2:5514 (хост QEMU, vm-test.sh), консоль — и на COM-порт.
+# tty0 последним — установщик остаётся на экране, как на мини-ПК. Параметры после «---» переходят
+# в установленную систему, до «---» — только установщику.
+SERIAL_DI_ARGS="log_host=10.0.2.2 log_port=5514 DEBCONF_DEBUG=5"
+SERIAL_KERNEL_ARGS="console=ttyS0,115200n8 console=tty0"
 KEEP_WORK=0
 MAX_SIZE=2147483648 # 2 ГиБ — предел файла в GitHub Releases
 
@@ -45,7 +58,7 @@ log() { printf '[TS] %s\n' "$*"; }
 warn() { printf '[TS] ВНИМАНИЕ: %s\n' "$*" >&2; }
 die() { printf '[TS] ОШИБКА: %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -60,6 +73,7 @@ while [ $# -gt 0 ]; do
     --timeout) BOOT_TIMEOUT="$2"; shift 2 ;;
     --gpg) DEBIAN_GPG="$2"; shift 2 ;;
     --keep-work) KEEP_WORK=1; shift ;;
+    --serial) SERIAL=1; shift ;;
     -h | --help) usage; exit 0 ;;
     *) die "неизвестный параметр: $1 (см. --help)" ;;
   esac
@@ -198,6 +212,7 @@ BUILT_EPOCH="$(date +%s)"
   echo "TS_BUILT='$(date -u -d "@$BUILT_EPOCH" +%Y-%m-%dT%H:%M:%SZ)'"
   echo "TS_BUILT_EPOCH='$BUILT_EPOCH'"
   echo "TS_DEBIAN_ISO='$DEBIAN_NAME'"
+  [ "$SERIAL" -eq 0 ] || echo "TS_SERIAL_CONSOLE='1'"
 } >"$OV/ts-minipc/build-info"
 
 # Пароль пользователя ts на время установки: хэш случайного пароля, который тут же забывается.
@@ -223,6 +238,23 @@ cat "$X/initrd.gz" "$X/overlay.cpio.gz" >"$X/ts-initrd.gz"
 
 # ---------- 3. Меню загрузки ----------
 sed -e "s|@TIMEOUT@|$BOOT_TIMEOUT|g" -e "s|@TS_VERSION@|$TS_VERSION|g" "$HERE/boot/grub.cfg" >"$X/grub.cfg"
+# --serial: те же пункты меню, только с последовательной консолью (см. шапку).
+serial_menu() { # serial_menu <файл меню> <строка в начало (пусто — не нужна)>
+  local f="$1" kernel_lines
+  kernel_lines="$(grep -c -- ' --- quiet$' "$f" || true)"
+  [ "$kernel_lines" -gt 0 ] || die "в $f нет строк ядра «… --- quiet» — шаблон меню изменился?"
+  sed -i "s| --- quiet\$| $SERIAL_DI_ARGS --- quiet $SERIAL_KERNEL_ARGS|" "$f"
+  [ "$(grep -c -- " --- quiet $SERIAL_KERNEL_ARGS\$" "$f")" -eq "$kernel_lines" ] || die "не удалось добавить консоль в $f"
+  [ -z "$2" ] || sed -i "1i $2" "$f"
+}
+if [ "$SERIAL" -eq 1 ]; then
+  log "Образ для проверки в QEMU: консоль ttyS0 (--serial)"
+  serial_menu "$X/grub.cfg" ""
+  sed -i 's|^# @TS_SERIAL@$|serial --unit=0 --speed=115200\nterminal_input --append serial\nterminal_output --append serial|' "$X/grub.cfg"
+  grep -q '^terminal_output --append serial$' "$X/grub.cfg" || die "в grub.cfg нет метки # @TS_SERIAL@"
+else
+  sed -i '/^# @TS_SERIAL@$/d' "$X/grub.cfg"
+fi
 map=(
   -map "$X/ts-initrd.gz" /install.amd/ts-initrd.gz
   -map "$X/grub.cfg" /boot/grub/grub.cfg
@@ -230,6 +262,8 @@ map=(
 )
 if [ "$HAS_ISOLINUX" -eq 1 ]; then
   sed -e "s|@TIMEOUT_DS@|$((BOOT_TIMEOUT * 10))|g" -e "s|@TS_VERSION@|$TS_VERSION|g" "$HERE/boot/isolinux.cfg" >"$X/isolinux.cfg"
+  # isolinux: директива serial должна идти первой.
+  [ "$SERIAL" -eq 0 ] || serial_menu "$X/isolinux.cfg" "serial 0 115200"
   map+=(-map "$X/isolinux.cfg" /isolinux/isolinux.cfg -map "$X/isolinux-debian.cfg" /isolinux/isolinux-debian.cfg)
 fi
 # Шрифт GRUB с кириллицей (если есть на машине сборки); иначе — шрифт Debian.
@@ -269,6 +303,7 @@ update_sums "$X/sha256sum.txt" sha256sum "${pairs[@]}"
 
 # ---------- 4. Сборка ISO ----------
 OUT_ISO="$OUT_DIR/TS-minipc-$TS_VERSION.iso"
+[ "$SERIAL" -eq 0 ] || OUT_ISO="$OUT_DIR/TS-minipc-$TS_VERSION-serial.iso"
 rm -f -- "$OUT_ISO" "$OUT_ISO.sha256"
 log "Пересобираю образ: $OUT_ISO"
 xorriso -report_about WARNING -indev "$DEBIAN_ISO" -outdev "$OUT_ISO" "${map[@]}" -boot_image any replay \

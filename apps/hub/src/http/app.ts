@@ -13,6 +13,7 @@ import { renderPowerMetrics } from '../power/metrics.ts';
 import type { SimulatorUps } from '../power/ups.ts';
 import type { VersionInfo } from '../version.ts';
 import { versionInfo } from '../version.ts';
+import { registerBookingRoutes } from '../bookings.ts';
 import { registerAuth } from './auth.ts';
 import type { AuthHookOptions } from './auth.ts';
 import { actorOf, emptyBody, guard, runCommand } from './command.ts';
@@ -21,6 +22,7 @@ import { registerMoneyRoutes } from './money-routes.ts';
 import { registerBarRoutes } from './routes/bar.ts';
 import { registerCounterRoutes } from './routes/counter.ts';
 import { registerGuestRoutes } from './routes/guest.ts';
+import { registerExtendRoutes } from './routes/prepaid-extend.ts';
 import { registerLicenseRoutes } from './routes/license.ts';
 import { registerLoyaltyRoutes } from './routes/loyalty.ts';
 import { registerTemplateRoutes } from './routes/templates.ts';
@@ -322,6 +324,7 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   registerBarRoutes(app, hub);
   registerCounterRoutes(app, hub);
   registerGuestRoutes(app, hub);
+  registerExtendRoutes(app, hub);
   registerLoyaltyRoutes(app, hub);
   registerStaffRoutes(app, hub);
   registerReportRoutes(app, hub);
@@ -329,6 +332,7 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   registerGuardRoutes(app, hub);
   registerLicenseRoutes(app, hub);
   registerTemplateRoutes(app, hub);
+  registerBookingRoutes(app, hub);
 
   // Server-sent events: screens refetch /api/state when something changes.
   app.get('/api/events', (req, reply) => {

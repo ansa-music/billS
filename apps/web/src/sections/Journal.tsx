@@ -203,6 +203,8 @@ function describe(e: JournalEntry, state: HubState): Described {
       return { title: `${table}: скоро конец оплаченного времени`, detail: 'лампа мигнула', icon: 'clock', cat: 'games' };
     case 'session.prepaid_ended':
       return { title: `${table}: оплаченное время вышло`, detail: d.minutes ? `${num(d.minutes)} мин` : undefined, icon: 'stop', cat: 'games' };
+    case 'session.prepaid_extended':
+      return { title: `${table}: продлено на ${num(d.minutes)} мин`, detail: `всего ${num(d.totalMinutes)} мин`, icon: 'clock', cat: 'games' };
     case 'session.prepaid_deadline_shifted':
       return { title: `${table}: конец оплаченного времени сдвинут`, icon: 'clock', cat: 'games' };
     case 'session.closed':

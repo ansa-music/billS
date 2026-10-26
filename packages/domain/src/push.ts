@@ -27,6 +27,8 @@ export type PushKind =
   | 'LAMP_FAILED'
   | 'PREPAID_NOT_STARTED'
   | GuardAlertKind
+  /** «Онлайн-бронь столов»: a guest booked a table on the public page (raised by the cloud). */
+  | 'BOOKING_NEW'
   | 'OTHER';
 
 export interface PushKindInfo {
@@ -55,6 +57,7 @@ export const PUSH_KINDS: readonly PushKindInfo[] = [
   { kind: 'MANUAL_MODE_LONG', label: 'Ручной режим ламп включён давно', defaultOn: true, guard: true },
   { kind: 'DISCOUNTS_ABOVE_NORMAL', label: 'Большая скидка или много скидок', defaultOn: true, guard: true },
   { kind: 'TABLE_REOPENED_QUICKLY', label: 'Стол закрыли и сразу открыли снова', defaultOn: true, guard: true },
+  { kind: 'BOOKING_NEW', label: 'Новая онлайн-бронь', defaultOn: true },
   { kind: 'OTHER', label: 'Прочие тревоги', defaultOn: false },
 ];
 

@@ -67,3 +67,9 @@ verify_jwt = false
 # X-Telegram-Bot-Api-Secret-Token = TELEGRAM_WEBHOOK_SECRET (set by setWebhook), checked inside.
 [functions.telegram]
 verify_jwt = false
+
+# «Онлайн-бронь столов»: the guest's page in the cabinet (#/book/<club>) calls it without an account.
+# Guarded inside: the club must switch booking on; per-IP and per-phone limits (booking_attempts);
+# capacity is checked in a transaction with the club's booking row locked.
+[functions.booking]
+verify_jwt = false

@@ -160,10 +160,15 @@ export interface HubState {
 /** OPEN — being paid (maybe partly); PAID — settled; VOID — emptied before any payment. */
 export type CheckStatus = 'OPEN' | 'PAID' | 'VOID';
 
+export type CheckItemKind = 'GAME' | 'ORDER' | 'EXTENSION';
+
 export interface CheckItemView {
   id: string;
-  /** GAME — time on a table; ORDER — one line of a bar order. */
-  kind: 'GAME' | 'ORDER';
+  /**
+   * GAME — time on a table; ORDER — one line of a bar order; EXTENSION — minutes added to a
+   * game paid upfront («Продление», its sessionId is the extended game, which is on a check of its own).
+   */
+  kind: CheckItemKind;
   /** "Стол 1" for a game, the product name for an order line. */
   title: string;
   amount: Minor;

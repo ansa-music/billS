@@ -1,18 +1,29 @@
-import type { OpenPrepaidResponse, PaymentPart, SessionView } from '@bills/domain';
-import { assertPrepaidMinutes, BillingError, formatMoney, PREPAID_QUOTE_TTL_MS, PREPAID_WARNING_MS, prepaidPrice } from '@bills/domain';
+import { randomUUID } from 'node:crypto';
+import type { CheckView, ExtendPrepaidResponse, OpenPrepaidResponse, PaymentPart, SessionView, TariffConfig } from '@bills/domain';
+import {
+  assertPrepaidExtension,
+  assertPrepaidMinutes,
+  BillingError,
+  formatMoney,
+  PREPAID_QUOTE_TTL_MS,
+  PREPAID_WARNING_MS,
+  prepaidExtensionPrice,
+  prepaidPrice,
+} from '@bills/domain';
 import type { CheckService } from './checks.ts';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
-import { afterCommit, all, run, transaction } from './db.ts';
+import { afterCommit, all, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import type { ChangeEvent, HubEvents } from './events.ts';
 import { raiseAlert, record, SYSTEM } from './journal.ts';
 import type { LampController } from './lamps/controller.ts';
 import { DEFAULT_BLINK_TIMES } from './lamps/controller.ts';
-import { shiftPrepaidDeadline } from './prepaid-deadline.ts';
+import { computePrepaidDeadline, shiftPrepaidDeadline } from './prepaid-deadline.ts';
 import type { SessionService } from './sessions.ts';
 import { clubId, requireOpenShift } from './shifts.ts';
-import { loadSession } from './views.ts';
+import type { SessionRow } from './views.ts';
+import { effectiveStatus, loadCheck, loadSession, SESSION_SELECT } from './views.ts';
 
 export interface OpenPrepaidInput {
   tableId: string;
@@ -26,6 +37,17 @@ export interface OpenPaidInput extends OpenPrepaidInput {
   amount: number;
   quotedAt?: number | undefined;
   parts: PaymentPart[];
+}
+
+export interface ExtendPrepaidInput {
+  sessionId: string;
+  /** Minutes to add. */
+  minutes: number;
+  /** The price staff saw; refused (409 PREPAID_PRICE_CHANGED) when the HUB price differs. */
+  amount?: number | undefined;
+  /** A game paid upfront: pay the extension now (needs an open shift, must cover it all). */
+  parts?: PaymentPart[] | undefined;
+  actor: string;
 }
 
 interface RunningRow {
@@ -147,6 +169,172 @@ export class PrepaidService {
         change: paid.change,
       };
     });
+  }
+
+  /**
+   * «Продлить на N минут»: adds paid minutes to a running prepaid game in one transaction.
+   *
+   * - The deadline moves by exactly N: `minutes` grows and the deadline is recomputed from
+   *   the lamp-confirmed start and the closed pauses (prepaid-deadline.ts), so pauses before
+   *   and after keep working. A paused game can be extended; its time left stays frozen.
+   * - The 5-minute warning re-arms when the new end is more than 5 minutes of play away.
+   * - Price: prepaidExtensionPrice — the game's own tariff, from the current deadline on.
+   * - A game paid upfront gets a line «Продление» (kind EXTENSION) on the open extension
+   *   check of that game, or on a new check: its prepaid check is PAID and stays untouched.
+   *   With `parts` the check is paid at once (open shift, the whole due), otherwise it waits
+   *   for the cashier like any open check (and blocks closing the shift).
+   * - A game paid after the stop just plays longer: it is billed by played time as always.
+   * - A game without a time limit has nothing to extend: `extended: false`, nothing changes.
+   */
+  extend(input: ExtendPrepaidInput): ExtendPrepaidResponse {
+    const db = this.#db;
+    const now = this.#clock.now();
+    return transaction(db, () => {
+      const row = one<SessionRow>(db, `${SESSION_SELECT} WHERE s.id = ?`, input.sessionId);
+      if (!row) throw new HubError(404, 'SESSION_NOT_FOUND', 'Игра не найдена');
+      const status = effectiveStatus(row);
+      if (status === 'OPENING') {
+        throw new HubError(409, 'SESSION_NOT_STARTED', 'Свет ещё не включился — продлить можно, когда игра начнётся');
+      }
+      if (status !== 'ACTIVE' && status !== 'PAUSED') {
+        throw new HubError(409, 'SESSION_NOT_LIVE', 'Игра уже закончилась — продлевать нечего');
+      }
+      if (row.prepaid_minutes === null) {
+        return { extended: false, session: loadSession(db, row.id, now), minutes: 0, price: 0, check: null, applied: 0, change: 0 };
+      }
+
+      assertPrepaidExtension(input.minutes, row.prepaid_minutes);
+      const paidUpfront = row.prepaid_check_id !== null;
+      const payNow = (input.parts?.length ?? 0) > 0;
+      if (payNow && !paidUpfront) {
+        throw new HubError(422, 'PREPAID_PAID_AFTER', 'Эта игра оплачивается после остановки — продление войдёт в её счёт');
+      }
+      const before = computePrepaidDeadline(db, row.id, now);
+      if (!before) throw new HubError(409, 'SESSION_NOT_LIVE', 'Игра уже закончилась — продлевать нечего');
+      // On a pause the time left is frozen at the pause start.
+      const clock = row.pause_started_at ?? now;
+      if (before.deadline <= clock) {
+        throw new HubError(409, 'PREPAID_OVER', 'Время уже вышло — игра сейчас остановится');
+      }
+      const tariff = JSON.parse(row.tariff_snapshot) as TariffConfig;
+      const money = (a: number) => formatMoney(a, tariff.currency);
+      const price = prepaidExtensionPrice(before.deadline, row.prepaid_minutes, input.minutes, tariff, row.timezone);
+      if (input.amount !== undefined && input.amount !== price) {
+        throw new HubError(409, 'PREPAID_PRICE_CHANGED', `Цена изменилась: ${money(price)} — назовите гостю новую сумму`);
+      }
+      if (payNow) requireOpenShift(db, row.club_id);
+
+      run(
+        db,
+        `UPDATE prepaid_games SET minutes = minutes + ?, extended_minutes = extended_minutes + ?,
+           amount = CASE WHEN amount IS NULL THEN NULL ELSE amount + ? END
+         WHERE session_id = ?`,
+        input.minutes,
+        input.minutes,
+        price,
+        row.id,
+      );
+      const after = computePrepaidDeadline(db, row.id, now)!.deadline;
+      const rearm = after - clock > PREPAID_WARNING_MS;
+      run(
+        db,
+        'UPDATE prepaid_games SET deadline_at = ?, warned_at = CASE WHEN ? THEN NULL ELSE warned_at END WHERE session_id = ?',
+        after,
+        rearm ? 1 : 0,
+        row.id,
+      );
+
+      let check: CheckView | null = null;
+      let applied = 0;
+      let change = 0;
+      if (paidUpfront) {
+        const checkId = this.#addExtensionLine(row, input.minutes, price, input.actor, now);
+        if (payNow) {
+          const paid = this.#checks.pay({ checkId, parts: input.parts!, actor: input.actor });
+          if (paid.remaining > 0) {
+            throw new BillingError('PREPAID_NOT_FULLY_PAID', `Продление оплачивается полностью: не хватает ${money(paid.remaining)}`);
+          }
+          ({ applied, change } = paid);
+          check = paid.check;
+        } else {
+          check = loadCheck(db, checkId);
+        }
+      }
+
+      record(db, now, {
+        actor: input.actor,
+        action: 'session.prepaid_extended',
+        entityType: 'session',
+        entityId: row.id,
+        data: {
+          tableId: row.table_id,
+          minutes: input.minutes,
+          totalMinutes: row.prepaid_minutes + input.minutes,
+          from: before.deadline,
+          to: after,
+          price,
+          paidUpfront,
+          checkId: check?.id ?? null,
+          paidNow: payNow,
+          warningRearmed: rearm && before.warnedAt !== null,
+        },
+      });
+      afterCommit(db, () => this.#events.changed({ kind: 'session', tableId: row.table_id }));
+      return { extended: true, session: loadSession(db, row.id, now), minutes: input.minutes, price, check, applied, change };
+    });
+  }
+
+  /**
+   * The line «Продление N мин · Стол 1» for a game paid upfront: on the open check that
+   * already holds an extension of this game, or on a new check. Returns the check id.
+   */
+  #addExtensionLine(row: SessionRow, minutes: number, amount: number, actor: string, now: number): string {
+    const db = this.#db;
+    const tableName = one<{ name: string }>(db, 'SELECT name FROM billiard_tables WHERE id = ?', row.table_id)?.name ?? 'Стол';
+    const itemId = randomUUID();
+    const item = { itemId, kind: 'EXTENSION', extendsSessionId: row.id, tableId: row.table_id, minutes, amount };
+    const open = one<{ id: string }>(
+      db,
+      `SELECT c.id FROM checks c
+       WHERE c.status = 'OPEN' AND EXISTS (SELECT 1 FROM check_items ci WHERE ci.check_id = c.id AND ci.extends_session_id = ?)
+       ORDER BY c.created_at DESC LIMIT 1`,
+      row.id,
+    );
+    let checkId: string;
+    if (open) {
+      checkId = open.id;
+    } else {
+      checkId = randomUUID();
+      const number = (one<{ n: number | null }>(db, 'SELECT MAX(number) AS n FROM checks WHERE club_id = ?', row.club_id)?.n ?? 0) + 1;
+      run(
+        db,
+        `INSERT INTO checks (id, club_id, number, status, created_at, created_by, updated_at) VALUES (?, ?, ?, 'OPEN', ?, ?, ?)`,
+        checkId,
+        row.club_id,
+        number,
+        now,
+        actor,
+        now,
+      );
+      // No sessionId on the item: the game stays on its prepaid check (here and in the cloud).
+      record(db, now, { actor, action: 'check.created', entityType: 'check', entityId: checkId, data: { number, extension: true, items: [] } });
+    }
+    run(
+      db,
+      `INSERT INTO check_items (id, check_id, kind, extends_session_id, minutes, title, amount, created_at)
+       VALUES (?, ?, 'EXTENSION', ?, ?, ?, ?, ?)`,
+      itemId,
+      checkId,
+      row.id,
+      minutes,
+      `Продление ${minutes} мин · ${tableName}`,
+      amount,
+      now,
+    );
+    run(db, 'UPDATE checks SET updated_at = ? WHERE id = ?', now, checkId);
+    record(db, now, { actor, action: 'check.item_added', entityType: 'check', entityId: checkId, data: item });
+    afterCommit(db, () => this.#events.changed({ kind: 'check' }));
+    return checkId;
   }
 
   /** Brings prepaid games in line with the clock. Safe to call any time; tests call it directly. */

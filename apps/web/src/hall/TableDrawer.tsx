@@ -15,6 +15,7 @@ import { Drawer, StatusBadge } from '../components.tsx';
 import { formatClock, formatDuration, formatPause, formatSpan, KIND_LABEL } from '../format.ts';
 import { tablePhase } from '../hall.ts';
 import { Icon } from '../icons.tsx';
+import { ExtendDialog } from '../prepaid/ExtendDialog.tsx';
 import { DurationSelect, PrepaidButton } from '../prepaid/OpenControls.tsx';
 import { PrepaidBadge } from '../prepaid/PrepaidBadge.tsx';
 import { hrefFor } from '../router.tsx';
@@ -173,6 +174,7 @@ function PausedSection({
   currency,
   timezone,
   stopButtons,
+  extendButton,
 }: {
   table: TableView;
   session: SessionView;
@@ -183,6 +185,8 @@ function PausedSection({
   currency: string;
   timezone: string;
   stopButtons: (amount: number) => ReactNode;
+  /** «Продлить» of a prepaid game, or null. */
+  extendButton: ReactNode;
 }) {
   const hub = useHub();
   const current = session.pauses.find((p) => p.to === null) ?? session.pauses.at(-1);
@@ -262,6 +266,7 @@ function PausedSection({
             Продолжить
           </button>
         )}
+        {extendButton}
         {stopButtons(charge.amount)}
       </div>
     </section>
@@ -326,12 +331,14 @@ export function TableDrawer({
   const [minutes, setMinutes] = useState<number | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [moving, setMoving] = useState(false);
+  const [extending, setExtending] = useState(false);
 
   useEffect(() => {
     setTariffId(table.defaultTariffId);
     setMinutes(null);
     setConfirming(false);
     setMoving(false);
+    setExtending(false);
   }, [table.id, table.defaultTariffId]);
   useEffect(() => {
     if (!confirming) return;
@@ -365,6 +372,14 @@ export function TableDrawer({
   const refusal = phase === 'playing' && session ? pauseRefusal(session.pauses, session.tariff, end) : null;
   // Paid upfront: the running amount is not what the guest owes.
   const paidUpfront = prepaid?.amount != null;
+  // «Продлить» a game for N minutes: whoever may sell prepaid time may extend it.
+  const extendButton =
+    prepaid && !confirming && hub.canNow('table.open') ? (
+      <button type="button" className="btn btn-ghost btn-large" disabled={busy} onClick={() => setExtending(true)}>
+        <Icon name="clock" />
+        Продлить
+      </button>
+    ) : null;
 
   const stopButtons = (amount: number) =>
     confirming ? (
@@ -545,6 +560,7 @@ export function TableDrawer({
                 Пауза
               </button>
             )}
+            {extendButton}
             {stopButtons(charge.amount)}
             {!confirming && canContinue && (
               <button type="button" className="btn btn-ghost btn-large" disabled={busy} onClick={() => setMoving((v) => !v)}>
@@ -567,7 +583,12 @@ export function TableDrawer({
           currency={currency}
           timezone={timezone}
           stopButtons={stopButtons}
+          extendButton={extendButton}
         />
+      )}
+
+      {extending && session?.prepaid && (
+        <ExtendDialog target={{ sessionId: session.id, tableName: table.name }} onClose={() => setExtending(false)} />
       )}
 
       <DayHistory sessions={daySessions} timezone={timezone} currency={currency} />

@@ -99,6 +99,9 @@ case "$MDNS_NAME" in *[!A-Za-z0-9.-]*) die "--mdns-name: только латин
 [ "$(id -u)" -eq 0 ] || die "запустите от root: sudo bash install.sh ${ORIG_ARGS[*]:-}"
 
 # ---------- Базовые пакеты (нужны и для самозагрузки) ----------
+# Если apt занят (apt-daily, unattended-upgrades на свежей системе) — ждать до 10 минут, а не падать.
+APT_LOCK_WAIT=(-o DPkg::Lock::Timeout=600)
+
 apt_install() {
   # apt_install <пакеты...> — ставит только недостающие.
   local missing=() p
@@ -107,8 +110,8 @@ apt_install() {
   done
   [ ${#missing[@]} -gt 0 ] || return 0
   log "Устанавливаю пакеты: ${missing[*]}"
-  apt-get update -qq </dev/null
-  apt-get install -y -qq --no-install-recommends "${missing[@]}" </dev/null
+  apt-get "${APT_LOCK_WAIT[@]}" update -qq </dev/null
+  apt-get "${APT_LOCK_WAIT[@]}" install -y -qq --no-install-recommends "${missing[@]}" </dev/null
 }
 
 # ---------- Самозагрузка: запуск через curl | bash без соседних файлов ----------
@@ -150,7 +153,7 @@ install_node_nodesource() {
   curl -fsSL https://deb.nodesource.com/setup_24.x -o "$setup" || { rm -f "$setup"; return 1; }
   bash "$setup" </dev/null >/dev/null || { rm -f "$setup"; return 1; }
   rm -f "$setup"
-  apt-get install -y -qq nodejs </dev/null || return 1
+  apt-get "${APT_LOCK_WAIT[@]}" install -y -qq nodejs </dev/null || return 1
 }
 
 install_node_tarball() {

@@ -5,8 +5,9 @@ import { HubRequestError, hubUrl } from '../api.ts';
 import { BrandMark } from '../BrandMark.tsx';
 import { toggleChoice } from '../cafe/pos-model.ts';
 import { usePolling } from '../cafe/cafe.ts';
-import { formatDuration, formatSpan } from '../format.ts';
+import { formatDuration } from '../format.ts';
 import { Icon } from '../icons.tsx';
+import { formatCountdown } from '../prepaid/prepaid.ts';
 import { fetchGuestPage, sendGuestRequest } from './api.ts';
 import './guest.css';
 
@@ -298,14 +299,33 @@ function GuestTable({ view, money }: { view: GuestPageView; money: (a: Minor) =>
               <strong className="guest-timer">{played === null ? '—' : formatDuration(played)}</strong>
             </div>
             <div>
-              <span>{t.prepaid ? 'Бар к оплате' : t.status === 'AWAITING_PAYMENT' ? 'К оплате' : 'Сейчас к оплате'}</span>
+              <span>
+                {t.prepaid?.paid && t.prepaid.extensionDue === 0
+                  ? 'Бар к оплате'
+                  : t.status === 'AWAITING_PAYMENT' || t.prepaid?.paid
+                    ? 'К оплате'
+                    : 'Сейчас к оплате'}
+              </span>
               <strong>{money(t.total)}</strong>
             </div>
           </div>
           {t.prepaid && (
-            <p className="guest-line">
-              Оплачено заранее: {t.prepaid.minutes} мин{left !== null && t.status !== 'AWAITING_PAYMENT' ? ` · осталось ${formatSpan(left)}` : ''}
+            <p className="guest-line guest-prepaid">
+              {t.prepaid.paid ? 'Оплачено заранее' : 'Игра на время'}: {t.prepaid.minutes} мин
+              {t.prepaid.extendedMinutes > 0 ? ` (продлено на ${t.prepaid.extendedMinutes})` : ''}
+              {left !== null && t.status !== 'AWAITING_PAYMENT' ? (
+                <>
+                  {' · осталось '}
+                  <strong className="guest-left">{formatCountdown(left)}</strong>
+                  {t.status === 'PAUSED' ? ' (пауза)' : ''}
+                </>
+              ) : (
+                ''
+              )}
             </p>
+          )}
+          {t.prepaid?.paid && t.prepaid.extensionDue > 0 && (
+            <p className="guest-line">Продление к оплате: {money(t.prepaid.extensionDue)}</p>
           )}
           {!t.prepaid && t.amount !== null && t.ordersTotal > 0 && (
             <p className="guest-line">

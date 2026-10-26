@@ -207,6 +207,10 @@ export class CheckService {
       if (item.kind === 'ORDER') {
         throw new HubError(409, 'ORDER_LINE_LOCKED', 'Строку бара нельзя убрать из счёта — отмените заказ на странице «Заказы»');
       }
+      // The minutes are already added to the game (prepaid.ts extend): the line is what they cost.
+      if (item.kind === 'EXTENSION') {
+        throw new HubError(409, 'EXTENSION_LINE_LOCKED', 'Продление уже добавлено к игре — его нельзя убрать из счёта');
+      }
       this.#assertNoMoney(check.id);
       // Loyalty: the gift or the bonus share may not fit a smaller check — the cashier applies it again.
       dropLoyaltyDiscount(db, check.id, input.actor, now, 'line_removed');

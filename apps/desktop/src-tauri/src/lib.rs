@@ -1,12 +1,16 @@
 //! TS for the cash-desk PC and the hall mini-PC: the club interface (apps/web, served by the
 //! HUB) in a native window, plus what a browser cannot do — silent receipt printing, a kiosk,
-//! autostart, HUB discovery, installing the HUB on this PC and self-updates.
+//! autostart, HUB discovery, running the built-in HUB on this PC (local_hub.rs) and self-updates.
+//!
+//! `ts-desktop --hub-only` runs only the built-in HUB, without a window; `--open-firewall` asks
+//! Windows to let the club network reach it. Both serve the CI smoke test and support.
 //!
 //! The window starts on the local page `ui/index.html` (setup and device settings) and then
 //! navigates to the HUB origin. Ctrl+Shift+S on any page comes back to the settings.
 
 mod hub;
 mod install;
+mod local_hub;
 mod print;
 mod settings;
 
@@ -14,7 +18,7 @@ use settings::Settings;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_updater::UpdaterExt;
 
@@ -36,6 +40,8 @@ struct AppState {
   hub_origin: Arc<Mutex<Option<String>>>,
   /// A manager key was entered since the settings were opened (kiosk only).
   unlocked: AtomicBool,
+  /// The built-in HUB while this app runs it.
+  local_hub: Mutex<Option<local_hub::Supervisor>>,
 }
 
 impl AppState {
@@ -95,6 +101,10 @@ struct DeviceState {
   version: String,
   platform: &'static str,
   locked: bool,
+  /// This build carries the built-in HUB (hub-bundle).
+  embedded_hub: bool,
+  /// The built-in HUB is running under this app now.
+  local_hub_running: bool,
 }
 
 #[tauri::command]
@@ -106,6 +116,8 @@ fn get_state(app: AppHandle, state: State<'_, AppState>) -> DeviceState {
     version: app.package_info().version.to_string(),
     platform: std::env::consts::OS,
     locked,
+    embedded_hub: bundle(&app).is_some(),
+    local_hub_running: state.local_hub.lock().unwrap().is_some(),
   }
 }
 
@@ -225,6 +237,109 @@ async fn install_hub(app: AppHandle, state: State<'_, AppState>) -> Result<Strin
   Err("HUB установлен, но пока не отвечает. Подождите минуту и нажмите «Найти HUB ещё раз».".into())
 }
 
+// ── The built-in HUB (local_hub.rs) ────────────────────────────────────────
+
+fn bundle(app: &AppHandle) -> Option<local_hub::Bundle> {
+  local_hub::find(app.path().resource_dir().ok().as_deref())
+}
+
+const NO_BUNDLE: &str = "В этой версии TS нет встроенного HUB. Скачайте установщик TS заново на странице «Скачать \
+                         приложение» или установите HUB как службу: Настройки → Обслуживание.";
+
+/// Starts the built-in HUB under this app unless it already runs (here or as a service).
+fn ensure_local_hub(app: &AppHandle) -> Result<(), String> {
+  let state = app.state::<AppState>();
+  let mut slot = state.local_hub.lock().unwrap();
+  if slot.is_some() || local_hub::answers(Duration::from_secs(2)) {
+    return Ok(());
+  }
+  let bundle = bundle(app).ok_or(NO_BUNDLE)?;
+  *slot = Some(local_hub::Supervisor::start(bundle, local_hub::data_dir()?)?);
+  Ok(())
+}
+
+fn stop_local_hub_now(app: &AppHandle) {
+  let supervisor = app.state::<AppState>().local_hub.lock().unwrap().take();
+  if let Some(mut s) = supervisor {
+    s.stop();
+  }
+}
+
+/// «This is the club's main computer»: opens the firewall for the club network (one UAC prompt on
+/// Windows, skipped when declined), starts the built-in HUB, remembers the choice and turns on
+/// autostart so the HUB is back after a reboot. Returns the local origin for `connect`.
+#[tauri::command]
+async fn start_local_hub(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+  state.ensure_unlocked()?;
+  let origin = hub::local_origin();
+  // A HUB already answers on this PC (installed as a service, started earlier): use it as is.
+  if hub::probe(&origin, Duration::from_secs(2)).await {
+    return Ok(origin);
+  }
+  let bundle = bundle(&app).ok_or(NO_BUNDLE)?;
+  if !state.settings().firewall_done {
+    let b = bundle.clone();
+    match tauri::async_runtime::spawn_blocking(move || local_hub::open_firewall(&b)).await.map_err(|e| e.to_string())? {
+      Ok(true) => {
+        let mut s = state.settings.lock().unwrap();
+        s.firewall_done = true;
+        settings::save(&app, &s)?;
+      }
+      Ok(false) => eprintln!("[TS] брандмауэр: разрешение не дано — HUB доступен только с этого компьютера"),
+      Err(e) => eprintln!("[TS] брандмауэр: {e}"),
+    }
+  }
+  let handle = app.clone();
+  tauri::async_runtime::spawn_blocking(move || ensure_local_hub(&handle)).await.map_err(|e| e.to_string())??;
+  {
+    let mut s = state.settings.lock().unwrap();
+    s.hub_here = true;
+    if !s.autostart {
+      match app.autolaunch().enable() {
+        Ok(()) => s.autostart = true,
+        Err(e) => eprintln!("[TS] автозапуск: {e}"),
+      }
+    }
+    settings::save(&app, &s)?;
+  }
+  // The first start creates the database: usually 1–3 s.
+  for _ in 0..60 {
+    if hub::probe(&origin, Duration::from_secs(2)).await {
+      return Ok(origin);
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+  }
+  let log = local_hub::data_dir().map(|d| d.join("logs").join("hub.log").display().to_string()).unwrap_or_default();
+  Err(format!("HUB запущен, но пока не отвечает. Подождите минуту и нажмите «Попробовать ещё раз». Журнал: {log}"))
+}
+
+/// Stops the built-in HUB and forgets «this PC is the HUB».
+#[tauri::command]
+async fn stop_local_hub(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+  state.ensure_unlocked()?;
+  {
+    let mut s = state.settings.lock().unwrap();
+    s.hub_here = false;
+    settings::save(&app, &s)?;
+  }
+  let handle = app.clone();
+  tauri::async_runtime::spawn_blocking(move || stop_local_hub_now(&handle)).await.map_err(|e| e.to_string())
+}
+
+/// Settings button: ask Windows again to let tablets reach the built-in HUB.
+#[tauri::command]
+async fn open_firewall(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+  state.ensure_unlocked()?;
+  let bundle = bundle(&app).ok_or(NO_BUNDLE)?;
+  let opened = tauri::async_runtime::spawn_blocking(move || local_hub::open_firewall(&bundle)).await.map_err(|e| e.to_string())??;
+  if !opened {
+    return Err("Доступ не открыт: Windows не получила разрешение. Нажмите ещё раз и ответьте «Да».".into());
+  }
+  let mut s = state.settings.lock().unwrap();
+  s.firewall_done = true;
+  settings::save(&app, &s)
+}
+
 /// Updater errors in words for the owner; the technical text goes to stderr.
 fn update_error(e: tauri_plugin_updater::Error) -> String {
   use tauri_plugin_updater::Error as E;
@@ -281,7 +396,30 @@ fn is_local(url: &url::Url) -> bool {
   url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost") || url.scheme() == "about"
 }
 
+/// Modes without a window, for the CI smoke test and support.
+fn run_cli(args: &[String]) -> Option<i32> {
+  if args.iter().any(|a| a == "--hub-only") {
+    return Some(local_hub::run_hub_only());
+  }
+  if args.iter().any(|a| a == "--open-firewall") {
+    return Some(match local_hub::find(None).map(|b| local_hub::open_firewall(&b)) {
+      Some(Ok(true)) => 0,
+      Some(Ok(false)) => 1,
+      Some(Err(e)) => {
+        eprintln!("[TS] {e}");
+        4
+      }
+      None => 2,
+    });
+  }
+  None
+}
+
 pub fn run() {
+  let args: Vec<String> = std::env::args().skip(1).collect();
+  if let Some(code) = run_cli(&args) {
+    std::process::exit(code);
+  }
   // reqwest is built with rustls but no crypto provider (feature of the updater); pick the same one.
   let _ = rustls::crypto::ring::default_provider().install_default();
   tauri::Builder::default()
@@ -297,8 +435,23 @@ pub fn run() {
       let handle = app.handle().clone();
       let settings = settings::load(&handle);
       let kiosk = settings.kiosk;
+      let hub_here = settings.hub_here;
       let hub_origin = Arc::new(Mutex::new(None::<String>));
-      app.manage(AppState { settings: Mutex::new(settings), hub_origin: hub_origin.clone(), unlocked: AtomicBool::new(false) });
+      app.manage(AppState {
+        settings: Mutex::new(settings),
+        hub_origin: hub_origin.clone(),
+        unlocked: AtomicBool::new(false),
+        local_hub: Mutex::new(None),
+      });
+      // This PC is the club's HUB: start it before the window asks for it (the page retries meanwhile).
+      if hub_here {
+        let handle = handle.clone();
+        std::thread::spawn(move || {
+          if let Err(e) = ensure_local_hub(&handle) {
+            eprintln!("[TS] встроенный HUB: {e}");
+          }
+        });
+      }
 
       let window = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::App("index.html".into()))
         .title("TS")
@@ -331,11 +484,20 @@ pub fn run() {
       list_printers,
       quit,
       install_hub,
+      start_local_hub,
+      stop_local_hub,
+      open_firewall,
       check_update,
       install_update,
       open_settings,
       print_receipt,
     ])
-    .run(tauri::generate_context!())
-    .expect("error while running TS");
+    .build(tauri::generate_context!())
+    .expect("error while running TS")
+    .run(|app, event| {
+      // The HUB stops with the app (on Windows the job object also covers a crash or the updater).
+      if let RunEvent::Exit = event {
+        stop_local_hub_now(app);
+      }
+    });
 }

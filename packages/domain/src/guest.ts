@@ -221,7 +221,18 @@ export interface GuestTableView {
   /** The rate in force now. */
   priceLabel: string | null;
   pricePerHour: Minor | null;
-  prepaid: { minutes: number; until: number | null; leftMs: number | null } | null;
+  /**
+   * A game for N minutes: `minutes` includes extensions («Продлить»), `extendedMinutes` is that
+   * added part; `paid` — paid upfront; `extensionDue` — extensions of a paid game not paid yet.
+   */
+  prepaid: {
+    minutes: number;
+    until: number | null;
+    leftMs: number | null;
+    paid: boolean;
+    extendedMinutes: number;
+    extensionDue: Minor;
+  } | null;
   orders: Array<{ id: string; createdAt: number; items: GuestRequestLine[]; total: Minor }>;
   ordersTotal: Minor;
   /** Time (unless prepaid) plus open bar orders. */

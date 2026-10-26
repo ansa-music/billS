@@ -2,6 +2,7 @@ import './prepaid.css';
 import type { PrepaidView } from '@bills/domain';
 import { formatMoney, isPrepaidEnding, prepaidRemainingMs } from '@bills/domain';
 import { formatClock } from '../format.ts';
+import { useHub } from '../useHub.tsx';
 import { formatCountdown, formatPrepaidMinutes } from './prepaid.ts';
 
 /**
@@ -24,6 +25,7 @@ export function PrepaidBadge({
   currency: string;
 }) {
   const { until, minutes, amount } = prepaid;
+  const extensionDue = useExtensionDue(prepaid);
   const duration = formatPrepaidMinutes(minutes);
   const clock = pausedAt ?? serverNow;
   const ending = until != null && isPrepaidEnding(clock, until);
@@ -53,10 +55,29 @@ export function PrepaidBadge({
         </p>
       )}
       {amount != null ? (
-        <p className="prepaid-paid">Оплачено {formatMoney(amount, currency)}</p>
+        <>
+          <p className="prepaid-paid">Оплачено {formatMoney(amount - extensionDue, currency)}</p>
+          {extensionDue > 0 && <p className="prepaid-meta prepaid-due">продление {formatMoney(extensionDue, currency)} — к оплате на кассе</p>}
+        </>
       ) : (
         <p className="prepaid-meta">оплата после игры</p>
       )}
     </div>
   );
+}
+
+/**
+ * A game paid upfront whose extension («Продление») still waits on an open check: how much.
+ * `prepaid.amount` is the price of all the prepaid time, extensions included.
+ */
+function useExtensionDue(prepaid: PrepaidView): number {
+  const { state } = useHub();
+  if (prepaid.checkId == null) return 0;
+  const sessionId = state.tables.find((t) => t.session?.prepaid?.checkId === prepaid.checkId)?.session?.id;
+  if (!sessionId) return 0;
+  let due = 0;
+  for (const c of state.checks) {
+    for (const i of c.items) if (i.kind === 'EXTENSION' && i.sessionId === sessionId) due += i.amount;
+  }
+  return due;
 }

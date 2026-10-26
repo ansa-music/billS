@@ -1,12 +1,18 @@
 # TS для Android (apps/mobile, Capacitor): APK приложения владельца (docs/MOBILE_RELEASE_RU.md).
 #
-# - метка mobile-v<версия> (например mobile-v0.1.0): сборка и выпуск на GitHub «TS для Android <версия>»
-#   с файлом TS-<версия>.apk — его находит страница «Скачать приложение»;
-# - ручной запуск (Actions → mobile → Run workflow): пробная сборка, APK — в артефактах запуска, без выпуска;
-# - pull request: только проверка, что APK собирается.
+# - метка mobile-v<версия> (например mobile-v0.1.0): сборка → проверка на эмуляторе → выпуск на GitHub
+#   «TS для Android <версия>» с файлом TS-<версия>.apk — его находит страница «Скачать приложение».
+#   Не прошла проверка на эмуляторе — выпуска нет;
+# - ручной запуск (Actions → mobile → Run workflow): пробная сборка и проверка на эмуляторе, APK — в артефактах
+#   запуска, без выпуска;
+# - pull request: сборка и проверка на эмуляторе.
+#
+# Job'ы: apk (сборка) → emulator-smoke (установка и запуск на эмуляторе Android 14, снимок экрана и logcat
+# в артефакте emulator-report) → release (только для метки).
 #
 # Настройки облака вшиваются в приложение из тех же переменных/секретов, что у deploy.yml:
 #   SUPABASE_PROJECT_REF, SUPABASE_ANON_KEY (обязательны для метки), VAPID_PUBLIC_KEY.
+# Ручной запуск и pull request берут те же значения, то есть публичный проект Supabase сайта.
 # Подпись: секреты ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
 #   (создаёт `npm run android:keystore`). Без них APK подписан отладочным ключом — см. шаг «Ключ подписи».
 name: mobile
@@ -23,7 +29,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: mobile-${{ github.ref }}
@@ -40,6 +46,10 @@ jobs:
       SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF }}
       SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY || secrets.SUPABASE_ANON_KEY }}
       IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/mobile-v') }}
+    outputs:
+      version: ${{ steps.version.outputs.name }}
+      signed: ${{ steps.signing.outputs.signed }}
+      cloud: ${{ steps.cloud.outputs.cloud }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -99,15 +109,19 @@ jobs:
           echo "Версия: $name (versionCode $code)"
 
       # An APK without the cloud address cannot sign in to the cabinet: a release refuses to build.
+      # Trial builds and pull requests use the same repository settings, i.e. the public Supabase project.
       - name: Cloud settings
+        id: cloud
         run: |
           if [ -n "$SUPABASE_PROJECT_REF" ] && [ -n "$SUPABASE_ANON_KEY" ]; then
             echo "Настройки облака Supabase вшиваются в приложение"
+            echo "cloud=supabase" >> "$GITHUB_OUTPUT"
           elif [ "$IS_RELEASE" = true ]; then
             echo "::error::Нет настроек облака: задайте SUPABASE_PROJECT_REF и SUPABASE_ANON_KEY (Settings → Secrets and variables → Actions), как для deploy.yml. Без них приложение не сможет войти в кабинет."
             exit 1
           else
-            echo "::warning::Нет SUPABASE_PROJECT_REF / SUPABASE_ANON_KEY — пробная сборка для своего облака (адрес облака вводится в приложении)."
+            echo "::warning::Нет SUPABASE_PROJECT_REF / SUPABASE_ANON_KEY — пробная сборка для своего облака (адрес облака вводится в приложении), не для облака TS."
+            echo "cloud=self-hosted" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Type-check
@@ -119,6 +133,21 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ (vars.SUPABASE_ANON_KEY || secrets.SUPABASE_ANON_KEY) }}
           VITE_VAPID_PUBLIC_KEY: ${{ vars.VAPID_PUBLIC_KEY || secrets.VAPID_PUBLIC_KEY }}
         run: npm run build -w @bills/mobile
+
+      # The settings above must really be inside the bundle: a build that silently fell back to the
+      # self-hosted variant would show «адрес облака» instead of the TS sign-in.
+      - name: Check cloud in the bundle
+        env:
+          CLOUD: ${{ steps.cloud.outputs.cloud }}
+        run: |
+          [ -f apps/mobile/www/index.html ] || { echo "::error::vite не создал apps/mobile/www/index.html"; exit 1; }
+          if [ "$CLOUD" = supabase ]; then
+            if ! grep -rqF "$SUPABASE_PROJECT_REF.supabase.co" apps/mobile/www; then
+              echo "::error::Адреса облака Supabase нет в собранном приложении (apps/mobile/www) — проверьте VITE_SUPABASE_URL в шаге «Build web part»."
+              exit 1
+            fi
+            echo "Адрес облака Supabase — в сборке"
+          fi
 
       - name: Capacitor sync
         working-directory: apps/mobile
@@ -179,6 +208,7 @@ jobs:
         id: apk
         env:
           VERSION: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
         run: |
           src=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
           if [ ! -f "$src" ]; then
@@ -189,27 +219,142 @@ jobs:
           mkdir -p dist
           cp "$src" "dist/TS-$VERSION.apk"
           (cd dist && sha256sum "TS-$VERSION.apk" > "TS-$VERSION.apk.sha256")
-          # Who signed it (the certificate is public): compare with the fingerprint npm run android:keystore printed.
           tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          # What the phone will see: package, versionCode, minSdk/targetSdk, permissions.
+          badging=$("$tools/aapt2" dump badging "dist/TS-$VERSION.apk")
+          echo "$badging" | grep -E "^(package|sdkVersion|targetSdkVersion|uses-permission|launchable-activity)" || true
+          if ! echo "$badging" | grep -q "package: name='kz.ts.owner' versionCode='$VERSION_CODE'"; then
+            echo "::error::В APK не тот пакет или versionCode (ждали kz.ts.owner, $VERSION_CODE)"
+            exit 1
+          fi
+          echo "$badging" | grep -q "uses-permission: name='android.permission.INTERNET'" || { echo "::error::В APK нет разрешения INTERNET"; exit 1; }
+          echo "$badging" | grep -q "launchable-activity: name='kz.ts.owner.MainActivity'" || { echo "::error::В APK нет запускаемого kz.ts.owner.MainActivity"; exit 1; }
+          # Who signed it (the certificate is public): compare with the fingerprint npm run android:keystore printed.
           certs=$("$tools/apksigner" verify --print-certs "dist/TS-$VERSION.apk")
           echo "$certs" | grep -m1 'certificate DN' || true
           digest=$(echo "$certs" | sed -n 's/.*certificate SHA-256 digest: //p' | head -1 | tr 'a-f' 'A-F' | sed 's/../&:/g; s/:$//')
           echo "Отпечаток сертификата SHA-256: $digest"
           echo "Готово: dist/TS-$VERSION.apk ($(du -h "dist/TS-$VERSION.apk" | cut -f1))"
+          {
+            echo "### TS-$VERSION.apk"
+            echo "- versionCode $VERSION_CODE, облако: ${{ steps.cloud.outputs.cloud }}, подпись: $([ '${{ steps.signing.outputs.signed }}' = true ] && echo 'ключ TS' || echo 'отладочный ключ')"
+            echo "- сертификат SHA-256: \`$digest\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
+      # Hands the APK to emulator-smoke and release; on a manual run this is the APK to download.
       - name: APK to artifacts
-        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: TS-${{ steps.version.outputs.name }}
-          path: dist/TS-${{ steps.version.outputs.name }}.apk
+          path: |
+            dist/TS-${{ steps.version.outputs.name }}.apk
+            dist/TS-${{ steps.version.outputs.name }}.apk.sha256
           if-no-files-found: error
+          retention-days: ${{ github.event_name == 'workflow_dispatch' && 30 || 7 }}
+
+      - name: Remove signing key
+        if: always() && steps.signing.outputs.file != ''
+        run: rm -f "${{ steps.signing.outputs.file }}"
+
+  # The APK on a clean Android 14 emulator: update over the previous release, clean install, launch,
+  # still alive after 20 s, no crash in logcat, the cabinet start screen visible in the WebView.
+  # Screenshot, UI dump and logcat → artifact emulator-report. Script: apps/mobile/scripts/emulator-smoke.sh.
+  emulator-smoke:
+    needs: apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: apps/mobile/scripts
+
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: TS-${{ needs.apk.outputs.version }}
+          path: dist
+
+      # The latest published mobile-v* release (not this tag): the job checks that the new APK installs
+      # over it, as on an owner's phone. No release or no APK in it → the check is skipped.
+      - name: Previous release
+        id: prev
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK: dist/TS-${{ needs.apk.outputs.version }}.apk
+        run: |
+          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isDraft --jq '.[] | select(.isDraft | not) | .tagName' 2>/dev/null \
+            | grep '^mobile-v' | grep -vxF "$GITHUB_REF_NAME" | head -1 || true)
+          if [ -z "$tag" ]; then echo "Прошлых выпусков TS для Android нет — проверка обновления пропускается"; exit 0; fi
+          mkdir -p prev
+          if ! gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern 'TS-*.apk' --dir prev; then
+            echo "::warning::В выпуске $tag нет файла TS-*.apk — проверка обновления пропускается"; exit 0
+          fi
+          prev=$(find prev -name 'TS-*.apk' | head -1)
+          tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          cert() { "$tools/apksigner" verify --print-certs "$1" | sed -n 's/.*certificate SHA-256 digest: //p' | head -1; }
+          same=false
+          [ "$(cert "$prev")" = "$(cert "$APK")" ] && same=true
+          echo "Прошлый выпуск: $tag ($prev), тот же ключ подписи: $same"
+          echo "apk=$prev" >> "$GITHUB_OUTPUT"
+          echo "same_cert=$same" >> "$GITHUB_OUTPUT"
+
+      # https://github.com/ReactiveCircus/android-emulator-runner#running-hardware-accelerated-emulators-on-linux-runners
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # The action runs every line of `script` as a separate `sh -c`, so the logic lives in one bash file.
+      - name: Install and launch on the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          PREV_APK: ${{ steps.prev.outputs.apk }}
+          SAME_CERT: ${{ steps.prev.outputs.same_cert }}
+          IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/mobile-v') }}
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
+          script: bash apps/mobile/scripts/emulator-smoke.sh "dist/TS-${{ needs.apk.outputs.version }}.apk" emulator-report
+
+      - name: Report to artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-report-${{ needs.apk.outputs.version }}
+          path: emulator-report
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Only after the APK passed on the emulator.
+  release:
+    needs: [apk, emulator-smoke]
+    if: startsWith(github.ref, 'refs/tags/mobile-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: TS-${{ needs.apk.outputs.version }}
+          path: dist
 
       - name: Release notes
-        if: env.IS_RELEASE == 'true'
         env:
-          VERSION: ${{ steps.version.outputs.name }}
-          SIGNED: ${{ steps.signing.outputs.signed }}
+          VERSION: ${{ needs.apk.outputs.version }}
+          SIGNED: ${{ needs.apk.outputs.signed }}
         run: |
           {
             echo "Приложение TS для владельца на телефон с Android 8 и новее."
@@ -218,6 +363,8 @@ jobs:
             echo "1. Откройте эту страницу на телефоне и скачайте файл TS-$VERSION.apk."
             echo "2. Откройте скачанный файл. Если телефон спросит — разрешите установку из этого источника."
             echo "3. Войдите той же почтой и паролем, что и в кабинете на сайте."
+            echo
+            echo "Если телефон пишет «Приложение не установлено» — удалите старое приложение TS и установите снова (подробно — docs/MOBILE_RELEASE_RU.md, раздел 0.4)."
             echo
             echo "**Уведомления о тревогах** приходят через бесплатное приложение ntfy: в TS откройте «Телефон и уведомления» → «Получать уведомления через ntfy» и следуйте подсказкам."
             if [ "$SIGNED" != true ]; then
@@ -228,19 +375,14 @@ jobs:
 
       # make_latest: false — «latest» stays with the PC app: its auto-update reads releases/latest (desktop.yml).
       - name: GitHub release
-        if: env.IS_RELEASE == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          name: TS для Android ${{ steps.version.outputs.name }}
+          name: TS для Android ${{ needs.apk.outputs.version }}
           body_path: ${{ runner.temp }}/release-notes.md
           draft: false
           prerelease: false
           make_latest: 'false'
           files: |
-            dist/TS-${{ steps.version.outputs.name }}.apk
-            dist/TS-${{ steps.version.outputs.name }}.apk.sha256
+            dist/TS-${{ needs.apk.outputs.version }}.apk
+            dist/TS-${{ needs.apk.outputs.version }}.apk.sha256
           fail_on_unmatched_files: true
-
-      - name: Remove signing key
-        if: always() && steps.signing.outputs.file != ''
-        run: rm -f "${{ steps.signing.outputs.file }}"

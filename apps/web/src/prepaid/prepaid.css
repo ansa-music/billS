@@ -87,6 +87,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* An extension of a paid game still waiting on a check «Продление». */
+.prepaid-meta.prepaid-due {
+  color: var(--warn, var(--accent));
+  font-weight: 600;
+}
+
 /* The last minutes: the lamp blinks, the badge turns to the warning colour and breathes. */
 
 .prepaid-badge[data-ending],

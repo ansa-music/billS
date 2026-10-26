@@ -16,11 +16,13 @@ import {
   listStaff,
   onboarding,
   reissueBranchHubKey,
+  requireLicensed,
   revokeStaffKey,
   setBranchBusinessType,
   updateStaff,
 } from '../company.ts';
 import type { ManagerRef } from '../company.ts';
+import { ownerBookings, setBookingStatus, updateBookingSettings } from '../booking.ts';
 import { CloudError } from '../errors.ts';
 import { b64urlDecode, registerDevice, removeDevice, saveRules } from '../push.ts';
 import { clubOfCompany } from '../reports.ts';
@@ -67,6 +69,13 @@ import { bearerToken, errorResponse, json, notFound, readJson, readOptionalJson,
  *                                                503 CLOUD_URL_MISSING without SUPABASE_URL / TS_CLOUD_URL)
  *   POST /owner/clubs/:id/business             { type: 'billiards' | 'cafe' } → BranchView (club.edit; 422 INVALID_BUSINESS_TYPE)
  *   GET  /owner/onboarding                     → OnboardingResponse
+ *
+ * «Онлайн-бронь столов» (apps/cloud/src/booking.ts; the guest's side is the function `booking`):
+ *   GET  /owner/clubs/:id/bookings?from=YYYY-MM-DD&days=N  → OwnerBookingsResponse (settings + bookings)
+ *   POST /owner/clubs/:id/bookings/:bookingId/confirm      → OwnerBookingView (409 BOOKING_STATE)
+ *   POST /owner/clubs/:id/bookings/:bookingId/cancel       → OwnerBookingView (409 BOOKING_STATE)
+ *   PUT  /owner/clubs/:id/booking-settings                 UpdateBookingSettingsRequest → BookingSettingsView
+ *                                                           (422 BOOKING_SETTINGS, 409 SLUG_TAKEN, 403 LICENSE_READ_ONLY)
  */
 
 const tariffsSchema: Schema = {
@@ -229,6 +238,32 @@ export async function handleOwner(req: EdgeRequest, ctx: EdgeContext): Promise<R
     if (path.startsWith('/owner/company/')) return json(200, await handleCompany(req, ctx, path.slice('/owner/company'.length)), cors);
     const device = /^\/owner\/devices\/([^/]+)$/.exec(path);
     const clubAction = /^\/owner\/clubs\/([^/]+)\/(hub-code|business)$/.exec(path);
+
+    const bookingsList = /^\/owner\/clubs\/([^/]+)\/bookings$/.exec(path);
+    const bookingAction = /^\/owner\/clubs\/([^/]+)\/bookings\/([^/]+)\/(confirm|cancel)$/.exec(path);
+    const bookingSettings = /^\/owner\/clubs\/([^/]+)\/booking-settings$/.exec(path);
+
+    if (m === 'GET' && bookingsList) {
+      const owner = await requireOwner(req, ctx);
+      const club = await requireClub(ctx, owner, decodeURIComponent(bookingsList[1]!));
+      const q = routeOf(req.url).query;
+      const res = await ownerBookings(ctx.db, ctx.now(), ctx.cabinetUrl, club, q.get('from') || null, Number(q.get('days') ?? 15));
+      return json(200, res, { ...cors, 'cache-control': 'no-store' });
+    }
+
+    if (m === 'POST' && bookingAction) {
+      const owner = await requireOwner(req, ctx);
+      const club = await requireClub(ctx, owner, decodeURIComponent(bookingAction[1]!));
+      const action = bookingAction[3] === 'confirm' ? 'confirm' : 'cancel';
+      return json(200, await setBookingStatus(ctx.db, ctx.now(), club, decodeURIComponent(bookingAction[2]!), action), cors);
+    }
+
+    if (m === 'PUT' && bookingSettings) {
+      const owner = await requireOwner(req, ctx);
+      const club = await requireClub(ctx, owner, decodeURIComponent(bookingSettings[1]!));
+      await requireLicensed(ctx.db, ctx.now(), owner.company_id, 'club.edit');
+      return json(200, await updateBookingSettings(ctx.db, ctx.now(), ctx.cabinetUrl, club, await readJson(req)), cors);
+    }
 
     if (m === 'GET' && path === '/owner/onboarding') {
       const owner = await requireOwner(req, ctx);

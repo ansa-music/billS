@@ -6,6 +6,8 @@ import type {
   CreateCounterOrderRequest,
   CreateCounterOrderResponse,
   CreateGuestRequest,
+  ExtendGuestRequestBody,
+  ExtendPrepaidResponse,
   GuestLinksResponse,
   GuestLinkView,
   GuestMenu,
@@ -419,6 +421,35 @@ export class GuestService {
     });
   }
 
+  /**
+   * The guest's «Продлить на N мин», accepted with the extension itself (PrepaidService.extend):
+   * a prepaid game gets its N minutes — paid now or on a check «Продление» — and the guest page
+   * shows the new time left. An open-ended game has nothing to extend: the request is just
+   * accepted. A refused extension (no shift, wrong price, game over) leaves the request pending.
+   */
+  extend(
+    requestId: string,
+    body: ExtendGuestRequestBody,
+    actor: string,
+  ): { request: StaffGuestRequestView; extension: ExtendPrepaidResponse } {
+    const db = this.#hub.db;
+    const now = this.#hub.clock.now();
+    return transaction(db, () => {
+      const row = this.#pending(requestId);
+      if (row.kind !== 'EXTEND') throw new HubError(409, 'GUEST_NOT_EXTEND', 'Гость не просил продлить игру');
+      if (!row.session_id) throw new HubError(409, 'GUEST_NO_GAME', 'У запроса нет игры — продлите её вручную');
+      const extension = this.#hub.prepaid.extend({
+        sessionId: row.session_id,
+        minutes: row.minutes ?? 30,
+        amount: body.amount,
+        parts: body.parts,
+        actor,
+      });
+      this.#resolveRow(row, 'ACCEPTED', actor, now, { extendedMinutes: extension.minutes });
+      return { request: this.#toStaffView(this.#row(row.id)), extension };
+    });
+  }
+
   reject(requestId: string, reason: string | undefined, actor: string): StaffGuestRequestView {
     const db = this.#hub.db;
     const now = this.#hub.clock.now();
@@ -534,10 +565,29 @@ export class GuestService {
       db,
       orderRows.map((o) => o.id),
     );
+    // Paid upfront: only extensions still waiting on a check «Продление» are due.
+    const extensionDue = s.prepaid?.checkId
+      ? (one<{ due: number | null }>(
+          db,
+          `SELECT SUM(ci.amount) AS due FROM check_items ci JOIN checks c ON c.id = ci.check_id
+           WHERE ci.extends_session_id = ? AND c.status = 'OPEN'`,
+          row.id,
+        )?.due ?? 0)
+      : 0;
+    // On a pause the time left stands still (the deadline moves when play resumes).
+    const leftAt = s.pausedAt ?? now;
     const prepaid = s.prepaid
-      ? { minutes: s.prepaid.minutes, until: s.prepaid.until, leftMs: s.prepaid.until === null ? null : Math.max(0, s.prepaid.until - now) }
+      ? {
+          minutes: s.prepaid.minutes,
+          until: s.prepaid.until,
+          leftMs: s.prepaid.until === null ? null : Math.max(0, s.prepaid.until - leftAt),
+          paid: s.prepaid.checkId !== null,
+          extendedMinutes:
+            one<{ m: number }>(db, 'SELECT extended_minutes AS m FROM prepaid_games WHERE session_id = ?', row.id)?.m ?? 0,
+          extensionDue,
+        }
       : null;
-    const timeDue = s.prepaid?.checkId ? 0 : (s.amount ?? 0);
+    const timeDue = s.prepaid?.checkId ? extensionDue : (s.amount ?? 0);
     return {
       view: {
         name: table.name,
@@ -639,7 +689,7 @@ export class GuestService {
     status: 'ACCEPTED' | 'REJECTED',
     actor: string,
     now: number,
-    extra: { orderId?: string | null; reason?: string | null; counterNumber?: number },
+    extra: { orderId?: string | null; reason?: string | null; counterNumber?: number; extendedMinutes?: number },
   ): void {
     const db = this.#hub.db;
     run(
@@ -665,6 +715,7 @@ export class GuestService {
         guestName: row.guest_name,
         orderId: extra.orderId ?? null,
         ...(extra.counterNumber ? { counterNumber: extra.counterNumber } : {}),
+        ...(extra.extendedMinutes !== undefined ? { extendedMinutes: extra.extendedMinutes } : {}),
         ...(extra.reason ? { reason: extra.reason } : {}),
       },
     });

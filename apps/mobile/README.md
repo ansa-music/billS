@@ -12,6 +12,7 @@ apps/mobile
 ├── capacitor.config.ts   appId kz.ts.owner, имя «TS», CapacitorHttp, заставка
 ├── scripts/android.mjs   сборка: vite build → cap sync android → gradle
 ├── scripts/icons.mjs     иконки и заставка «TS» (без зависимостей)
+├── scripts/emulator-smoke.sh  проверка APK на эмуляторе в CI (mobile.yml, job emulator-smoke)
 ├── android/              проект Android Studio (в git; build/ и local.properties — нет)
 └── ios/                  проект Xcode (SPM), собирается только на Mac
 ```
@@ -82,7 +83,7 @@ npm run build:android-debug -w @bills/mobile
 `apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk` — ставится на телефон с
 включённой «установкой из неизвестных источников» или `adb install -r app-debug.apk`.
 
-**Готовый APK без своего компьютера** собирает GitHub Actions (`.github/workflows/mobile.yml`):
+**Готовый APK без своего компьютера** собирает и проверяет на эмуляторе GitHub Actions (`.github/workflows/mobile.yml`):
 метка `mobile-v1.2.3` → выпуск «TS для Android 1.2.3» с файлом `TS-1.2.3.apk`, ручной запуск →
 пробный APK в артефактах. Как выпустить и как настроить ключ подписи — в
 [docs/MOBILE_RELEASE_RU.md](../../docs/MOBILE_RELEASE_RU.md).

@@ -1,5 +1,6 @@
 import type { SyncEventsRequest, SyncSnapshotRequest } from '@bills/domain';
 import { accessPackage } from '../access.ts';
+import { applyHubBookingEvents, bookingsVersionOf, syncBookings } from '../booking.ts';
 import { CloudError } from '../errors.ts';
 import { hubBackOnline } from '../push.ts';
 import type { HubRow } from '../sync.ts';
@@ -13,6 +14,11 @@ import { bearerToken, errorResponse, json, notFound, readJson, routeOf, validate
  * Edge Function `sync`: the HUB ↔ cloud protocol of apps/cloud/src/http/app.ts,
  * byte-compatible, so a HUB only needs CLOUD_URL=https://<ref>.supabase.co/functions/v1.
  * Serverless: the push queue is flushed before answering (no background work).
+ *
+ * Supabase only (not in apps/cloud): GET /sync/bookings → SyncBookingsResponse («Онлайн-бронь столов»).
+ * POST /sync/events adds `bookingsVersion` once the club has booking settings; the HUB pulls
+ * /sync/bookings when it differs from the version it applied. booking.arrived / booking.no_show
+ * events from the HUB update the cloud's bookings.
  */
 
 const MAX_BATCH = 1000;
@@ -94,9 +100,12 @@ export async function handleSync(req: EdgeRequest, ctx: EdgeContext): Promise<Re
       const body = validate<SyncEventsRequest>(await readJson(req), syncEventsSchema);
       const hub = await requireHub(ctx, req, body.hubId);
       const res = await acceptEvents(ctx.db, ctx.now(), hub, body);
+      // «Онлайн-бронь»: the hall's «пришёл» / «не пришёл» reach the cabinet; the version tells the HUB to pull.
+      await applyHubBookingEvents(ctx.db, ctx.now(), hub.club_id, body.events);
+      const bookingsVersion = await bookingsVersionOf(ctx.db, hub.club_id);
       await flushQuietly(ctx);
       await reportPushConfigured(ctx);
-      return json(200, res);
+      return json(200, bookingsVersion === undefined ? res : { ...res, bookingsVersion });
     }
 
     if (req.method === 'POST' && path === '/sync/snapshot') {
@@ -140,6 +149,13 @@ export async function handleSync(req: EdgeRequest, ctx: EdgeContext): Promise<Re
       const res = await accessPackage(ctx.db, hub);
       await flushQuietly(ctx);
       return json(200, res);
+    }
+
+    if (req.method === 'GET' && path === '/sync/bookings') {
+      const hub = await hubByKey(ctx, req);
+      const hubId = query.get('hubId');
+      if (hubId !== null && hubId !== hub.id) throw new CloudError(403, 'HUB_MISMATCH', 'Ключ выдан другому HUB');
+      return json(200, await syncBookings(ctx.db, ctx.now(), hub.club_id));
     }
 
     return notFound();

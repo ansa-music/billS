@@ -487,14 +487,14 @@ interface CheckRow {
 interface CheckItemRow {
   id: string;
   check_id: string;
-  kind: 'GAME' | 'ORDER';
+  kind: CheckItemView['kind'];
   session_id: string | null;
   title: string;
   amount: number;
   order_id: string | null;
   qty: number | null;
   unit_price: number | null;
-  /** The game of the line: its own for GAME, the order's game for ORDER. */
+  /** The game of the line: its own for GAME, the order's game for ORDER, the extended game for EXTENSION. */
   line_session_id: string | null;
   table_id: string | null;
   started_at: number | null;
@@ -540,7 +540,10 @@ export function discountStep(currency: string): number {
   return minorPerMajor(currency);
 }
 
-/** Each game followed by the bar lines ordered at it; bar lines of games not on the check last. */
+/**
+ * Each game followed by the bar lines ordered at it; bar lines of games not on the check
+ * next; extensions («Продление» of a game paid upfront, whose game is on its own check) last.
+ */
 function groupLines(items: CheckItemRow[]): CheckItemRow[] {
   const games = items.filter((i) => i.kind === 'GAME');
   const onGame = new Set(games.map((g) => g.line_session_id));
@@ -549,6 +552,7 @@ function groupLines(items: CheckItemRow[]): CheckItemRow[] {
     out.push(g, ...items.filter((i) => i.kind === 'ORDER' && i.line_session_id === g.line_session_id));
   }
   out.push(...items.filter((i) => i.kind === 'ORDER' && !onGame.has(i.line_session_id)));
+  out.push(...items.filter((i) => i.kind === 'EXTENSION'));
   return out;
 }
 
@@ -607,7 +611,7 @@ export function loadChecksWhere(db: Db, where: string, ...params: Param[]): Chec
   );
   if (rows.length === 0) return [];
   const ids = JSON.stringify(rows.map((r) => r.id));
-  const items = all<CheckItemRow>(
+  const items = all<CheckItemRow & { extends_session_id?: string | null }>(
     db,
     `SELECT ci.*, COALESCE(ci.session_id, o.session_id) AS line_session_id,
             COALESCE(s.table_id, o.table_id) AS table_id, s.started_at, s.stopped_at, s.played_seconds
@@ -617,6 +621,21 @@ export function loadChecksWhere(db: Db, where: string, ...params: Param[]): Chec
      WHERE ci.check_id IN (SELECT value FROM json_each(?)) ORDER BY ci.created_at, ci.rowid`,
     ids,
   );
+  // «Продление» lines (migration 017) name their game in extends_session_id.
+  const extensions = items.filter((i) => i.kind === 'EXTENSION');
+  if (extensions.length > 0) {
+    const tableOf = new Map(
+      all<{ id: string; table_id: string }>(
+        db,
+        'SELECT id, table_id FROM table_sessions WHERE id IN (SELECT value FROM json_each(?))',
+        JSON.stringify(extensions.map((i) => i.extends_session_id)),
+      ).map((r) => [r.id, r.table_id]),
+    );
+    for (const i of extensions) {
+      i.line_session_id = i.extends_session_id ?? null;
+      i.table_id = i.line_session_id ? (tableOf.get(i.line_session_id) ?? null) : null;
+    }
+  }
   const payments = all<PaymentRow>(
     db,
     'SELECT * FROM payments WHERE check_id IN (SELECT value FROM json_each(?)) ORDER BY at, rowid',
