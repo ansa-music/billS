@@ -14,6 +14,7 @@ import {
 import { Drawer, StatusBadge } from '../components.tsx';
 import { formatClock, formatDuration, formatPause, formatSpan, KIND_LABEL } from '../format.ts';
 import { tablePhase } from '../hall.ts';
+import { BookingBadge, useOpenGuard } from './bookings.tsx';
 import { Icon } from '../icons.tsx';
 import { ExtendDialog } from '../prepaid/ExtendDialog.tsx';
 import { DurationSelect, PrepaidButton } from '../prepaid/OpenControls.tsx';
@@ -320,6 +321,7 @@ export function TableDrawer({
   onClose: () => void;
 }) {
   const hub = useHub();
+  const openGuard = useOpenGuard(hub.state.tables);
   const { state, serverNow } = hub;
   const { timezone, currency } = state.club;
   const phase = tablePhase(table);
@@ -415,6 +417,7 @@ export function TableDrawer({
             {PHASE_LABEL[phase]}
           </span>
           <LampBadge lamp={table.lamp} />
+          <BookingBadge tableId={table.id} />
         </>
       }
     >
@@ -459,7 +462,7 @@ export function TableDrawer({
               type="button"
               className="btn btn-primary btn-large"
               disabled={busy}
-              onClick={() => void hub.openTable(table.id, tariffId, minutes)}
+              onClick={() => openGuard.guard(table.id, () => void hub.openTable(table.id, tariffId, minutes))}
             >
               <Icon name="lamp" />
               Открыть стол{tariff && state.tariffs.length > 1 ? ` · ${tariff.name}` : ''}
@@ -598,6 +601,7 @@ export function TableDrawer({
         Журнал действий этого стола
         <Icon name="chevron" size={16} />
       </a>
+      {openGuard.dialog}
     </Drawer>
   );
 }

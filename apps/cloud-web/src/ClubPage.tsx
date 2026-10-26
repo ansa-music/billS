@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ClubSummary, CloudSessionView, DayStats, HourLoad, PowerOutageView, TableStats } from '@bills/domain';
 import { isLive } from '@bills/domain';
-import { fetchClub, fetchSessions } from './api.ts';
+import { BOOKING_AVAILABLE, fetchClub, fetchSessions } from './api.ts';
 import {
   KIND_LABEL,
   STATUS_LABEL,
@@ -51,6 +51,11 @@ export function ClubHeader({ club, now, tab }: { club: ClubSummary; now: number;
           <a href={clubHref(club.id, 'staff')} aria-current={tab === 'staff' ? 'page' : undefined}>
             Сотрудники
           </a>
+          {BOOKING_AVAILABLE && (
+            <a href={clubHref(club.id, 'bookings')} aria-current={tab === 'bookings' ? 'page' : undefined}>
+              Брони
+            </a>
+          )}
         </nav>
       </div>
     </header>

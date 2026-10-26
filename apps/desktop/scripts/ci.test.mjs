@@ -1,11 +1,11 @@
 // Tests of the release scripts of TS for PC: node --test "apps/desktop/scripts/*.test.mjs"
 // The key pair tests run the real Tauri CLI (after npm ci) and are skipped without it.
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { ciConfig, latestJson, releaseAsset, tagVersion } from './ci.mjs';
+import { ciConfig, hubBundleProblems, latestJson, releaseAsset, tagVersion } from './ci.mjs';
 import { checkKeyPair, keyIdHex, parsePublicKey, runTauri, signFile, tauriCli, verifySignature } from './updater-key.mjs';
 
 describe('tagVersion', () => {
@@ -34,6 +34,26 @@ test('ciConfig: version and public key only when given', () => {
     version: '0.1.2',
     plugins: { updater: { pubkey: 'PUB' } },
   });
+});
+
+test('ciConfig: the built-in HUB joins the installer resources', () => {
+  assert.deepEqual(ciConfig({ version: null, publicKey: null, updaterArtifacts: false, hubBundle: true }), {
+    bundle: { createUpdaterArtifacts: false, resources: { '../hub-bundle/': 'hub-bundle/' } },
+  });
+});
+
+test('hubBundleProblems: names what the HUB folder lacks for the OS', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ts-hub-bundle-'));
+  try {
+    assert.deepEqual(hubBundleProblems(dir, 'win32'), ['node.exe', join('src', 'main.mjs'), join('src', 'migrations'), join('web', 'index.html'), 'package.json']);
+    mkdirSync(join(dir, 'src', 'migrations'), { recursive: true });
+    mkdirSync(join(dir, 'web'));
+    for (const f of ['node', join('src', 'main.mjs'), join('web', 'index.html'), 'package.json']) writeFileSync(join(dir, f), '');
+    assert.deepEqual(hubBundleProblems(dir, 'linux'), []);
+    assert.deepEqual(hubBundleProblems(dir, 'win32'), ['node.exe']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('release assets and latest.json', () => {

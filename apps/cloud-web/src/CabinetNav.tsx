@@ -14,6 +14,7 @@ export function sectionOf(route: Route): Section | null {
     case 'club':
     case 'shifts':
     case 'tariffs':
+    case 'bookings':
     case 'start':
       return 'overview';
     case 'company':

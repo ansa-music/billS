@@ -6,6 +6,10 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import type { RealtimeChannel, Session, SupabaseClient } from '@supabase/supabase-js';
 import type {
+  BookingSettingsView,
+  OwnerBookingsResponse,
+  OwnerBookingView,
+  UpdateBookingSettingsRequest,
   BusinessType,
   BlockClientRequest,
   BranchView,
@@ -716,4 +720,19 @@ export function fetchOnboarding(): Promise<unknown> {
 
 export async function setBusinessType(clubId: string, type: BusinessType): Promise<void> {
   await edge<unknown>('POST', `/owner/clubs/${enc(clubId)}/business`, { type });
+}
+
+// --- «Онлайн-бронь столов» --------------------------------------------------------------
+
+export function fetchBookings(clubId: string, from: string | null, days: number): Promise<OwnerBookingsResponse> {
+  const q = new URLSearchParams({ days: String(days), ...(from ? { from } : {}) });
+  return edge<OwnerBookingsResponse>('GET', `/owner/clubs/${enc(clubId)}/bookings?${q}`);
+}
+
+export function setBookingStatus(clubId: string, bookingId: string, action: 'confirm' | 'cancel'): Promise<OwnerBookingView> {
+  return edge<OwnerBookingView>('POST', `/owner/clubs/${enc(clubId)}/bookings/${enc(bookingId)}/${action}`);
+}
+
+export function saveBookingSettings(clubId: string, patch: UpdateBookingSettingsRequest): Promise<BookingSettingsView> {
+  return edge<BookingSettingsView>('PUT', `/owner/clubs/${enc(clubId)}/booking-settings`, patch);
 }

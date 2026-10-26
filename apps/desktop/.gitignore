@@ -1,0 +1,2 @@
+# Built-in HUB for the installers: node scripts/bundle-hub.mjs
+hub-bundle/

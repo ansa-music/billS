@@ -1,0 +1,127 @@
+/* «Онлайн-бронь столов» on the hall: the badge on a table card and the «Брони» panel. */
+
+.booking-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--info-soft);
+  color: var(--text);
+  border: 1px solid color-mix(in oklab, var(--info) 60%, transparent);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.booking-badge[data-late] {
+  background: var(--warn);
+  color: var(--on-warn);
+  border-color: var(--warn);
+}
+
+.booking-panel {
+  background: var(--surface);
+  border: 1px solid color-mix(in oklab, var(--info) 50%, var(--border));
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.booking-panel h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-lg);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.booking-count {
+  display: inline-flex;
+  min-width: 24px;
+  justify-content: center;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--info);
+  color: var(--on-info);
+  font-size: var(--fs-xs);
+  font-weight: 750;
+}
+
+.booking-later {
+  margin-left: auto;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.booking-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.booking-panel li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border);
+}
+
+.booking-panel li:first-child {
+  border-top: 0;
+}
+
+.booking-panel li[data-status='NO_SHOW'] {
+  opacity: 0.7;
+}
+
+.booking-time {
+  flex: none;
+  min-width: 64px;
+  font-size: var(--fs-lg);
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.booking-time[data-late] {
+  color: var(--warn);
+}
+
+.booking-what {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.booking-what strong {
+  display: block;
+}
+
+.booking-what span {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.booking-what a {
+  color: inherit;
+}
+
+.booking-tools {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.booking-tools .btn {
+  flex: none;
+}
+
+/* The plan view: a small tag under a booked table. */
+.plan-booking {
+  pointer-events: none;
+}

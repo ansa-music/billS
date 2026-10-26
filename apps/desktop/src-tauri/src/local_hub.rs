@@ -35,7 +35,6 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// The HUB files shipped with the app.
 #[derive(Clone, Debug)]
 pub struct Bundle {
-  pub dir: PathBuf,
   pub node: PathBuf,
   pub main: PathBuf,
   pub web: PathBuf,
@@ -54,7 +53,7 @@ impl Bundle {
       .ok()
       .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
       .and_then(|v| v.get("gitSha")?.as_str().map(String::from));
-    Some(Bundle { web: dir.join("web"), node, main, git_sha, dir })
+    Some(Bundle { web: dir.join("web"), node, main, git_sha })
   }
 }
 
@@ -543,7 +542,6 @@ mod tests {
       main: dir.join("src").join("main.mjs"),
       web: dir.join("web"),
       git_sha: Some("abc1234567".into()),
-      dir,
     }
   }
 

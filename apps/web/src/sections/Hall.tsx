@@ -28,6 +28,7 @@ import { TableCard } from '../TableCard.tsx';
 import { ShiftBanner } from '../cash/ShiftBanner.tsx';
 import { useHub, useLive } from '../useHub.tsx';
 import { GuestRequestsPanel } from '../guest/GuestRequestsPanel.tsx';
+import { BookingsPanel, useOpenGuard } from '../hall/bookings.tsx';
 
 type HallView = 'plan' | 'cards';
 const VIEW_KEY = 'bills.hallView';
@@ -251,6 +252,8 @@ export function HallSection() {
   const [selection, setSelection] = useState<PlanSelection | null>(null);
   const [savedView, setSavedView] = useState<HallLayoutView | null>(null);
   const [prepaidFor, setPrepaidFor] = useState<PrepaidTarget | null>(null);
+  // «Онлайн-бронь»: a table booked within the hour asks before a game opens on it.
+  const openGuard = useOpenGuard(state.tables);
 
   const hall = useLive(fetchHall, [], hub.layoutVersion);
   useEffect(() => setSavedView(null), [hall.data]);
@@ -437,6 +440,7 @@ export function HallSection() {
       )}
       <HallSummary dayRevenue={dayRevenue} />
       <GuestRequestsPanel />
+      <BookingsPanel />
 
       <div className="hall-bar">
         <HallFilterChips tables={state.tables} alerts={alerts} filter={filter} onFilter={setFilter} />
@@ -548,8 +552,8 @@ export function HallSection() {
                 serverNow={serverNow}
                 busy={hub.isBusy(table.id) || !hub.online}
                 shiftOpen={state.shift !== null}
-                onOpen={(tariffId, prepaidMinutes) => void hub.openTable(table.id, tariffId, prepaidMinutes)}
-                onPrepaid={(tariffId, minutes) => setPrepaidFor({ tableId: table.id, tariffId, minutes })}
+                onOpen={(tariffId, prepaidMinutes) => openGuard.guard(table.id, () => void hub.openTable(table.id, tariffId, prepaidMinutes))}
+                onPrepaid={(tariffId, minutes) => openGuard.guard(table.id, () => setPrepaidFor({ tableId: table.id, tariffId, minutes }))}
                 onStop={(sessionId) => void hub.stopSession(table.id, sessionId)}
                 onPause={(sessionId) => void hub.pauseSession(table.id, sessionId)}
                 onResume={(sessionId) => void hub.resumeSession(table.id, sessionId)}
@@ -568,10 +572,12 @@ export function HallSection() {
           table={selectedTable}
           alert={alerts.get(selectedTable.id)}
           daySessions={(day.data ?? []).filter((s) => s.tableId === selectedTable.id)}
-          onPrepaid={(tariffId, minutes) => setPrepaidFor({ tableId: selectedTable.id, tariffId, minutes })}
+          onPrepaid={(tariffId, minutes) => openGuard.guard(selectedTable.id, () => setPrepaidFor({ tableId: selectedTable.id, tariffId, minutes }))}
           onClose={() => setSelectedId(null)}
         />
       )}
+
+      {openGuard.dialog}
 
       {prepaidFor && (
         <PrepaidDialog

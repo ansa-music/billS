@@ -53,7 +53,7 @@ export function usePoll<T>(load: () => Promise<T>, intervalMs: number) {
   return { data, error, reload };
 }
 
-export type ClubTab = 'overview' | 'tariffs' | 'shifts' | 'staff';
+export type ClubTab = 'overview' | 'tariffs' | 'shifts' | 'staff' | 'bookings';
 
 export type Route =
   | { kind: 'overview' }
@@ -62,6 +62,8 @@ export type Route =
   | { kind: 'tariffs'; id: string }
   | { kind: 'shifts'; id: string }
   | { kind: 'staff'; id: string }
+  /** «Брони» of a venue (online booking, Supabase). */
+  | { kind: 'bookings'; id: string }
   | { kind: 'company' }
   | { kind: 'phone' }
   /** «Сотрудники» in the cabinet's menu: the venue's staff, or a venue to pick. */
@@ -84,18 +86,19 @@ export function parseHash(hash: string): Route {
   if (path === '/start') return { kind: 'start' };
   if (path === '/signup') return { kind: 'signup' };
   if (path === '/login') return { kind: 'login' };
-  const m = /^\/clubs\/([^/]+)(?:\/(tariffs|shifts|staff))?$/.exec(path);
+  const m = /^\/clubs\/([^/]+)(?:\/(tariffs|shifts|staff|bookings))?$/.exec(path);
   if (m && m[1]) {
     const id = decodeURIComponent(m[1]);
     if (m[2] === 'tariffs') return { kind: 'tariffs', id };
     if (m[2] === 'shifts') return { kind: 'shifts', id };
     if (m[2] === 'staff') return { kind: 'staff', id };
+    if (m[2] === 'bookings') return { kind: 'bookings', id };
     return { kind: 'club', id };
   }
   return { kind: 'overview' };
 }
 
-/** Routing by `location.hash`: #/, #/apps, #/start, #/signup, #/login, #/staff, #/clubs/:id, #/clubs/:id/tariffs, #/clubs/:id/shifts, #/clubs/:id/staff, #/company, #/phone, #/set-password. */
+/** Routing by `location.hash`: #/, #/apps, #/start, #/signup, #/login, #/staff, #/clubs/:id, #/clubs/:id/tariffs, #/clubs/:id/shifts, #/clubs/:id/staff, #/clubs/:id/bookings, #/company, #/phone, #/set-password. */
 export function useHashRoute(): Route {
   const [route, setRoute] = useState<Route>(() => parseHash(location.hash));
   useEffect(() => {

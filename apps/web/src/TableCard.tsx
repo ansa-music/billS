@@ -15,6 +15,7 @@ import { hasProblem, tablePhase } from './hall.ts';
 import { DurationSelect, PrepaidButton } from './prepaid/OpenControls.tsx';
 import { PrepaidBadge } from './prepaid/PrepaidBadge.tsx';
 import { GuestBadge } from './guest/GuestRequestsPanel.tsx';
+import { BookingBadge } from './hall/bookings.tsx';
 
 const HOUR = 60 * 60 * 1000;
 /** After this long without a lamp confirmation staff are told the HUB is retrying. */
@@ -210,6 +211,7 @@ export function TableCard(props: Props) {
           <h2>{table.name}</h2>
           <span className="kind">{KIND_LABEL[table.kind]}</span>
           <GuestBadge tableId={table.id} />
+          <BookingBadge tableId={table.id} />
           {props.onDetails && (
             <button type="button" className="felt-more" onClick={props.onDetails} aria-label={`${table.name}: подробнее`}>
               Подробнее

@@ -2,10 +2,11 @@ import { useRef } from 'react';
 import type { PointerEvent } from 'react';
 import type { AlertView, HallLayout, HubState, Landmark, TableView } from '@bills/domain';
 import { calculateCharge, formatMoney, LANDMARK_LABEL, priceAt } from '@bills/domain';
-import { formatDuration, KIND_LABEL } from '../format.ts';
+import { formatClock, formatDuration, KIND_LABEL } from '../format.ts';
 import type { HallFilter } from '../hall.ts';
 import { hasProblem, matchesFilter, tablePhase } from '../hall.ts';
 import { PlanDefs, PLAN_IDS, TableShape } from './TableShape.tsx';
+import { bookingOnTable, useHallBookings } from './bookings.tsx';
 
 export type PlanSelection = { type: 'table' | 'landmark'; id: string };
 
@@ -70,6 +71,7 @@ function LandmarkShape({
 
 export function PlanView(p: Props) {
   const svg = useRef<SVGSVGElement>(null);
+  const bookings = useHallBookings();
   const drag = useRef<{
     sel: PlanSelection;
     startX: number;
@@ -160,7 +162,10 @@ export function PlanView(p: Props) {
             secondary = `${Math.max(0, Math.floor((p.serverNow - session.requestedAt) / 1000))} с`;
           } else {
             const tariff = tariffById.get(table.defaultTariffId);
-            if (tariff) secondary = `${formatMoney(priceAt(p.serverNow, tariff.config, p.timezone).pricePerHour, p.currency)}/ч`;
+            const booked = p.editing ? null : bookingOnTable(bookings, table.id, p.serverNow);
+            // «Онлайн-бронь»: a free table booked within the hour says so instead of its price.
+            if (booked) secondary = `Бронь ${formatClock(booked.startsAt, p.timezone)}`;
+            else if (tariff) secondary = `${formatMoney(priceAt(p.serverNow, tariff.config, p.timezone).pricePerHour, p.currency)}/ч`;
           }
           const problem = hasProblem(table, alert);
           const selected = p.editing
@@ -185,7 +190,7 @@ export function PlanView(p: Props) {
               issue={p.editing ? (p.issues.get(table.id) ?? null) : null}
               primary={primary}
               secondary={secondary}
-              label={`${table.name}, ${KIND_LABEL[table.kind]}: ${phase === 'playing' ? `идёт игра ${primary}, ${secondary}` : phase === 'paused' ? `на паузе, сыграно ${secondary}` : phase === 'opening' ? 'включаем свет' : 'свободен'}${problem ? ', проблема с лампой' : ''}`}
+              label={`${table.name}, ${KIND_LABEL[table.kind]}: ${phase === 'playing' ? `идёт игра ${primary}, ${secondary}` : phase === 'paused' ? `на паузе, сыграно ${secondary}` : phase === 'opening' ? 'включаем свет' : `свободен${secondary?.startsWith('Бронь') ? `, ${secondary.toLowerCase()}` : ''}`}${problem ? ', проблема с лампой' : ''}`}
               {...(p.editing
                 ? { onPointerDown: startDrag({ type: 'table', id: table.id }, placement.x, placement.y) }
                 : { onActivate: () => p.onOpenTable(table.id) })}

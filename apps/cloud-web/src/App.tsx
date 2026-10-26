@@ -20,6 +20,7 @@ import { StartPage } from './Start.tsx';
 import { CabinetNav } from './CabinetNav.tsx';
 import { markReturning } from './signup.ts';
 import { ClubPage } from './ClubPage.tsx';
+import { BookingsPage } from './Bookings.tsx';
 import { clubHref, requestRefresh, useHashRoute } from './hooks.ts';
 import { Login } from './Login.tsx';
 import { Overview } from './Overview.tsx';
@@ -312,6 +313,7 @@ export function App() {
       {page.kind === 'tariffs' && <Tariffs key={page.id} id={page.id} />}
       {page.kind === 'shifts' && <Shifts key={page.id} id={page.id} />}
       {page.kind === 'staff' && <StaffPage key={page.id} clubId={page.id} />}
+      {page.kind === 'bookings' && <BookingsPage key={page.id} id={page.id} />}
       {page.kind === 'staff-home' && <StaffHome />}
       {page.kind === 'company' && <CompanyPage companyId={owner.company.id} />}
       {page.kind === 'phone' && <Phone />}

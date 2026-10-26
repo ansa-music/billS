@@ -66,6 +66,8 @@
       .timer { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; }
       .links { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
       .links.end { justify-content: flex-end; }
+      details summary { cursor: pointer; color: var(--muted); }
+      details[open] { display: grid; gap: 10px; }
     </style>
   </head>
   <body>
@@ -105,8 +107,8 @@
           <p class="lead">Главная программа TS хранит столы, игры, кассу и заказы заведения. Где она будет работать?</p>
           <div class="choices">
             <button id="choose-install" class="choice main">
-              <strong>Это главный компьютер заведения — установить TS сюда</strong>
-              <span>Для заведения без отдельного мини-ПК. Нужны интернет и права администратора, установка займёт 5–15 минут. Потом вы подключите TS к кабинету кодом подключения. Этот компьютер должен быть включён, пока заведение работает.</span>
+              <strong>Это главный компьютер заведения — запустить HUB здесь</strong>
+              <span>Для заведения без отдельного мини-ПК. Займёт несколько секунд, интернет и пароль администратора не нужны. Потом вы подключите TS к кабинету кодом подключения. Этот компьютер должен быть включён, пока заведение работает: TS будет запускаться вместе с ним.</span>
             </button>
             <button class="choice" data-action="address">
               <strong>TS уже стоит на другом компьютере — ввести адрес</strong>
@@ -133,7 +135,7 @@
         </section>
 
         <section id="w-install" class="welcome" hidden>
-          <h2 id="install-title">Устанавливаю TS на этот компьютер</h2>
+          <h2 id="install-title">Запускаю HUB на этом компьютере</h2>
           <div id="install-progress" class="waiting">
             <div class="spinner" aria-hidden="true"></div>
             <div>
@@ -199,15 +201,31 @@
           <div id="device-status" class="status" role="status"></div>
         </section>
 
+        <section id="local-hub" hidden>
+          <h2>HUB на этом компьютере</h2>
+          <p id="local-hub-text"></p>
+          <div class="row">
+            <button id="local-start" class="primary">Запустить HUB здесь</button>
+            <button id="local-firewall">Открыть доступ планшетам</button>
+            <button id="local-stop" class="danger">Остановить HUB на этом компьютере</button>
+          </div>
+          <div id="local-hub-status" class="status" role="status"></div>
+        </section>
+
         <section id="maintenance" hidden>
           <h2>Обслуживание</h2>
           <div class="row">
             <button id="update">Проверить обновления</button>
-            <button id="install-hub">Установить TS на этот ПК</button>
             <button id="quit" class="danger">Закрыть TS</button>
           </div>
-          <p>«Установить TS» ставит главную программу TS (HUB) на этот ПК как службу (нужны права администратора); адрес после установки — этот же ПК. Затем откроется экран «Подключите кассу к кабинету».</p>
           <div id="maintenance-status" class="status" role="status"></div>
+          <details id="advanced">
+            <summary>Для опытных: HUB как служба</summary>
+            <p>Обычно не нужно: встроенный HUB запускается вместе с TS. Служба работает ещё до входа в Windows, но установка требует интернета и пароля администратора и занимает 5–15 минут (скачиваются Node.js, Git и код TS). Журнал установки: C:\bills\logs\install.log.</p>
+            <div class="row">
+              <button id="install-hub">Установить HUB как службу</button>
+            </div>
+          </details>
         </section>
 
         <p>Вернуться к этим настройкам из интерфейса TS: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>.</p>
@@ -267,11 +285,26 @@
         $('maintenance').hidden = state.locked;
         $('search').disabled = state.locked && Boolean(s.hubUrl);
         $('manual').hidden = state.locked && Boolean(s.hubUrl);
-        $('install-hub').hidden = !canInstallHere();
+        $('advanced').hidden = !canInstallHere();
         $('choose-install').hidden = !canInstallHere();
+        showLocalHub();
         $('kiosk').checked = s.kiosk;
         $('autostart').checked = s.autostart;
         setPrinter(s.printer);
+      }
+
+      /** «HUB на этом компьютере» in the settings. */
+      function showLocalHub() {
+        const s = state.settings;
+        $('local-hub').hidden = state.locked || !canInstallHere();
+        $('local-hub-text').textContent = !state.embeddedHub
+          ? 'В этой версии TS нет встроенного HUB. Скачайте установщик заново на странице «Скачать приложение».'
+          : s.hubHere
+            ? `HUB работает на этом компьютере и запускается вместе с TS. Планшеты открывают адрес этого компьютера с портом 4310. База и журнал — в папке пользователя (${state.platform === 'windows' ? '%LOCALAPPDATA%\\TS\\hub' : '~/.local/share/TS/hub'}).`
+            : 'Если это главный компьютер заведения, HUB может работать прямо здесь — без мини-ПК, интернета и пароля администратора.';
+        $('local-start').hidden = !state.embeddedHub || s.hubHere;
+        $('local-stop').hidden = !s.hubHere;
+        $('local-firewall').hidden = !s.hubHere || state.platform !== 'windows';
       }
 
       function setPrinter(name) {
@@ -352,18 +385,13 @@
       }
 
       function installSteps() {
-        const steps =
-          state.platform === 'windows'
-            ? [
-                'Windows спросит «Разрешить этому приложению вносить изменения?» — нажмите «Да».',
-                'Откроется окно установки — не закрывайте его. Если на компьютере нет Node.js и Git, они установятся сами.',
-                'Когда TS заработает, окно установки закроется и откроется экран «Подключите кассу к кабинету» — там вставьте код подключения из кабинета.',
-              ]
-            : [
-                'Система спросит пароль администратора этого компьютера — введите его.',
-                'Установка идёт без отдельного окна: скачиваются нужные программы и TS.',
-                'Когда TS заработает, откроется экран «Подключите кассу к кабинету» — там вставьте код подключения из кабинета.',
-              ];
+        const steps = [
+          ...(state.platform === 'windows'
+            ? ['Windows может спросить «Разрешить этому приложению вносить изменения?». Нажмите «Да» — так планшеты и телефоны в сети заведения смогут подключаться к этому компьютеру. Если отказаться, TS всё равно заработает на этом компьютере, а доступ можно открыть позже в настройках.']
+            : []),
+          'Через несколько секунд откроется экран «Подключите кассу к кабинету» — вставьте там код подключения из кабинета.',
+          'Этот компьютер должен быть включён, пока заведение работает. TS запускается вместе с ним сам.',
+        ];
         $('install-steps').replaceChildren(
           ...steps.map((text) => {
             const li = document.createElement('li');
@@ -373,13 +401,14 @@
         );
       }
 
+      /** «Это главный компьютер»: the built-in HUB starts here, then the connect screen opens. */
       async function startInstall() {
         if (installing) return;
         installing = true;
         showWelcome('install');
         installSteps();
-        $('install-title').textContent = 'Устанавливаю TS на этот компьютер';
-        $('install-lead').textContent = 'Не выключайте компьютер и не закрывайте TS. Обычно это занимает 5–15 минут.';
+        $('install-title').textContent = 'Запускаю HUB на этом компьютере';
+        $('install-lead').textContent = 'Обычно это занимает несколько секунд.';
         $('install-progress').hidden = false;
         $('install-steps').hidden = false;
         $('install-actions').hidden = true;
@@ -392,16 +421,38 @@
         tick();
         const timer = setInterval(tick, 1000);
         try {
-          const origin = await invoke('install_hub');
-          $('install-title').textContent = 'TS установлен';
-          $('install-lead').textContent = 'Теперь подключите его к кабинету — открываю экран подключения…';
+          const origin = await invoke('start_local_hub');
+          $('install-title').textContent = 'HUB работает';
+          $('install-lead').textContent = 'Открываю экран подключения к кабинету…';
           $('install-steps').hidden = true;
-          if (!(await connect(origin, 'install-status'))) installFailed('TS установлен, но открыть его не удалось');
+          if (!(await connect(origin, 'install-status'))) installFailed('HUB работает, но открыть его не удалось');
         } catch (e) {
           say('install-status', String(e), 'error');
-          installFailed('TS не установлен');
+          installFailed('HUB не запустился');
         } finally {
           clearInterval(timer);
+          installing = false;
+        }
+      }
+
+      /** Advanced: the old service installer (deploy/windows/install.ps1, deploy/linux/install.sh). */
+      async function installService() {
+        if (installing) return;
+        installing = true;
+        const status = 'maintenance-status';
+        const button = $('install-hub');
+        busy(button, true);
+        say(status, state.platform === 'windows'
+          ? 'Устанавливаю HUB как службу: ответьте «Да» на вопрос Windows и не закрывайте окно установки (5–15 минут)…'
+          : 'Устанавливаю HUB как службу: введите пароль администратора (5–15 минут)…');
+        try {
+          const origin = await invoke('install_hub');
+          say(status, 'HUB установлен как служба', 'ok');
+          await connect(origin, status);
+        } catch (e) {
+          say(status, String(e), 'error');
+        } finally {
+          busy(button, false);
           installing = false;
         }
       }
@@ -531,9 +582,37 @@
         }
       };
       $('install-hub').onclick = () => {
-        if (confirm('Установить TS на этот компьютер? Нужны интернет и права администратора, установка займёт 5–15 минут. Потом подключите его к кабинету кодом подключения.')) {
-          previousPanel = 'none';
-          startInstall();
+        if (confirm('Установить HUB как службу Windows? Нужны интернет и пароль администратора, установка займёт 5–15 минут. Встроенный HUB при этом не нужен — остановите его, если он запущен.')) {
+          installService();
+        }
+      };
+      $('local-start').onclick = () => {
+        previousPanel = 'none';
+        startInstall();
+      };
+      $('local-stop').onclick = async (e) => {
+        if (!confirm('Остановить HUB на этом компьютере? Кассы и планшеты перестанут работать, пока HUB не запустят снова. Данные заведения сохранятся.')) return;
+        busy(e.target, true);
+        try {
+          await invoke('stop_local_hub');
+          say('local-hub-status', 'HUB остановлен. Данные сохранены — запустить его снова можно здесь же.', 'ok');
+        } catch (err) {
+          say('local-hub-status', String(err), 'error');
+        } finally {
+          busy(e.target, false);
+          await refresh();
+        }
+      };
+      $('local-firewall').onclick = async (e) => {
+        busy(e.target, true);
+        say('local-hub-status', 'Windows спросит разрешение — нажмите «Да»…');
+        try {
+          await invoke('open_firewall');
+          say('local-hub-status', 'Готово: планшеты в сети заведения могут подключаться. Если не получается — в Windows сделайте сеть «Частной» (Параметры → Сеть и Интернет).', 'ok');
+        } catch (err) {
+          say('local-hub-status', String(err), 'error');
+        } finally {
+          busy(e.target, false);
         }
       };
 
@@ -548,10 +627,18 @@
           await firstSearch();
           return;
         }
-        // Saved HUB: open it; if it is down (power cut, Wi-Fi), keep retrying.
+        // Saved HUB: open it; if it is down (power cut, Wi-Fi), keep retrying. The built-in HUB of
+        // this PC is starting together with TS: a few seconds, not an error.
         showSettings();
+        let tries = 0;
         const attempt = async () => {
           if (await connect(null)) return;
+          tries += 1;
+          if (state.settings.hubHere && tries <= 15) {
+            say('hub-status', 'Запускаю HUB на этом компьютере…');
+            retry = setTimeout(attempt, 2000);
+            return;
+          }
           say('hub-status', `HUB не отвечает (${state.settings.hubUrl}). Повтор через 5 секунд…`, 'error');
           retry = setTimeout(attempt, 5000);
         };

@@ -1,4 +1,8 @@
 import type {
+  BookingSettingsView,
+  OwnerBookingsResponse,
+  OwnerBookingView,
+  UpdateBookingSettingsRequest,
   BusinessType,
   BlockClientRequest,
   BranchView,
@@ -368,4 +372,25 @@ export async function fetchOnboarding(): Promise<unknown> {
 
 export async function setBusinessType(clubId: string, type: BusinessType): Promise<void> {
   return SUPABASE_MODE ? (await sb()).setBusinessType(clubId, type) : http.setBusinessType(clubId, type);
+}
+
+// --- «Онлайн-бронь столов» (Supabase only; the guest's page is book.ts) -------------------
+
+/** Online booking lives in the TS cloud (Supabase): the self-hosted cloud has no public page. */
+export const BOOKING_AVAILABLE: boolean = SUPABASE_MODE;
+
+const noBooking = (): never => {
+  throw new CloudRequestError(404, 'NOT_AVAILABLE', 'Онлайн-бронь есть только в облаке TS');
+};
+
+export async function fetchBookings(clubId: string, from: string | null, days: number): Promise<OwnerBookingsResponse> {
+  return SUPABASE_MODE ? (await sb()).fetchBookings(clubId, from, days) : noBooking();
+}
+
+export async function setBookingStatus(clubId: string, bookingId: string, action: 'confirm' | 'cancel'): Promise<OwnerBookingView> {
+  return SUPABASE_MODE ? (await sb()).setBookingStatus(clubId, bookingId, action) : noBooking();
+}
+
+export async function saveBookingSettings(clubId: string, patch: UpdateBookingSettingsRequest): Promise<BookingSettingsView> {
+  return SUPABASE_MODE ? (await sb()).saveBookingSettings(clubId, patch) : noBooking();
 }

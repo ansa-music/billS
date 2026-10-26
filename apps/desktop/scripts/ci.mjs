@@ -6,6 +6,9 @@
 //     desktop-v<version> tag (so a tag alone is enough for a release), the updater public key from
 //     the TAURI_UPDATER_PUBKEY repository variable, updater files only when there is a signing key.
 //     With a key, checks that it matches that public key and stops the build if it does not.
+//     Adds the built-in HUB (apps/desktop/hub-bundle from `node scripts/bundle-hub.mjs --node …`) to
+//     the installer resources and stops the build when it is missing: an installer without it could
+//     not start the HUB on the club PC.
 //   node apps/desktop/scripts/ci.mjs signatures <dir>…
 //     Every installer (.msi, .deb) in the folders gets a .sig that the public key verifies.
 //   node apps/desktop/scripts/ci.mjs release <in-dir> <out-dir>
@@ -30,6 +33,10 @@ import {
 } from './updater-key.mjs';
 
 export const CI_CONF = join(DESKTOP_DIR, 'src-tauri', 'tauri.ci.conf.json');
+/** Built-in HUB made by scripts/bundle-hub.mjs; installed as <resources>/hub-bundle (local_hub.rs). */
+export const HUB_BUNDLE = join(DESKTOP_DIR, 'hub-bundle');
+/** `bundle.resources` entry: the source is relative to src-tauri. */
+export const HUB_RESOURCES = { '../hub-bundle/': 'hub-bundle/' };
 /** Prerelease that always holds the newest latest.json: the endpoint in tauri.conf.json points here. */
 export const UPDATER_CHANNEL_TAG = 'desktop-latest';
 const TAG_PREFIX = 'desktop-v';
@@ -80,14 +87,31 @@ export function tagVersion(refType, refName) {
 }
 
 /** Config merged over tauri.conf.json by `tauri build --config` (JSON merge patch). */
-export function ciConfig({ version, publicKey, updaterArtifacts }) {
+export function ciConfig({ version, publicKey, updaterArtifacts, hubBundle = false }) {
   const config = { bundle: { createUpdaterArtifacts: updaterArtifacts } };
+  // JSON merge patch: adds to the deploy/ resources of tauri.conf.json.
+  if (hubBundle) config.bundle.resources = HUB_RESOURCES;
   if (version) config.version = version;
   if (publicKey) config.plugins = { updater: { pubkey: publicKey } };
   return config;
 }
 
+/** What is missing in the built-in HUB folder for this OS ([] — complete). */
+export function hubBundleProblems(dir, platform = process.platform) {
+  const node = platform === 'win32' ? 'node.exe' : 'node';
+  return [node, join('src', 'main.mjs'), join('src', 'migrations'), join('web', 'index.html'), 'package.json'].filter(
+    (f) => !existsSync(join(dir, f)),
+  );
+}
+
 function prepare() {
+  const missing = hubBundleProblems(HUB_BUNDLE);
+  if (missing.length) {
+    fail(
+      `Нет встроенного HUB для установщика (${HUB_BUNDLE}: не хватает ${missing.join(', ')}). ` +
+        'Сначала выполните: node scripts/bundle-hub.mjs --node host',
+    );
+  }
   let version;
   try {
     version = tagVersion(env('GITHUB_REF_TYPE'), env('GITHUB_REF_NAME'));
@@ -130,7 +154,7 @@ function prepare() {
     annotate(version ? 'warning' : 'notice', message);
   }
 
-  const config = ciConfig({ version, publicKey: variable || null, updaterArtifacts: signing });
+  const config = ciConfig({ version, publicKey: variable || null, updaterArtifacts: signing, hubBundle: true });
   writeFileSync(CI_CONF, `${JSON.stringify(config, null, 2)}\n`);
   console.log(`${CI_CONF}: ${JSON.stringify(config)}`);
   setOutput('signing', String(signing));
