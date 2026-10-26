@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2054 # запятые — внутри параметров QEMU, а не разделители массива
 # vm-test.sh — проверка образа «TS для мини-ПК» в QEMU, как на настоящем мини-ПК:
 # флешка USB + пустой NVMe-диск, сеть по DHCP, никто ничего не нажимает.
 #
@@ -59,7 +60,7 @@ while [ $# -gt 0 ]; do
     --firstboot-timeout) FIRSTBOOT_TIMEOUT="$2"; shift 2 ;;
     --no-reboot-check) REBOOT_CHECK=0; shift ;;
     --no-extract) EXTRACT=0; shift ;;
-    -h | --help) sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '3,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "неизвестный параметр: $1 (см. --help)" ;;
   esac
 done
@@ -360,5 +361,5 @@ if [ "$REBOOT_CHECK" = 1 ]; then
   wait_vm_exit $((3 * 60 * SLOW)) || true
 fi
 
-PHASE=done
+PHASE=final
 pass "все этапы пройдены ($FIRMWARE)"

@@ -41,18 +41,32 @@ deploy/minipc/build-iso.sh --iso ~/debian-13.1.0-amd64-netinst.iso   # без с
 
 Результат: `dist/minipc/TS-minipc-<версия>.iso` и `.sha256`. Скрипт проверяет SHA512SUMS и подпись Debian CD (`--gpg auto|require|off`), не требует root, падает, если образ больше 2 ГиБ.
 
-CI: `.github/workflows/minipc.yml` — PR/ручной запуск → артефакт на 3 дня; тег `minipc-v<версия>` → выпуск «TS для мини-ПК <версия>».
+`--serial` — образ для проверки в QEMU (`TS-minipc-<версия>-serial.iso`): те же пункты меню, только меню дублируется на COM-порт, ядру добавлено `console=ttyS0,115200n8 console=tty0` (установщик остаётся на экране), а журнал установщика уходит на хост QEMU (`log_host=10.0.2.2 log_port=5514 DEBCONF_DEBUG=5`). Установленная система с `console=ttyS…` дублирует журнал systemd на этот порт (late.sh).
+
+CI: `.github/workflows/minipc.yml` — job `iso` собирает обычный и `--serial` образы; `install-test` (BIOS, UEFI, UEFI Secure Boot) ставит `--serial` образ в QEMU; `release` (только тег `minipc-v<версия>`) выпускает «TS для мини-ПК <версия>», если проверка прошла. PR/ручной запуск → образы в артефактах на 3 дня; в ручном запуске проверку можно выключить (`install_test`).
 
 ## Проверка в QEMU
+
+Автоматически (так же в CI, job `install-test`):
+
+```bash
+sudo apt-get install -y qemu-system-x86 qemu-utils ovmf
+deploy/minipc/build-iso.sh --serial --out /tmp/out
+deploy/minipc/test/vm-test.sh --iso /tmp/out/TS-minipc-<версия>-serial.iso --firmware uefi --out /tmp/vm   # bios | uefi | uefi-sb
+```
+
+Флешка — USB (`usb-storage`, pick-disk.sh её исключает), диск — пустой NVMe 20 ГБ, сеть — DHCP QEMU с пробросом `127.0.0.1:14310 → 4310`. Этапы: установка без вопросов (QEMU с `-no-reboot` завершается на перезагрузке) → первая загрузка до `GET /api/setup/status` = `"open":true`, `/api/health` ok, `/setup` 200 → выключение кнопкой питания (ACPI) и повторная загрузка. В UEFI флешка остаётся вставленной (проверка «забытой флешки»), в BIOS — вынимается. Тайм-ауты: 50 + 50 + 15 мин с KVM, без KVM ×3. Результаты в `--out`: `serial-*.log`, `installer-syslog.log` (с вопросами debconf; установка, молчащая 15 мин, считается зависшей), `screens/*.png` (раз в минуту), `api-*.json`, `guest-logs/` (с диска гостя через qemu-nbd, нужен sudo: журнал установщика, `ts-firstboot.log`, journal), `result.txt`.
+
+Вручную:
 
 ```bash
 qemu-img create -f qcow2 disk.qcow2 20G
 cp /usr/share/OVMF/OVMF_VARS_4M.fd vars.fd
-qemu-system-x86_64 -m 4096 -enable-kvm \
+qemu-system-x86_64 -machine q35 -m 4096 -enable-kvm \
   -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd -drive if=pflash,format=raw,file=vars.fd \
-  -drive file=TS-minipc-0.1.0.iso,format=raw,if=none,id=usb,readonly=on -device qemu-xhci -device usb-storage,drive=usb,bootindex=0 \
-  -drive file=disk.qcow2,if=none,id=hd -device virtio-blk-pci,drive=hd,bootindex=1 \
-  -nic user,model=virtio-net-pci
+  -drive file=TS-minipc-0.1.0.iso,format=raw,if=none,id=usb,readonly=on -device qemu-xhci -device usb-storage,drive=usb,removable=on,bootindex=0 \
+  -drive file=disk.qcow2,if=none,id=hd -device nvme,serial=TS1,drive=hd,bootindex=1 \
+  -nic user,model=virtio-net-pci,hostfwd=tcp::14310-:4310
 ```
 
-Без `pflash`-строк — загрузка BIOS. Флешка подключена как USB — так pick-disk.sh её исключает, как на настоящем мини-ПК.
+Без `pflash`-строк — загрузка BIOS.

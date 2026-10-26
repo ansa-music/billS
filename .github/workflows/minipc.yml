@@ -1,11 +1,18 @@
 # TS для мини-ПК: образ флешки TS-minipc-<версия>.iso (Debian netinst + автоматическая установка TS).
 #
-# - pull request (deploy/minipc/**, этот файл) и ручной запуск: сборка, образ — в артефактах запуска
-#   (хранится 3 дня, чтобы не тратить место);
-# - тег minipc-v<версия> (например minipc-v0.1.0): выпуск на GitHub «TS для мини-ПК <версия>»
-#   с TS-minipc-<версия>.iso и .sha256 — его показывает страница «Скачать приложение».
+# - pull request (deploy/minipc/**, deploy/linux/**, этот файл) и ручной запуск: сборка + проверка
+#   установки в QEMU; образ — в артефактах запуска (хранится 3 дня, чтобы не тратить место);
+# - тег minipc-v<версия> (например minipc-v0.1.0): то же, и только если проверка установки прошла —
+#   выпуск на GitHub «TS для мини-ПК <версия>» с TS-minipc-<версия>.iso и .sha256 (его показывает
+#   страница «Скачать приложение»).
 #
-# Образ ставит TS ровно того коммита, из которого собран (--ref github.sha); дальше — bills update.
+# Проверка установки (job install-test, deploy/minipc/test/vm-test.sh): образ --serial (тот же, только
+# с COM-портом и журналами) ставится в QEMU на пустой NVMe-диск с USB-флешки — BIOS, UEFI и UEFI с
+# Secure Boot; ждём, пока HUB ответит /api/setup/status "open":true и /api/health, затем выключение
+# кнопкой питания и повторная загрузка. Журналы и снимки экрана — артефакт vm-<прошивка>.
+#
+# Образ ставит TS ровно того коммита, из которого собран (--ref = коммит; у pull request — его
+# последний коммит, а не служебный merge-коммит); дальше — bills update.
 # Версия Debian: ручной запуск (поле debian) или переменная репозитория MINIPC_DEBIAN_VERSION,
 # по умолчанию current. Подробно — deploy/minipc/README.md.
 name: minipc
@@ -24,6 +31,11 @@ on:
         description: 'Версия Debian netinst: current или номер, например 13.1.0'
         required: false
         default: current
+      install_test:
+        description: 'Проверить установку в QEMU (BIOS, UEFI, UEFI Secure Boot)'
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: read
@@ -36,12 +48,15 @@ jobs:
   iso:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    permissions:
-      contents: write
     env:
       DEBIAN_VERSION: ${{ inputs.debian || vars.MINIPC_DEBIAN_VERSION || 'current' }}
+      TS_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+    outputs:
+      version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TS_REF }}
 
       - name: Инструменты
         run: |
@@ -50,9 +65,10 @@ jobs:
 
       - name: Проверка скриптов
         run: |
-          for f in deploy/linux/*.sh deploy/minipc/*.sh deploy/minipc/target/opt/ts-minipc/*.sh; do bash -n "$f"; done
+          for f in deploy/linux/*.sh deploy/minipc/*.sh deploy/minipc/test/*.sh deploy/minipc/target/opt/ts-minipc/*.sh; do bash -n "$f"; done
           for f in deploy/minipc/d-i/*.sh; do sh -n "$f"; done
-          shellcheck -S warning deploy/minipc/*.sh deploy/minipc/d-i/*.sh deploy/minipc/target/opt/ts-minipc/*.sh
+          python3 -m py_compile deploy/minipc/test/*.py
+          shellcheck -S warning deploy/minipc/*.sh deploy/minipc/d-i/*.sh deploy/minipc/test/*.sh deploy/minipc/target/opt/ts-minipc/*.sh
 
       - name: Версия
         id: v
@@ -60,7 +76,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/minipc-v* ]]; then
             v="${GITHUB_REF_NAME#minipc-v}"
           else
-            v="dev-${GITHUB_SHA::7}"
+            v="dev-${TS_REF::7}"
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
@@ -68,14 +84,25 @@ jobs:
         run: |
           deploy/minipc/build-iso.sh \
             --version "${{ steps.v.outputs.version }}" \
-            --ref "$GITHUB_SHA" \
+            --ref "$TS_REF" \
             --debian "$DEBIAN_VERSION" \
             --gpg auto \
             --out dist/minipc \
             --work "$RUNNER_TEMP/minipc"
 
+      # Тот же образ (тот же Debian из кэша, тот же коммит), только с консолью на COM-порту — для install-test.
+      - name: Сборка образа для проверки (--serial)
+        run: |
+          deploy/minipc/build-iso.sh \
+            --version "${{ steps.v.outputs.version }}" \
+            --ref "$TS_REF" \
+            --debian "$DEBIAN_VERSION" \
+            --gpg auto \
+            --serial \
+            --out dist/minipc-test \
+            --work "$RUNNER_TEMP/minipc"
+
       - name: Образ в артефакты
-        if: ${{ !startsWith(github.ref, 'refs/tags/minipc-v') }}
         uses: actions/upload-artifact@v4
         with:
           name: TS-minipc-${{ steps.v.outputs.version }}
@@ -84,12 +111,91 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
+      - name: Образ для проверки в артефакты
+        uses: actions/upload-artifact@v4
+        with:
+          name: TS-minipc-${{ steps.v.outputs.version }}-serial
+          path: dist/minipc-test/TS-minipc-*-serial.iso
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error
+
+  install-test:
+    needs: iso
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.install_test }}
+    runs-on: ubuntu-latest
+    # С KVM — около часа; без KVM (эмуляция TCG) vm-test.sh сам утраивает тайм-ауты.
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        firmware: [bios, uefi, uefi-sb]
+    env:
+      TS_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TS_REF }}
+
+      - name: QEMU и KVM
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 qemu-utils ovmf parted
+          # KVM на раннерах GitHub: https://github.blog/changelog/2024-04-02-github-actions-hardware-accelerated-android-virtualization-now-available/
+          if [ -e /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+            sudo chmod 666 /dev/kvm || true
+          fi
+          ls -l /dev/kvm || echo "KVM нет — проверка пойдёт в эмуляции TCG (в 3 раза медленнее)"
+
+      - name: Образ для проверки
+        uses: actions/download-artifact@v4
+        with:
+          name: TS-minipc-${{ needs.iso.outputs.version }}-serial
+          path: iso
+
+      - name: Установка в QEMU (${{ matrix.firmware }})
+        run: |
+          deploy/minipc/test/vm-test.sh \
+            --iso "iso/TS-minipc-${{ needs.iso.outputs.version }}-serial.iso" \
+            --firmware "${{ matrix.firmware }}" \
+            --out vm-out
+
+      - name: Журналы и снимки экрана
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: vm-${{ matrix.firmware }}
+          path: |
+            vm-out/
+            !vm-out/disk.qcow2
+            !vm-out/efivars.fd
+          retention-days: 7
+          if-no-files-found: warn
+
+  release:
+    needs: [iso, install-test]
+    if: ${{ startsWith(github.ref, 'refs/tags/minipc-v') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Образ из сборки
+        uses: actions/download-artifact@v4
+        with:
+          name: TS-minipc-${{ needs.iso.outputs.version }}
+          path: dist/minipc
+
       - name: Выпуск на GitHub
-        if: ${{ startsWith(github.ref, 'refs/tags/minipc-v') }}
         env:
           GH_TOKEN: ${{ github.token }}
-          V: ${{ steps.v.outputs.version }}
+          GH_REPO: ${{ github.repository }}
+          V: ${{ needs.iso.outputs.version }}
         run: |
+          (cd dist/minipc && sha256sum -c "TS-minipc-${V}.iso.sha256")
           cat > "$RUNNER_TEMP/notes.md" <<EOF
           Образ флешки для мини-ПК клуба: TS ставится сам, без программиста.
 
