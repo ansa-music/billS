@@ -194,7 +194,7 @@ export function BookPage({ refId }: { refId: string }) {
             Добавить в календарь
           </button>
           <p className="book-note">
-            Стол держим 15 минут после начала. Если планы изменятся — позвоните в клуб, чтобы стол достался другим гостям.
+            Стол держим {first.holdMinutes ?? 15} минут после начала. Если планы изменятся — позвоните в клуб, чтобы стол достался другим гостям.
           </p>
           <button
             type="button"
@@ -362,7 +362,8 @@ export function BookPage({ refId }: { refId: string }) {
             {chosen ? (
               <>
                 <strong>
-                  {date === today ? 'Сегодня' : dayText(date ?? '')}, {chosen.time}–{bookingClock(chosen.startsAt + minutes * 60_000, tz)}
+                  {date === today || dayChipTitle(date ?? '', today) === 'Завтра' ? dayChipTitle(date ?? '', today) : dayText(date ?? '')} · {chosen.time}–
+                  {bookingClock(chosen.startsAt + minutes * 60_000, tz)}
                 </strong>
                 <span>
                   {durationText(minutes)} · {kind === 'any' ? 'любой стол' : BOOKING_KIND_LABEL[kind].toLowerCase()}

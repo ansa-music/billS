@@ -74,13 +74,24 @@ export function bookingOnTable(list: HubBookingsResponse | null, tableId: string
   return hit ? (list.bookings.find((b) => b.id === hit.id) ?? null) : null;
 }
 
-/** «Бронь 19:00 · Аня» on a table card (cards and the drawer). */
-export function BookingBadge({ tableId }: { tableId: string }) {
+/** «Бронь 19:00 · Аня» on a table: a strip under the felt of a card, a badge in the drawer. */
+export function BookingBadge({ tableId, strip = false }: { tableId: string; strip?: boolean }) {
   const hub = useHub();
   const list = useHallBookings();
   const b = bookingOnTable(list, tableId, hub.serverNow);
   if (!b) return null;
   const late = hub.serverNow >= b.startsAt;
+  if (strip) {
+    return (
+      <p className="booking-strip" data-late={late || undefined}>
+        <Icon name="clock" size={16} />
+        <span>
+          <strong>Бронь {formatClock(b.startsAt, hub.state.club.timezone)}</strong> · {b.guestName} · {durationText(b.minutes)}
+          {late ? ' · опаздывает' : ''}
+        </span>
+      </p>
+    );
+  }
   return (
     <span className="booking-badge" data-late={late || undefined} title={`Онлайн-бронь: ${b.guestName}, ${durationText(b.minutes)}`}>
       <Icon name="clock" size={12} /> Бронь {formatClock(b.startsAt, hub.state.club.timezone)} · {b.guestName}

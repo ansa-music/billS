@@ -307,7 +307,9 @@ jobs:
             for _ in $(seq 1 "${1:-120}"); do curl -sf "$base/api/health" -o /tmp/health.json && return 0; sleep 0.5; done
             echo 'HUB не ответил на /api/health'; tail -60 "$data/logs/hub.log" || true; return 1
           }
-          hub_node() { pgrep -f "^$bundle/node " || pgrep -f "^$data/runtime/node " || true; }
+          hub_node() { pgrep -f "node --env-file-if-exists=$data/hub.env" || true; }
+          ts=
+          trap '[ -n "$ts" ] && kill "$ts" 2>/dev/null; true' EXIT
           "$bin" --hub-only & ts=$!
           wait_health
           cat /tmp/health.json; echo
@@ -324,13 +326,13 @@ jobs:
           echo; sleep 4; wait_health 60
           curl -sf "$base/api/setup/status" | grep -q '"hubId":"ci-smoke-hub"'
           echo '— TS убит: HUB закрывается вместе с ним'
-          kill -9 $ts; sleep 3
+          kill -9 "$ts"; sleep 3; ts=
           [ -z "$(hub_node)" ] || { echo 'HUB остался работать'; exit 1; }
           if curl -sf "$base/api/health" -o /dev/null; then echo 'HUB отвечает после закрытия TS'; exit 1; fi
           echo '— повторный запуск на той же базе'
           "$bin" --hub-only & ts=$!
           wait_health
-          kill $ts; sleep 3
+          kill "$ts"; sleep 3; ts=
           [ -z "$(hub_node)" ]
           tail -20 "$data/logs/hub.log"
           echo 'Встроенный HUB (.deb): всё в порядке'

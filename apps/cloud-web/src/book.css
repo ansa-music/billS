@@ -73,6 +73,7 @@
   gap: 8px;
   overflow-x: auto;
   scroll-snap-type: x proximity;
+  scroll-padding-inline: 16px;
   margin: 0 -16px;
   padding: 2px 16px 6px;
   scrollbar-width: none;
@@ -133,7 +134,7 @@
 
 .book-seg-wrap {
   grid-auto-flow: row;
-  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(68px, 1fr));
 }
 
 .book-seg button {
@@ -267,7 +268,7 @@
 }
 
 .book-bar-what strong {
-  font-size: 16px;
+  font-size: 15px;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -293,6 +294,7 @@
   .book-days {
     margin: 0 -24px;
     padding-inline: 24px;
+    scroll-padding-inline: 24px;
   }
 
   .book-bar {
@@ -302,6 +304,7 @@
     box-shadow: var(--shadow);
     left: 16px;
     right: 16px;
+    max-width: 528px;
   }
 }
 

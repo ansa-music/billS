@@ -211,7 +211,6 @@ export function TableCard(props: Props) {
           <h2>{table.name}</h2>
           <span className="kind">{KIND_LABEL[table.kind]}</span>
           <GuestBadge tableId={table.id} />
-          <BookingBadge tableId={table.id} />
           {props.onDetails && (
             <button type="button" className="felt-more" onClick={props.onDetails} aria-label={`${table.name}: подробнее`}>
               Подробнее
@@ -225,6 +224,8 @@ export function TableCard(props: Props) {
           </span>
         </div>
       </div>
+
+      <BookingBadge tableId={table.id} strip />
 
       {problem && (
         <p className="card-alert" role="alert">

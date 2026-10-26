@@ -181,6 +181,7 @@ export async function publicAvailability(db: SqlDriver, now: number, ref: string
     date: day,
     opensAt: settings.opensAt,
     closesAt: settings.closesAt,
+    holdMinutes: settings.holdMinutes,
     kinds,
     durations: [...BOOKING_DURATIONS],
     slots,

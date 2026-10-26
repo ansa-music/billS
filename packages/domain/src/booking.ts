@@ -579,6 +579,8 @@ export interface BookingAvailability {
   date: string;
   opensAt: string;
   closesAt: string;
+  /** A late guest's table is held this long. */
+  holdMinutes: number;
   /** Table types the club has (the picker shows when there are several). */
   kinds: TableKind[];
   durations: number[];

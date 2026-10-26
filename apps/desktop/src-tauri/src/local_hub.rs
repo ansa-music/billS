@@ -43,7 +43,8 @@ pub struct Bundle {
 
 impl Bundle {
   pub fn at(dir: &Path) -> Option<Bundle> {
-    let dir = crate::install::plain_path(dir);
+    // Canonical, so the HUB's command line and logs show /usr/lib/TS/…, not /usr/bin/../lib/TS/….
+    let dir = crate::install::plain_path(&fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf()));
     let node = dir.join(if cfg!(windows) { "node.exe" } else { "node" });
     let main = dir.join("src").join("main.mjs");
     if !node.is_file() || !main.is_file() {
