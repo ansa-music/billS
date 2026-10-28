@@ -142,7 +142,9 @@ function Invoke-Native {
         if ($Capture) {
             $output = @(& $FilePath @Arguments 2>&1 | ForEach-Object { "$_" })
         } else {
-            & $FilePath @Arguments
+            # Out-Host: otherwise the program's stdout lands in this function's result and the caller
+            # gets an array of lines instead of { ExitCode; Output } (StrictMode then fails on .ExitCode).
+            & $FilePath @Arguments | Out-Host
         }
         $code = $LASTEXITCODE
     } finally {

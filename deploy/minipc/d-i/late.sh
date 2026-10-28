@@ -60,6 +60,14 @@ FONTFACE="Fixed"
 FONTSIZE="8x16"
 VIDEOMODE=
 EOF
+# Основной язык системы — русский (установщик работал по-английски, см. preseed.cfg).
+if grep -q '^ru_RU.UTF-8' "$T/etc/locale.gen" 2>/dev/null || [ -d "$T/usr/lib/locale/ru_RU.utf8" ]; then
+  in-target update-locale LANG=ru_RU.UTF-8 >/dev/null 2>&1 || log "update-locale ru_RU.UTF-8 не удался"
+else
+  sed -i 's/^# *ru_RU.UTF-8 UTF-8/ru_RU.UTF-8 UTF-8/' "$T/etc/locale.gen" 2>/dev/null
+  { in-target locale-gen >/dev/null 2>&1 && in-target update-locale LANG=ru_RU.UTF-8 >/dev/null 2>&1; } \
+    || log "русская локаль не собрана — экран TS задаёт LANG сам"
+fi
 in-target setupcon --save-only >/dev/null 2>&1 || log "setupcon --save-only не удался — шрифт загрузит ts-console"
 mkdir -p "$T/etc/sysctl.d"
 echo 'kernel.printk = 3 4 1 3' >"$T/etc/sysctl.d/90-ts-console.conf"

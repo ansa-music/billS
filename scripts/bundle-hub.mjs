@@ -20,7 +20,7 @@
 import { build } from 'esbuild';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { isBuiltin } from 'node:module';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -120,7 +120,8 @@ export async function fetchNode(platform, out) {
       binary = join(tmp, spec.member);
     }
     rmSync(target, { force: true });
-    renameSync(binary, target);
+    // copy, not rename: the temp folder may be on another disk (C: vs D: on GitHub Windows runners).
+    copyFileSync(binary, target);
     if (process.platform !== 'win32') chmodSync(target, 0o755);
     writeFileSync(join(out, NODE_STAMP), `${stamp}\n`);
   } finally {
