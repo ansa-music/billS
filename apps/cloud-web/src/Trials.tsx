@@ -87,29 +87,20 @@ function TrialCard({ trial, now, selected, onOpen }: { trial: TrialView; now: nu
   );
 }
 
-const CHART_W = 560;
-const CHART_H = 160;
-const PAD_TOP = 24;
-const PAD_BOTTOM = 22;
-
 type ChartKind = 'orders' | 'revenue';
 
-/** The last 14 days, bars of orders or revenue; the last bar is today. */
+/** The last 14 days as CSS bars (text stays readable at any width); the last bar is today. */
 function TrialChart({ stats, now }: { stats: TrialStats; now: number }) {
   const [kind, setKind] = useState<ChartKind>('orders');
   const days = lastDays(stats.days, CHART_DAYS, now);
   const value = (d: TrialStats['days'][number]) => (kind === 'orders' ? d.orders : d.revenue);
   const label = (v: number) => (kind === 'orders' ? ordersText(v) : trialMoney(v));
-  const max = Math.max(1, ...days.map(value));
+  const max = Math.max(...days.map(value));
   const total = days.reduce((sum, d) => sum + value(d), 0);
-  const slot = CHART_W / days.length;
-  const barW = Math.max(6, slot * 0.62);
-  const plotH = CHART_H - PAD_TOP - PAD_BOTTOM;
-  const baseY = CHART_H - PAD_BOTTOM;
   return (
     <figure className="chart trial-chart">
       <div className="trial-chart-head">
-        <span className="muted">За {daysText(CHART_DAYS)}</span>
+        <span className="muted">За {daysText(CHART_DAYS)}{max > 0 ? ` · макс. ${label(max)}` : ''}</span>
         <span className="seg trial-seg" role="tablist" aria-label="Что показать">
           <button type="button" role="tab" aria-selected={kind === 'orders'} onClick={() => setKind('orders')}>
             Заказы
@@ -119,32 +110,20 @@ function TrialChart({ stats, now }: { stats: TrialStats; now: number }) {
           </button>
         </span>
       </div>
-      <svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} role="img" aria-label={`${kind === 'orders' ? 'Заказы' : 'Выручка'} по дням за ${daysText(CHART_DAYS)}`}>
-        <line className="chart-axis" x1={0} x2={CHART_W} y1={baseY} y2={baseY} />
-        <text className="chart-max" x={0} y={PAD_TOP - 10}>
-          макс. {label(max === 1 && total === 0 ? 0 : max)}
-        </text>
+      <div className="trial-bars" role="img" aria-label={`${kind === 'orders' ? 'Заказы' : 'Выручка'} по дням за ${daysText(CHART_DAYS)}`}>
         {days.map((d, i) => {
           const v = value(d);
-          const h = (v / max) * plotH;
-          const x = i * slot + (slot - barW) / 2;
           const last = i === days.length - 1;
-          const showLabel = last || i % 2 === 0;
           return (
-            <g key={d.day} className="chart-bar" data-today={last || undefined}>
-              <title>
-                {formatDayLabel(d.day)}: {ordersText(d.orders)}, {trialMoney(d.revenue)}
-              </title>
-              <rect x={x} y={baseY - h} width={barW} height={Math.max(h, v > 0 ? 2 : 0)} rx={2} />
-              {showLabel && (
-                <text className="chart-label" x={x + barW / 2} y={CHART_H - 6} textAnchor="middle">
-                  {formatDayLabel(d.day, !last)}
-                </text>
-              )}
-            </g>
+            <div key={d.day} className="trial-bar" data-today={last || undefined} title={`${formatDayLabel(d.day)}: ${ordersText(d.orders)}, ${trialMoney(d.revenue)}`}>
+              <span className="trial-bar-track">
+                <span className="trial-bar-fill" style={{ height: max > 0 ? `${Math.max((v / max) * 100, v > 0 ? 2 : 0)}%` : 0 }} />
+              </span>
+              <span className="trial-bar-label">{last ? 'сег.' : i % 2 === 0 ? formatDayLabel(d.day, true) : ''}</span>
+            </div>
           );
         })}
-      </svg>
+      </div>
       <figcaption className="muted">Итого за {daysText(CHART_DAYS)}: {label(total)}</figcaption>
     </figure>
   );
@@ -300,8 +279,8 @@ function TrialDetail({
               <span className="stat-sub">{ordersText(s.ordersTotal)}</span>
             </div>
             <div className="stat">
-              <span className="stat-label">Касса</span>
-              <span className="stat-value">{s.shiftOpen ? 'Смена открыта' : 'Смена закрыта'}</span>
+              <span className="stat-label">Смена</span>
+              <span className="stat-value">{s.shiftOpen ? 'открыта' : 'закрыта'}</span>
               <span className="stat-sub">
                 {lastOrderText(s.lastOrderAt, now)}
               </span>
@@ -355,7 +334,7 @@ function TrialDetail({
             <button type="button" className="btn" disabled={busy} onClick={() => extend(14)}>
               +14 дней
             </button>
-            <form className="trial-custom" onSubmit={extendCustom}>
+            <form className="trial-custom" onSubmit={extendCustom} noValidate>
               <label className="field trial-custom-field">
                 <span className="visually-hidden">Сколько дней добавить</span>
                 <input

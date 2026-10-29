@@ -120,8 +120,10 @@ test('backup file: exactly what «Восстановить из копии» rea
     managerKey: '',
     savedAt: NOW - 5 * MIN,
     db: 'U1FMaXRl',
+    endsAt: t.endsAt,
+    status: t.status,
   });
-  assert.deepEqual(Object.keys(JSON.parse(JSON.stringify(file))), ['format', 'version', 'startedAt', 'venue', 'managerName', 'managerKey', 'savedAt', 'db']);
+  assert.deepEqual(Object.keys(JSON.parse(JSON.stringify(file))), ['format', 'version', 'startedAt', 'venue', 'managerName', 'managerKey', 'savedAt', 'db', 'endsAt', 'status']);
 });
 
 test('backup file name is Latin', () => {

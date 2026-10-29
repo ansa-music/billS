@@ -2,38 +2,12 @@
  * «Пробные версии» of the platform cabinet: pure helpers (no browser globals, so `node --test`
  * runs them as is) — the trial's term, last activity and the backup file in words and shapes.
  */
-import { formatMoney } from '@bills/domain';
+import type { TrialStats, TrialStatus, TrialView } from '@bills/domain';
+import { TRIAL_EXTEND_MAX_DAYS, formatMoney } from '@bills/domain';
 
-// Mirrors packages/domain/src/trial.ts (the API contract of GET /platform/trials).
-export interface TrialStats {
-  ordersTotal: number;
-  ordersToday: number;
-  /** Minor units (tiyn), KZT. */
-  revenueTotal: number;
-  revenueToday: number;
-  productsCount: number;
-  staffCount: number;
-  shiftOpen: boolean;
-  lastOrderAt: number | null;
-  days: Array<{ day: string; orders: number; revenue: number }>;
-  appVersion?: string;
-}
+export type { TrialStats, TrialStatus, TrialView } from '@bills/domain';
 
-export type TrialStatus = 'active' | 'ended' | 'expired';
-
-export interface TrialView {
-  id: string;
-  venue: string;
-  managerName: string;
-  startedAt: number;
-  endsAt: number;
-  status: TrialStatus;
-  lastSeenAt: number | null;
-  stats: TrialStats | null;
-  snapshotAt: number | null;
-  snapshotBytes: number | null;
-}
-
+/** GET /platform/trials/:id/snapshot: the trial's last SQLite file, base64. */
 export interface TrialSnapshot {
   snapshot: string;
   snapshotAt: number;
@@ -47,7 +21,7 @@ export const TRIAL_CURRENCY = 'KZT';
 /** «Сейчас работает» when the trial reported within this window. */
 export const WORKING_WINDOW_MS = 10 * MINUTE_MS;
 export const EXTEND_MIN_DAYS = 1;
-export const EXTEND_MAX_DAYS = 90;
+export const EXTEND_MAX_DAYS = TRIAL_EXTEND_MAX_DAYS;
 /** Where a coffee shop starts its trial (the empty state shows it). */
 export const DEFAULT_TRIAL_URL = 'https://ts-kofe.pages.dev';
 
@@ -197,9 +171,12 @@ export interface TrialBackupFile {
   managerKey: string;
   savedAt: number;
   db: string;
+  /** The term as the cabinet has it, so a restored copy opens with the same end date. */
+  endsAt: number;
+  status: TrialView['status'];
 }
 
-export function trialBackup(t: Pick<TrialView, 'startedAt' | 'venue' | 'managerName'>, snap: TrialSnapshot): TrialBackupFile {
+export function trialBackup(t: Pick<TrialView, 'startedAt' | 'venue' | 'managerName' | 'endsAt' | 'status'>, snap: TrialSnapshot): TrialBackupFile {
   return {
     format: 'ts-trial-backup',
     version: 1,
@@ -209,6 +186,8 @@ export function trialBackup(t: Pick<TrialView, 'startedAt' | 'venue' | 'managerN
     managerKey: '',
     savedAt: snap.snapshotAt,
     db: snap.snapshot,
+    endsAt: t.endsAt,
+    status: t.status,
   };
 }
 

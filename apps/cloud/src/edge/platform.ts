@@ -150,7 +150,8 @@ export async function handlePlatform(req: EdgeRequest, ctx: EdgeContext): Promis
     const trial = /^\/platform\/trials\/([^/]+)\/(extend|end|snapshot)$/.exec(path);
     if (trial && ((m === 'POST' && trial[2] !== 'snapshot') || (m === 'GET' && trial[2] === 'snapshot'))) {
       const me = await requirePlatform(req, ctx);
-      const id = decodeURIComponent(trial[1]!);
+      // A uuid needs no decoding; anything else is not a trial (404 from the lookup).
+      const id = trial[1]!;
       if (trial[2] === 'snapshot') return json(200, await trialSnapshot(ctx.db, me, id), { ...cors, 'cache-control': 'no-store' });
       const view = trial[2] === 'extend' ? await extendTrial(ctx.db, ctx.now(), me, id, await readJson(req)) : await endTrial(ctx.db, ctx.now(), me, id);
       // The platform has no audit table: the action goes to the function's log with who did it.
