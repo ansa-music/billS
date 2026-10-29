@@ -1,6 +1,7 @@
 # Запасной хостинг без регистрации: GitHub Pages (docs/PUBLIC_DEPLOY_RU.md, «Вариант Б»).
 #   https://<владелец>.github.io/<репозиторий>/cabinet/ — кабинет владельца
 #   https://<владелец>.github.io/<репозиторий>/demo/    — демо экрана клуба
+#   https://<владелец>.github.io/<репозиторий>/trial/   — пробная версия кофейни на 14 дней
 # Включение: Settings → Pages → Source: «GitHub Actions», затем переменная репозитория PAGES_ENABLED = 1.
 # Ограничения GitHub Pages: свои HTTP-заголовки задать нельзя (файл _headers игнорируется), все файлы
 # кэшируются на 10 минут — новая версия PWA доходит до телефонов до 10 минут позже, чем на Cloudflare Pages.
@@ -46,9 +47,11 @@ jobs:
         run: |
           VITE_BASE="/$REPO/cabinet/" npm run build -w @bills/cloud-web
           VITE_BASE="/$REPO/demo/" VITE_DEMO_LOCAL=1 npm run build -w @bills/web
+          VITE_BASE="/$REPO/trial/" VITE_DEMO_LOCAL=1 VITE_TRIAL=1 npm run build -w @bills/web -- --outDir dist-trial
           mkdir -p _site
           cp -r apps/cloud-web/dist _site/cabinet
           cp -r apps/web/dist _site/demo
+          cp -r apps/web/dist-trial _site/trial
           rm -f _site/*/_headers _site/*/_redirects
           cat > _site/index.html <<'HTML'
           <!doctype html>
@@ -59,6 +62,7 @@ jobs:
           </head><body><main><h1>TS</h1>
           <a href="cabinet/">Кабинет владельца</a>
           <a href="demo/">Демо экрана клуба — данные сбрасываются каждую ночь</a>
+          <a href="trial/">Пробная версия для кофейни — 14 дней, данные ваши</a>
           </main></body></html>
           HTML
           touch _site/.nojekyll

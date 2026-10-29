@@ -18,7 +18,15 @@ declare module '@ts-hub/seed.ts' {
 
 declare module '@ts-hub/demo-license.ts' {
   export const DEMO_LICENSE_KEYS: Readonly<Record<string, string>>;
-  export function installDemoLicense(license: unknown, now: number): Promise<boolean>;
+  export function installDemoLicense(license: unknown, now: number, trial?: { startedAt: number; days: number; companyName: string }): Promise<boolean>;
+}
+
+declare module '@ts-hub/trial.ts' {
+  export function trialKey(random?: () => number): string;
+  export function setupTrialClub(
+    hub: import('@ts-hub/hub.ts').Hub,
+    setup: { venue: string; managerName: string; key: string; timezone: string; withMenu: boolean; now: number },
+  ): boolean;
 }
 
 declare module '@ts-hub/lamps/simulator.ts' {

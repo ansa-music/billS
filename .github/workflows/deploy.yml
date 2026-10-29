@@ -44,6 +44,7 @@ env:
   CF_PAGES_CABINET: ${{ vars.CF_PAGES_CABINET || 'ts-cabinet' }}
   TS_CABINET_URL: ${{ vars.TS_CABINET_URL || secrets.TS_CABINET_URL || 'https://ts-cabinet.pages.dev' }}
   CF_PAGES_DEMO: ${{ vars.CF_PAGES_DEMO || 'ts-demo' }}
+  CF_PAGES_TRIAL: ${{ vars.CF_PAGES_TRIAL || 'ts-trial' }}
 
 jobs:
   deploy:
@@ -188,11 +189,13 @@ jobs:
         run: |
           npm run build -w @bills/cloud-web
           VITE_DEMO_LOCAL=1 npm run build -w @bills/web
+          # Two-week browser trial for a coffee shop: the same in-page HUB, the person's own data.
+          VITE_DEMO_LOCAL=1 VITE_TRIAL=1 npm run build -w @bills/web -- --outDir dist-trial
 
       - name: Cloudflare Pages projects
         if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && (env.LIVE == 'true' || github.event.pull_request.head.repo.full_name == github.repository)
         run: |
-          for p in "$CF_PAGES_CABINET" "$CF_PAGES_DEMO"; do
+          for p in "$CF_PAGES_CABINET" "$CF_PAGES_DEMO" "$CF_PAGES_TRIAL"; do
             if npx --yes wrangler@4 pages project list 2>&1 | grep -qw "$p"; then echo "проект Pages $p уже есть"; else npx --yes wrangler@4 pages project create "$p" --production-branch=main; fi
           done
 
@@ -218,18 +221,30 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy apps/web/dist --project-name=${{ env.CF_PAGES_DEMO }} --branch=${{ env.LIVE == 'true' && 'main' || github.head_ref }} --commit-dirty=true
 
+      - name: Deploy trial
+        id: trial
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && (env.LIVE == 'true' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          wranglerVersion: "4"
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy apps/web/dist-trial --project-name=${{ env.CF_PAGES_TRIAL }} --branch=${{ env.LIVE == 'true' && 'main' || github.head_ref }} --commit-dirty=true
+
       - name: Preview links in the PR
         if: github.event_name == 'pull_request' && steps.cabinet.outputs.deployment-url != ''
         uses: actions/github-script@v7
         env:
           CABINET_URL: ${{ steps.cabinet.outputs.deployment-url }}
           DEMO_URL: ${{ steps.demo.outputs.deployment-url }}
+          TRIAL_URL: ${{ steps.trial.outputs.deployment-url }}
         with:
           script: |
             const body = [
               '**Preview TS (Cloudflare Pages)**',
               `- кабинет владельца: ${process.env.CABINET_URL}`,
               `- демо экрана клуба: ${process.env.DEMO_URL}`,
+              `- пробная версия кофейни: ${process.env.TRIAL_URL}`,
             ].join('\n');
             await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });
 

@@ -296,7 +296,7 @@ export function licenseStatus(license: LicensePayload | null, now: number, optio
     return { ...base, state: 'not_yet', readOnly: true, daysLeft, message: `Лицензия начнёт действовать ${dateRu(license.validFrom)}. Проверьте часы HUB.` };
   }
   if (left <= 0) {
-    return { ...base, state: 'expired', readOnly: true, daysLeft: 0, message: `Срок лицензии истёк ${dateRu(license.validUntil)} — режим «только чтение»: новые игры не открываются, идущие доигрываются и оплачиваются, данные сохранены. Продлите доступ.` };
+    return { ...base, state: 'expired', readOnly: true, daysLeft: 0, message: `Срок лицензии истёк ${dateRu(license.validUntil)} — режим «только чтение»: новые игры и заказы не начинаются, начатые можно завершить и оплатить, данные сохранены. Продлите доступ.` };
   }
   if (left < DAY_MS) {
     return { ...base, state: 'last_day', readOnly: false, daysLeft, message: 'Лицензия заканчивается сегодня. Продлите доступ, чтобы клуб не перешёл в режим «только чтение».' };

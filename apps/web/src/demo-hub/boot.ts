@@ -24,6 +24,9 @@ import type { MiniFastify } from './mini-fastify.ts';
 import type { DatabaseSync } from './shims/sqlite.ts';
 import { provideSqlJs } from './shims/sqlite.ts';
 import { clearSnapshot, loadSnapshot, nextResetAt, resetDemo, saveSnapshot } from './storage.ts';
+import { setupTrialClub, trialKey } from '@ts-hub/trial.ts';
+import type { TrialInfo, TrialRecord } from './trial-store.ts';
+import { loadTrial, saveTrial, setCurrentTrial, TRIAL_DAYS } from './trial-store.ts';
 
 const SAVE_DEBOUNCE_MS = 800;
 
@@ -117,6 +120,109 @@ function keepSaved(db: DatabaseSync, hub: Hub): () => void {
 function scheduleNightlyReset(): void {
   const now = Date.now();
   setTimeout(resetDemo, Math.min(nextResetAt(now) - now, 2 ** 31 - 1));
+}
+
+/** What the welcome screen asks before a new trial starts. */
+export interface NewTrial {
+  venue: string;
+  managerName: string;
+  withMenu: boolean;
+}
+
+let trialStarted: Promise<TrialInfo> | null = null;
+
+/** Is there a saved trial coffee shop in this browser? (Then the welcome screen is skipped.) */
+export async function hasSavedTrial(): Promise<boolean> {
+  return (await loadTrial()) !== null;
+}
+
+/**
+ * The two-week browser trial (VITE_TRIAL=1): the same in-page HUB as the demo, but the coffee
+ * shop is the person's own — kept in IndexedDB with no nightly reset, no demo keys, a trial
+ * license counted from the first day. `fresh` creates it (first visit); otherwise the saved
+ * one is opened.
+ */
+export function startTrialHub(fresh: NewTrial | null): Promise<TrialInfo> {
+  trialStarted ??= bootTrial(fresh);
+  return trialStarted;
+}
+
+async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
+  const SQL = await initSqlJs({ locateFile: () => wasmUrl });
+  const saved = await loadTrial();
+  const now = Date.now();
+  let info: TrialInfo;
+  let db: DatabaseSync;
+  if (saved) {
+    provideSqlJs(SQL, saved.db);
+    db = openDb(':memory:');
+    info = { startedAt: saved.startedAt, venue: saved.venue, managerName: saved.managerName, managerKey: saved.managerKey };
+  } else {
+    provideSqlJs(SQL, null);
+    db = openDb(':memory:');
+    info = {
+      startedAt: now,
+      venue: fresh?.venue.trim() || 'Моя кофейня',
+      managerName: fresh?.managerName.trim() || 'Управляющий',
+      managerKey: trialKey(),
+    };
+  }
+  setCurrentTrial(info);
+
+  // A coffee shop has no lamps or UPS: no simulated UPS, so the topbar shows no power badge.
+  const simulator = new SimulatorLampDriver();
+  const hub = new Hub({ db, clock: systemClock, lampDriver: simulator, license: { mode: 'enforce', publicKeys: DEMO_LICENSE_KEYS } });
+  const app = buildApp(hub, {
+    simulator,
+    logger: false,
+    dbPath: ':memory:',
+    startedAt: now,
+    version: { version: 'trial', gitSha: null },
+  });
+  await hub.license.init();
+  await installDemoLicense(hub.license, now, { startedAt: info.startedAt, days: TRIAL_DAYS, companyName: info.venue });
+  if (!saved) {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Almaty';
+    setupTrialClub(hub, { venue: info.venue, managerName: info.managerName, key: info.managerKey, timezone, withMenu: fresh?.withMenu ?? true, now });
+  }
+  hub.start();
+
+  // Ask the browser not to evict the coffee shop under storage pressure (best effort).
+  void navigator.storage?.persist?.().catch(() => false);
+  const changed = keepTrialSaved(db, hub, info);
+  installFetch(app, changed);
+  installEventSource(hub);
+  return info;
+}
+
+/** Like keepSaved, into IndexedDB; the first save happens right away so a new trial survives a reload. */
+function keepTrialSaved(db: DatabaseSync, hub: Hub, info: TrialInfo): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let writing: Promise<void> = Promise.resolve();
+  const save = () => {
+    clearTimeout(timer);
+    timer = undefined;
+    if (db.isTransaction) {
+      timer = setTimeout(save, 50);
+      return;
+    }
+    const rec: TrialRecord = { ...info, db: db.export(), savedAt: Date.now() };
+    writing = writing.then(() => saveTrial(rec)).catch((err: unknown) => console.warn('[trial] could not save the coffee shop', err));
+  };
+  const changed = () => {
+    clearTimeout(timer);
+    timer = setTimeout(save, SAVE_DEBOUNCE_MS);
+  };
+  hub.events.on('changed', changed);
+  const flush = () => {
+    if (timer !== undefined) save();
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flush();
+  });
+  window.addEventListener('pagehide', flush);
+  save();
+  return changed;
 }
 
 function isHubPath(url: URL): boolean {

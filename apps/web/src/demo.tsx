@@ -3,6 +3,7 @@ import type { DemoInfo } from '@bills/domain';
 import { DEMO_KEYS, rolesLabel } from '@bills/domain';
 import { hubUrl } from './api.ts';
 import { DEMO_LOCAL, resetDemo } from './demo-hub/storage.ts';
+import { currentTrial, daysLeft, downloadBackup, TRIAL, trialEndsAt } from './demo-hub/trial-store.ts';
 
 /**
  * Public demo (the screen on a static host talking to a demo HUB with
@@ -13,7 +14,8 @@ import { DEMO_LOCAL, resetDemo } from './demo-hub/storage.ts';
  * answers /api/demo itself; the banner then also offers «Сбросить демо».
  */
 
-const BUILT_AS_DEMO = import.meta.env.VITE_DEMO === '1' || DEMO_LOCAL;
+// The browser trial runs the same in-page HUB but is the person's own coffee shop, not a demo.
+const BUILT_AS_DEMO = (import.meta.env.VITE_DEMO === '1' || DEMO_LOCAL) && !TRIAL;
 
 let cached: Promise<DemoInfo | null> | null = null;
 
@@ -42,6 +44,7 @@ export function useDemo(): { demo: boolean; keys: DemoInfo['keys'] } {
 /** Strip under the top bar on every page of the demo. */
 export function DemoBanner({ cafe = false }: { cafe?: boolean }) {
   const { demo } = useDemo();
+  if (TRIAL) return <TrialBanner />;
   if (!demo) return null;
   return (
     <div className="pwa-banner demo-banner" role="note">
@@ -66,6 +69,56 @@ export function DemoBanner({ cafe = false }: { cafe?: boolean }) {
       )}
     </div>
   );
+}
+
+/** Browser trial: days left, «Скачать копию», the manager's code — on every page. */
+function TrialBanner() {
+  const info = currentTrial();
+  const [busy, setBusy] = useState(false);
+  if (!info) return null;
+  const left = daysLeft(info);
+  const until = new Date(trialEndsAt(info)).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+  return (
+    <div className="pwa-banner demo-banner trial-banner" role="note">
+      <p className="pwa-banner-text">
+        <strong>Пробная версия</strong> —{' '}
+        {left > 0 ? `осталось ${left} ${daysWord(left)} (до ${until}).` : 'пробный период закончился: данные можно смотреть и скачать, новые заказы недоступны.'} Данные хранятся
+        только в этом браузере.
+      </p>
+      <div className="pwa-banner-actions">
+        <button
+          type="button"
+          className="btn btn-small"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            void downloadBackup().finally(() => setBusy(false));
+          }}
+        >
+          Скачать копию
+        </button>
+        <button
+          type="button"
+          className="btn btn-small btn-ghost"
+          onClick={() => {
+            if (window.confirm('Показать код управляющего? Убедитесь, что экран не видят посторонние.')) {
+              window.alert(`${info.managerName}: код входа ${info.managerKey}`);
+            }
+          }}
+        >
+          Код управляющего
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function daysWord(n: number): string {
+  const d = n % 10;
+  const dd = n % 100;
+  if (d === 1 && dd !== 11) return 'день';
+  if (d >= 2 && d <= 4 && (dd < 12 || dd > 14)) return 'дня';
+  return 'дней';
 }
 
 /**

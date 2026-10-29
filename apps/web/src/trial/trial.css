@@ -1,0 +1,57 @@
+/* Browser trial: welcome, «Готово» with the key, the trial strip. Builds on onboarding.css. */
+
+.trial-welcome {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 24px 16px 32px;
+  box-sizing: border-box;
+}
+
+.trial-form {
+  display: grid;
+  gap: 16px;
+}
+
+.trial-form input:not([type='checkbox']) {
+  font-size: 1.125rem;
+  min-height: 48px;
+}
+
+.trial-check {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.trial-check input {
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+  flex: none;
+}
+
+.trial-check > span {
+  display: grid;
+  gap: 2px;
+}
+
+.trial-key {
+  font-size: clamp(2.5rem, 12vw, 4rem);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  margin: 8px 0;
+}
+
+.trial-next {
+  margin: 0;
+  padding-left: 1.25em;
+  display: grid;
+  gap: 6px;
+}
+
+.trial-banner .pwa-banner-actions {
+  flex-wrap: wrap;
+}
