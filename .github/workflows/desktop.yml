@@ -307,7 +307,8 @@ jobs:
             for _ in $(seq 1 "${1:-120}"); do curl -sf "$base/api/health" -o /tmp/health.json && return 0; sleep 0.5; done
             echo 'HUB не ответил на /api/health'; tail -60 "$data/logs/hub.log" || true; return 1
           }
-          hub_node() { pgrep -f "node --env-file-if-exists=$data/hub.env" || true; }
+          # By the bundle script: --env-file-if-exists is passed only once hub.env exists.
+          hub_node() { pgrep -f "$main" || true; }
           ts=
           trap '[ -n "$ts" ] && kill "$ts" 2>/dev/null; true' EXIT
           "$bin" --hub-only & ts=$!
