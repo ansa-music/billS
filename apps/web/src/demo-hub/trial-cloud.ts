@@ -11,45 +11,15 @@
  * Without VITE_SUPABASE_URL everything here is off. Nothing waits on the network: a failed
  * call is tried again on the next tick.
  */
-import { workingDay } from '@bills/domain';
+import type { TrialReportRequest, TrialStartRequest, TrialStartResponse, TrialStats, TrialTerms } from '@bills/domain';
+import { TRIAL_SNAPSHOT_MAX_BYTES, workingDay } from '@bills/domain';
 import type { DatabaseSync } from './shims/sqlite.ts';
-import type { TrialCloudStatus, TrialInfo } from './trial-store.ts';
+import type { TrialInfo } from './trial-store.ts';
 import { isStatus } from './trial-store.ts';
 
-// Same shapes as packages/domain trial.ts (the cloud's side of the contract).
-export interface TrialDayStats {
-  /** Working day YYYY-MM-DD (starts 06:00 club time). */
-  day: string;
-  orders: number;
-  /** Minor units. */
-  revenue: number;
-}
-
-export interface TrialStats {
-  ordersTotal: number;
-  ordersToday: number;
-  revenueTotal: number;
-  revenueToday: number;
-  productsCount: number;
-  staffCount: number;
-  shiftOpen: boolean;
-  lastOrderAt: number | null;
-  /** The last 14 working days, oldest first, today last (zeros included). */
-  days: TrialDayStats[];
-  appVersion: string;
-}
-
-export interface TrialTerms {
-  status: TrialCloudStatus;
-  endsAt: number;
-  message?: string | null;
-}
-
-export interface TrialStarted extends TrialTerms {
-  id: string;
-  token: string;
-  startedAt: number;
-}
+export type { TrialStats, TrialTerms };
+type TrialDayStats = TrialStats['days'][number];
+type TrialStarted = TrialStartResponse & TrialTerms;
 
 const BASE = String(import.meta.env.VITE_SUPABASE_URL ?? '')
   .trim()
@@ -61,7 +31,7 @@ const APP_VERSION = String(import.meta.env.VITE_APP_VERSION ?? 'trial');
 const REPORT_EVERY_MS = 5 * 60_000;
 const FIRST_CHANGE_DELAY_MS = 20_000;
 const SNAPSHOT_EVERY_MS = 30 * 60_000;
-const SNAPSHOT_MAX_BYTES = 6 * 1024 * 1024;
+const SNAPSHOT_MAX_BYTES = TRIAL_SNAPSHOT_MAX_BYTES;
 const STATS_DAYS = 14;
 const TIMEOUT_MS = 20_000;
 
@@ -69,7 +39,8 @@ function parseTerms(body: unknown): TrialTerms | null {
   if (!body || typeof body !== 'object') return null;
   const o = body as Record<string, unknown>;
   if (!isStatus(o.status) || typeof o.endsAt !== 'number' || !Number.isFinite(o.endsAt)) return null;
-  return { status: o.status, endsAt: o.endsAt, message: typeof o.message === 'string' && o.message.trim() ? o.message.trim() : null };
+  const message = typeof o.message === 'string' ? o.message.trim() : '';
+  return { status: o.status, endsAt: o.endsAt, ...(message ? { message } : {}) };
 }
 
 async function call(path: string, init: RequestInit & { token?: string | undefined }): Promise<unknown> {
@@ -87,7 +58,7 @@ async function call(path: string, init: RequestInit & { token?: string | undefin
   }
 }
 
-export async function cloudStart(body: { venue: string; managerName: string; timezone: string }): Promise<TrialStarted> {
+export async function cloudStart(body: TrialStartRequest): Promise<TrialStarted> {
   const o = (await call('/start', { method: 'POST', body: JSON.stringify(body) })) as Record<string, unknown>;
   const terms = parseTerms(o);
   if (!terms || typeof o.id !== 'string' || typeof o.token !== 'string') throw new Error('trial /start: unexpected answer');
@@ -95,7 +66,8 @@ export async function cloudStart(body: { venue: string; managerName: string; tim
 }
 
 export async function cloudReport(id: string, token: string, stats: TrialStats, snapshot?: string): Promise<TrialTerms> {
-  const terms = parseTerms(await call('/report', { method: 'POST', token, body: JSON.stringify({ id, stats, ...(snapshot ? { snapshot } : {}) }) }));
+  const req: TrialReportRequest = { id, stats, ...(snapshot ? { snapshot } : {}) };
+  const terms = parseTerms(await call('/report', { method: 'POST', token, body: JSON.stringify(req) }));
   if (!terms) throw new Error('trial /report: unexpected answer');
   return terms;
 }

@@ -6,6 +6,8 @@
  * without pulling in the HUB.
  */
 
+import type { TrialStatus } from '@bills/domain';
+
 const DB_NAME = 'ts-trial';
 const STORE = 'trial';
 const RECORD = 'current';
@@ -18,7 +20,7 @@ const DAY_MS = 86_400_000;
 export const TRIAL = import.meta.env.VITE_TRIAL === '1';
 
 /** What the TS cloud says about this trial (POST /trial/report). */
-export type TrialCloudStatus = 'active' | 'ended' | 'expired';
+export type TrialCloudStatus = TrialStatus;
 
 export interface TrialInfo {
   startedAt: number;
