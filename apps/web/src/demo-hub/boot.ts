@@ -184,15 +184,23 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
     version: { version: 'trial', gitSha: null },
   });
   await hub.license.init();
-  await installTrialLicense(hub, info, now);
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Almaty';
   if (!saved) {
     setupTrialClub(hub, { venue: info.venue, managerName: info.managerName, key: info.managerKey, timezone, withMenu: fresh?.withMenu ?? true, now });
   }
+  // After the club exists: the license names this HUB by its club (before it, signing fails and
+  // licenses would be switched off for the whole session).
+  await installTrialLicense(hub, info, now);
   hub.start();
 
   // Ask the browser not to evict the coffee shop under storage pressure (best effort).
   void navigator.storage?.persist?.().catch(() => false);
+  // A copy from the cabinet comes without the manager's code: give the manager a new one to sign in with.
+  if (saved && !info.managerKey) {
+    const managerKey = trialKey();
+    hub.auth.issueFixedKeys([{ roles: ['manager'], name: info.managerName || 'Управляющий', key: managerKey }]);
+    updateCurrentTrial({ managerKey });
+  }
   const saver = keepTrialSaved(db, hub, info);
   installFetch(app, saver.changed);
   installEventSource(hub);

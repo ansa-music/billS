@@ -207,11 +207,12 @@ export interface TrialCloudDeps {
 /**
  * Starts the link: POST /start once (retried until it answers), then a report every 5 minutes,
  * 20 s after the first change, and a last one (without the copy) when the page goes away.
- * Returns null when this build has no cloud.
+ * Returns null when this build has no cloud or the coffee shop is a local-only copy.
  */
 export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
-  if (!TRIAL_CLOUD_URL) return null;
   const { db, info } = deps;
+  // A copy opened for viewing (no cloud link) must never pose as the trial.
+  if (!TRIAL_CLOUD_URL || info.localOnly) return null;
   let running: Promise<TrialTerms | null> | null = null;
 
   const take = (terms: TrialTerms) => {

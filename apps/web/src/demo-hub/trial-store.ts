@@ -36,6 +36,11 @@ export interface TrialInfo {
   /** When the last backup copy went to the cloud, and a fingerprint of it (sent only when changed). */
   snapshotAt?: number;
   snapshotHash?: string;
+  /**
+   * Opened from a copy that has no link to the cloud (the cabinet's «Скачать копию данных», an old
+   * copy): someone viewing the data, not the trial itself — it never calls /start or /report.
+   */
+  localOnly?: boolean;
 }
 
 export interface TrialRecord extends TrialInfo {
@@ -141,8 +146,11 @@ export async function downloadBackup(): Promise<void> {
     managerName: rec.managerName,
     managerKey: rec.managerKey,
     savedAt: rec.savedAt,
+    ...(rec.endsAt !== undefined ? { endsAt: rec.endsAt } : {}),
+    ...(rec.status ? { status: rec.status } : {}),
+    ...(rec.message ? { message: rec.message } : {}),
     // The link to the TS cloud moves with the copy, so the trial stays the same trial there.
-    ...(rec.cloudId ? { cloudId: rec.cloudId, cloudToken: rec.cloudToken, endsAt: rec.endsAt, status: rec.status, message: rec.message ?? null } : {}),
+    ...(rec.cloudId && rec.cloudToken ? { cloudId: rec.cloudId, cloudToken: rec.cloudToken } : {}),
     db: toBase64(rec.db),
   });
   const url = URL.createObjectURL(new Blob([payload], { type: 'application/json' }));
@@ -156,7 +164,11 @@ export async function downloadBackup(): Promise<void> {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
-/** «Восстановить из копии»: replaces this browser's coffee shop with the file's. */
+/**
+ * «Восстановить из копии»: replaces this browser's coffee shop with the file's. Optional `endsAt`
+ * and `status` are kept (without endsAt: startedAt + TRIAL_DAYS). A copy without the cloud link
+ * (the cabinet's file) opens local-only; an empty managerKey gets a new code at the first start.
+ */
 export async function restoreBackup(file: File): Promise<void> {
   const data = JSON.parse(await file.text()) as Partial<Record<string, unknown>>;
   if (data.format !== 'ts-trial-backup' || typeof data.db !== 'string' || typeof data.startedAt !== 'number') {
@@ -169,8 +181,10 @@ export async function restoreBackup(file: File): Promise<void> {
     managerName: String(data.managerName ?? ''),
     managerKey: String(data.managerKey ?? ''),
     savedAt: Date.now(),
-    ...(typeof data.cloudId === 'string' && typeof data.cloudToken === 'string' ? { cloudId: data.cloudId, cloudToken: data.cloudToken } : {}),
-    ...(typeof data.endsAt === 'number' ? { endsAt: data.endsAt } : {}),
+    ...(typeof data.cloudId === 'string' && data.cloudId && typeof data.cloudToken === 'string' && data.cloudToken
+      ? { cloudId: data.cloudId, cloudToken: data.cloudToken }
+      : { localOnly: true }),
+    ...(typeof data.endsAt === 'number' && Number.isFinite(data.endsAt) ? { endsAt: data.endsAt } : {}),
     ...(isStatus(data.status) ? { status: data.status } : {}),
     ...(typeof data.message === 'string' ? { message: data.message } : {}),
   });

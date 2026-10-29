@@ -63,7 +63,11 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
             Осталось <strong>{left} {daysWord(left)}</strong> — до {until}.
           </p>
         )}
-        <p className="muted">Данные хранятся в этом браузере. Раз в несколько дней скачивайте копию.</p>
+        <p className="muted">
+          {info.localOnly
+            ? 'Это копия данных для просмотра: она хранится только в этом браузере и не связана с TS.'
+            : 'Данные хранятся в этом браузере. Раз в несколько дней скачивайте копию.'}
+        </p>
         <div className="trial-details-actions">
           <button
             type="button"
