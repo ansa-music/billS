@@ -448,3 +448,9 @@
 .license-hint p {
   margin: 0;
 }
+
+/* Keypad only (no list of people): a narrow centred card, a little below the top. */
+.login-page:has(.login-pad):not(:has(.roster)) {
+  max-width: 400px;
+  padding-top: clamp(16px, 8vh, 96px);
+}

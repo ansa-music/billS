@@ -55,3 +55,19 @@
 .trial-banner .pwa-banner-actions {
   flex-wrap: wrap;
 }
+
+/* The trial strip stays one slim line so the counter keeps its space. */
+.trial-banner {
+  align-items: center;
+  padding: 6px 8px 6px 14px;
+  font-size: 13.5px;
+}
+
+.trial-banner .pwa-banner-text {
+  margin: 0;
+}
+
+.trial-banner .btn {
+  min-height: 32px;
+  font-size: 13px;
+}

@@ -1098,3 +1098,22 @@
   white-space: nowrap;
   color: var(--accent-ink);
 }
+
+/* Sidebar: never scrolls sideways; long labels end with «…». Compact rows. */
+.sidebar-links {
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.sidebar .nav-link {
+  min-width: 0;
+  min-height: 40px;
+  font-size: 14.5px;
+}
+
+.sidebar .nav-label {
+  min-width: 0;
+  white-space: nowrap;
+}

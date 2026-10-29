@@ -552,7 +552,7 @@ export function PosPage() {
                 ref={searchRef}
                 type="search"
                 value={query}
-                placeholder="Поиск: капучино, rfgexbyj…"
+                placeholder="Поиск по меню"
                 aria-label="Поиск по меню"
                 autoComplete="off"
                 enterKeyHint="go"
@@ -859,7 +859,8 @@ export function PosPage() {
 
                   {noShift && canOrder && (
                     <div className="pos-shift" role="alert">
-                      <span>Смена не открыта — оплату принять нельзя.</span>
+                      <Icon name="alert" size={18} />
+                      <span>Смена не открыта</span>
                       {canNow('shift.open') && (
                         <button type="button" className="btn btn-small btn-primary" onClick={() => setShiftDialog(true)}>
                           Открыть смену
@@ -1005,9 +1006,7 @@ const MenuGrid = memo(function MenuGrid({ tiles, onTap }: { tiles: Tile[]; onTap
             ) : t.low !== null ? (
               <span className="pos-badge pos-badge-low">ост. {t.low}</span>
             ) : t.options ? (
-              <span className="pos-tile-more" aria-hidden="true">
-                <Icon name="settings" size={14} />
-              </span>
+              <span className="pos-tile-more">добавки</span>
             ) : null}
           </span>
           {t.count > 0 && (
