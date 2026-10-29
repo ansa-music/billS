@@ -5,6 +5,7 @@ import type { ClientView, CreateClientResponse, IssuedLongKey, ManagerInviteResp
 import { ROLE_LABEL, can } from '@bills/domain';
 import {
   SUPABASE_MODE,
+  TRIALS_AVAILABLE,
   blockClient,
   createClient,
   inviteManager,
@@ -29,8 +30,26 @@ import {
   planLabel,
 } from './license-form.ts';
 import { OfflineBanner, Section, loadingText } from './shared.tsx';
+import { TrialsSection } from './Trials.tsx';
 
 const ZONE = 'Asia/Almaty';
+
+type PlatformTab = 'clients' | 'trials';
+
+/** #/platform/trials — «Пробные версии»; anything else — «Клиенты». */
+function platformTabOf(hash: string): PlatformTab {
+  return TRIALS_AVAILABLE && /^#\/platform\/trials\/?$/.test(hash) ? 'trials' : 'clients';
+}
+
+function usePlatformTab(): PlatformTab {
+  const [tab, setTab] = useState<PlatformTab>(() => platformTabOf(location.hash));
+  useEffect(() => {
+    const onChange = () => setTab(platformTabOf(location.hash));
+    window.addEventListener('hashchange', onChange);
+    return () => window.removeEventListener('hashchange', onChange);
+  }, []);
+  return tab;
+}
 
 /** What happened to the invitation letter, in words. */
 function inviteText(res: ManagerInviteResponse): string {
@@ -522,6 +541,7 @@ export function PlatformCabinet({
   /** The same person also manages a client (Supabase e-mail sign-in). */
   onSwitchToManager?: () => void;
 }) {
+  const tab = usePlatformTab();
   const load = useCallback(() => listClients(), []);
   const { data, error, reload } = usePoll(load, 60_000);
   const [creating, setCreating] = useState(false);
@@ -563,7 +583,20 @@ export function PlatformCabinet({
       </header>
       <OfflineBanner online={online} />
 
-      {can(me.role, 'platform.view') ? (
+      {can(me.role, 'platform.view') && TRIALS_AVAILABLE && (
+        <nav className="tabs platform-tabs" aria-label="Разделы платформы">
+          <a href="#/platform" aria-current={tab === 'clients' ? 'page' : undefined}>
+            Клиенты
+          </a>
+          <a href="#/platform/trials" aria-current={tab === 'trials' ? 'page' : undefined}>
+            Пробные версии
+          </a>
+        </nav>
+      )}
+
+      {can(me.role, 'platform.view') && tab === 'trials' ? (
+        <TrialsSection editable={editable} />
+      ) : can(me.role, 'platform.view') ? (
         <>
           {creating && (
             <NewClient

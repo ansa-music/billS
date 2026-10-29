@@ -73,3 +73,9 @@ verify_jwt = false
 # capacity is checked in a transaction with the club's booking row locked.
 [functions.booking]
 verify_jwt = false
+
+# The coffee shop's browser trial (apps/web, VITE_TRIAL=1) registers itself and reports its counters
+# without an account. Guarded inside: a per-IP limit on starts and a per-trial limit on reports
+# (trial_attempts); after the start every call carries the trial's own token (stored as sha256).
+[functions.trial]
+verify_jwt = false

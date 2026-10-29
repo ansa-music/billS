@@ -5,4 +5,6 @@ interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL?: string;
   readonly VITE_SUPABASE_ANON_KEY?: string;
   readonly VITE_VAPID_PUBLIC_KEY?: string;
+  /** The browser trial for coffee shops («Пробные версии» shows it to share). */
+  readonly VITE_TRIAL_URL?: string;
 }

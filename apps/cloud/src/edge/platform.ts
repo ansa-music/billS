@@ -10,6 +10,7 @@ import {
   platformStaff,
   updateClientLicense,
 } from '../platform.ts';
+import { endTrial, extendTrial, listTrials, trialSnapshot } from '../trial.ts';
 import type { EdgeContext } from './context.ts';
 import { signPendingQuietly } from './context.ts';
 import type { EdgeRequest, Schema } from './http.ts';
@@ -35,6 +36,10 @@ import { authUserId, corsHeaders } from './owner.ts';
  *   POST /platform/clients/:companyId/block      BlockClientRequest → ClientView
  *   POST /platform/clients/:companyId/manager-key → IssuedLongKey
  *   GET  /platform/staff, POST /platform/staff   the support team (hiring: owner only)
+ *   GET  /platform/trials                        → { trials: TrialView[] } (coffee shop browser trials, newest first)
+ *   POST /platform/trials/:id/extend             { days: 1..90 } → TrialView
+ *   POST /platform/trials/:id/end                → TrialView (ended now)
+ *   GET  /platform/trials/:id/snapshot           → { snapshot: base64 SQLite, snapshotAt } (404 SNAPSHOT_NOT_FOUND)
  */
 
 const loginSchema: Schema = {
@@ -136,6 +141,21 @@ export async function handlePlatform(req: EdgeRequest, ctx: EdgeContext): Promis
       }
       await readOptionalJson(req);
       return json(200, await newClientManagerKey(ctx.db, ctx.now(), me, companyId), cors);
+    }
+
+    if (m === 'GET' && path === '/platform/trials') {
+      return json(200, await listTrials(ctx.db, ctx.now(), await requirePlatform(req, ctx)), { ...cors, 'cache-control': 'no-store' });
+    }
+
+    const trial = /^\/platform\/trials\/([^/]+)\/(extend|end|snapshot)$/.exec(path);
+    if (trial && ((m === 'POST' && trial[2] !== 'snapshot') || (m === 'GET' && trial[2] === 'snapshot'))) {
+      const me = await requirePlatform(req, ctx);
+      const id = decodeURIComponent(trial[1]!);
+      if (trial[2] === 'snapshot') return json(200, await trialSnapshot(ctx.db, me, id), { ...cors, 'cache-control': 'no-store' });
+      const view = trial[2] === 'extend' ? await extendTrial(ctx.db, ctx.now(), me, id, await readJson(req)) : await endTrial(ctx.db, ctx.now(), me, id);
+      // The platform has no audit table: the action goes to the function's log with who did it.
+      ctx.log(`platform: ${me.name} (${me.id}) ${trial[2] === 'extend' ? 'продлил' : 'завершил'} пробную версию ${view.id} «${view.venue}» до ${new Date(view.endsAt).toISOString()}`);
+      return json(200, view, cors);
     }
 
     if (m === 'GET' && path === '/platform/staff') return json(200, await platformStaff(ctx.db, await requirePlatform(req, ctx)), cors);

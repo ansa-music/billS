@@ -26,7 +26,9 @@ import { provideSqlJs } from './shims/sqlite.ts';
 import { clearSnapshot, loadSnapshot, nextResetAt, resetDemo, saveSnapshot } from './storage.ts';
 import { setupTrialClub, trialKey } from '@ts-hub/trial.ts';
 import type { TrialInfo, TrialRecord } from './trial-store.ts';
-import { loadTrial, saveTrial, setCurrentTrial, TRIAL_DAYS } from './trial-store.ts';
+import { loadTrial, saveTrial, setCurrentTrial, TRIAL_DAYS, updateCurrentTrial } from './trial-store.ts';
+import type { TrialTerms } from './trial-cloud.ts';
+import { startTrialCloud } from './trial-cloud.ts';
 
 const SAVE_DEBOUNCE_MS = 800;
 
@@ -156,7 +158,9 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
   if (saved) {
     provideSqlJs(SQL, saved.db);
     db = openDb(':memory:');
-    info = { startedAt: saved.startedAt, venue: saved.venue, managerName: saved.managerName, managerKey: saved.managerKey };
+    // Records from before the cloud link have no cloud fields: they load as they are.
+    const { db: _bytes, savedAt: _savedAt, ...facts } = saved;
+    info = facts;
   } else {
     provideSqlJs(SQL, null);
     db = openDb(':memory:');
@@ -180,23 +184,54 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
     version: { version: 'trial', gitSha: null },
   });
   await hub.license.init();
-  await installDemoLicense(hub.license, now, { startedAt: info.startedAt, days: TRIAL_DAYS, companyName: info.venue });
+  await installTrialLicense(hub, info, now);
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Almaty';
   if (!saved) {
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Almaty';
     setupTrialClub(hub, { venue: info.venue, managerName: info.managerName, key: info.managerKey, timezone, withMenu: fresh?.withMenu ?? true, now });
   }
   hub.start();
 
   // Ask the browser not to evict the coffee shop under storage pressure (best effort).
   void navigator.storage?.persist?.().catch(() => false);
-  const changed = keepTrialSaved(db, hub, info);
-  installFetch(app, changed);
+  const saver = keepTrialSaved(db, hub, info);
+  installFetch(app, saver.changed);
   installEventSource(hub);
+
+  // The TS cloud: reports of how the trial goes, and its terms back (never waited for).
+  const link = startTrialCloud({
+    db,
+    info,
+    timezone,
+    onChange: (listener) => hub.events.on('changed', listener),
+    persist: (patch) => {
+      updateCurrentTrial(patch);
+      saver.saveNow();
+    },
+    applyTerms: (_terms: TrialTerms) => {
+      void installTrialLicense(hub, info, Date.now()).catch((err: unknown) => console.warn('[trial] could not apply the new terms', err));
+    },
+  });
+  if (link) (window as unknown as { __tsTrialReportNow?: () => Promise<unknown> }).__tsTrialReportNow = link.reportNow;
   return info;
 }
 
+/**
+ * The trial license of the in-page HUB: until the end the cloud set (or startedAt + TRIAL_DAYS
+ * before it answered); a trial the cloud ended is valid until now, so the counter is read-only.
+ */
+async function installTrialLicense(hub: Hub, info: TrialInfo, now: number): Promise<void> {
+  const over = info.status === 'ended' || info.status === 'expired';
+  const endsAt = info.endsAt !== undefined ? (over ? Math.min(info.endsAt, now) : info.endsAt) : over ? now : undefined;
+  await installDemoLicense(hub.license, now, {
+    startedAt: info.startedAt,
+    days: TRIAL_DAYS,
+    ...(endsAt !== undefined ? { endsAt } : {}),
+    companyName: info.venue,
+  });
+}
+
 /** Like keepSaved, into IndexedDB; the first save happens right away so a new trial survives a reload. */
-function keepTrialSaved(db: DatabaseSync, hub: Hub, info: TrialInfo): () => void {
+function keepTrialSaved(db: DatabaseSync, hub: Hub, info: TrialInfo): { changed: () => void; saveNow: () => void } {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let writing: Promise<void> = Promise.resolve();
   const save = () => {
@@ -222,7 +257,7 @@ function keepTrialSaved(db: DatabaseSync, hub: Hub, info: TrialInfo): () => void
   });
   window.addEventListener('pagehide', flush);
   save();
-  return changed;
+  return { changed, saveNow: save };
 }
 
 function isHubPath(url: URL): boolean {

@@ -112,7 +112,7 @@ export function TrialReady({ venue, managerKey, onContinue }: { venue: string; m
           {managerKey.slice(0, 3)} {managerKey.slice(3)}
         </p>
         <p className="onboarding-note">
-          Запишите его. Код спросят при входе в кассу. Если забудете — он есть в полосе «Пробная версия» → «Код управляющего».
+          Запишите его. Код спросят при входе в кассу. Если забудете — внизу меню нажмите «Пробная» → «Код управляющего».
         </p>
         <ol className="trial-next">
           <li>Войдите с этим кодом.</li>

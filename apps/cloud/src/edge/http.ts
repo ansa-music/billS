@@ -51,12 +51,15 @@ export function bearerToken(req: EdgeRequest): string | null {
 
 const badRequest = (message: string, status = 400): CloudError => new CloudError(status, 'BAD_REQUEST', message);
 
-/** Reads a JSON body the way Fastify does: empty or broken JSON is 400, over the limit is 413. */
-export async function readJson(req: EdgeRequest): Promise<unknown> {
+/**
+ * Reads a JSON body the way Fastify does: empty or broken JSON is 400, over the limit is 413.
+ * `limit` is BODY_LIMIT unless a route needs more (the trial's report with a 6 MB snapshot in base64).
+ */
+export async function readJson(req: EdgeRequest, limit = BODY_LIMIT): Promise<unknown> {
   const length = Number(req.headers.get('content-length') ?? 0);
-  if (length > BODY_LIMIT) throw badRequest('Request body is too large', 413);
+  if (length > limit) throw badRequest('Request body is too large', 413);
   const text = await req.text();
-  if (text.length > BODY_LIMIT) throw badRequest('Request body is too large', 413);
+  if (text.length > limit) throw badRequest('Request body is too large', 413);
   if (text.trim() === '') throw badRequest("Body cannot be empty when content-type is set to 'application/json'");
   try {
     return JSON.parse(text) as unknown;

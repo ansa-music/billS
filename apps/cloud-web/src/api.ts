@@ -45,6 +45,7 @@ import type { AlertEvent } from './api-supabase.ts';
 import { SUPABASE_MODE } from './config.ts';
 import type { HubCodeResponse } from './onboarding.ts';
 import type { SignupRequest, SignupResponse } from './signup.ts';
+import type { TrialSnapshot, TrialView } from './trials.ts';
 
 /**
  * One API for the pages, two backends chosen at build time (config.ts):
@@ -393,4 +394,32 @@ export async function setBookingStatus(clubId: string, bookingId: string, action
 
 export async function saveBookingSettings(clubId: string, patch: UpdateBookingSettingsRequest): Promise<BookingSettingsView> {
   return SUPABASE_MODE ? (await sb()).saveBookingSettings(clubId, patch) : noBooking();
+}
+
+// --- «Пробные версии» of the platform (Supabase only: browser trials report to the TS cloud) ---
+
+/** Browser trials report to the TS cloud (Supabase); a self-hosted cloud never sees them. */
+export const TRIALS_AVAILABLE: boolean = SUPABASE_MODE;
+
+const noTrials = (): never => {
+  throw new CloudRequestError(404, 'NOT_AVAILABLE', 'Доступно только в облачной версии');
+};
+
+/** Newest first. */
+export async function listTrials(): Promise<TrialView[]> {
+  return SUPABASE_MODE ? (await sb()).listTrials() : noTrials();
+}
+
+/** Adds `days` (1..90) to the trial; the cloud answers with the updated trial. */
+export async function extendTrial(id: string, days: number): Promise<TrialView> {
+  return SUPABASE_MODE ? (await sb()).extendTrial(id, days) : noTrials();
+}
+
+export async function endTrial(id: string): Promise<TrialView> {
+  return SUPABASE_MODE ? (await sb()).endTrial(id) : noTrials();
+}
+
+/** The trial's last SQLite copy as base64; CloudRequestError 404 when there is none. */
+export async function fetchTrialSnapshot(id: string): Promise<TrialSnapshot> {
+  return SUPABASE_MODE ? (await sb()).fetchTrialSnapshot(id) : noTrials();
 }

@@ -1,5 +1,6 @@
 import type { Action, LicenseState, LicenseStatus, RoleSet } from '@bills/domain';
 import { ACTION_MODULE, MODULE_LABEL, decide, licenseGateOf } from '@bills/domain';
+import { currentTrial, TRIAL } from './demo-hub/trial-store.ts';
 
 /**
  * The license of this branch as screens see it: the banner in the shell and
@@ -55,12 +56,16 @@ export function LicenseBanner({ license }: { license: LicenseStatus | null | und
   if (!license) return null;
   const tone = licenseTone(license.state);
   if (tone === 'ok' && !license.readOnly) return null;
+  // Browser trial: the days left are on the badge in the menu; only read-only mode gets the strip.
+  if (TRIAL && !license.readOnly) return null;
   const danger = license.readOnly || tone === 'danger';
   return (
     <div className="license-banner" data-tone={danger ? 'danger' : 'warn'} role={danger ? 'alert' : 'status'}>
       <p className="license-banner-text">
         <strong>{danger ? 'Только чтение.' : 'Лицензия.'}</strong>{' '}
-        {license.message ?? (danger ? READ_ONLY_TEXT : 'Лицензия скоро закончится. Продлите доступ.')}
+        {TRIAL && license.readOnly
+          ? (currentTrial()?.message ?? 'Пробный период завершён: данные можно смотреть и скачать, новые заказы недоступны.')
+          : (license.message ?? (danger ? READ_ONLY_TEXT : 'Лицензия скоро закончится. Продлите доступ.'))}
       </p>
     </div>
   );

@@ -1,4 +1,4 @@
-/* Browser trial: welcome, «Готово» with the key, the trial strip. Builds on onboarding.css. */
+/* Browser trial: welcome, «Готово» with the key, the trial badge in the menu. Builds on onboarding.css. */
 
 .trial-welcome {
   max-width: 560px;
@@ -52,22 +52,129 @@
   gap: 6px;
 }
 
-.trial-banner .pwa-banner-actions {
-  flex-wrap: wrap;
-}
-
-/* The trial strip stays one slim line so the counter keeps its space. */
-.trial-banner {
+/* The trial badge at the bottom of the menu (TrialBadge.tsx): one quiet line, no strip over the pages.
+   This file is loaded with the welcome screen, which every trial start imports. */
+.trial-badge {
+  display: flex;
   align-items: center;
-  padding: 6px 8px 6px 14px;
-  font-size: 13.5px;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  text-align: left;
+  cursor: pointer;
 }
 
-.trial-banner .pwa-banner-text {
+.trial-badge:hover {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+.trial-badge:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.trial-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+
+.trial-badge[data-over] {
+  color: var(--danger);
+}
+
+.trial-badge[data-over] .trial-badge-dot {
+  background: var(--danger);
+}
+
+.trial-badge-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trial-badge-short {
+  display: none;
+}
+
+/* In the sidebar the badge takes the space above «Касса на связи», which then sits right under it. */
+.sidebar .trial-badge {
+  margin-top: auto;
+}
+
+.sidebar .trial-badge + .sidebar-foot {
+  margin-top: 0;
+}
+
+/* Tablet icon rail: just «12 дн.» under the links. */
+@media (max-width: 1180px) and (min-width: 768px) {
+  .sidebar .trial-badge {
+    justify-content: center;
+    padding: 6px 2px;
+  }
+
+  .sidebar .trial-badge-text {
+    display: none;
+  }
+
+  .sidebar .trial-badge-short {
+    display: block;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+}
+
+/* Phones: a line at the bottom of the «Ещё» sheet. */
+.trial-badge[data-place='sheet'] {
+  margin-top: 8px;
+  padding: 10px 12px;
+  font-size: var(--fs-sm);
+}
+
+.trial-details {
+  display: grid;
+  gap: 12px;
+  max-width: 420px;
+}
+
+.trial-details p {
   margin: 0;
 }
 
-.trial-banner .btn {
-  min-height: 32px;
-  font-size: 13px;
+.trial-details-state[data-over] {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.trial-details-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.trial-details-key code {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+
+.trial-details-foot {
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
 }

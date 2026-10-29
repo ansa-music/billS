@@ -3231,3 +3231,176 @@ input[aria-invalid='true'] {
     width: 60mm;
   }
 }
+
+/* ---- Platform: «Пробные версии» (browser trials of coffee shops) ---- */
+
+.platform-tabs {
+  justify-self: start;
+  max-width: 100%;
+}
+
+.trial-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px;
+}
+
+.trial-card {
+  width: 100%;
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.trial-card:hover,
+.trial-card:focus-visible {
+  border-color: var(--accent);
+}
+
+.trial-card[aria-current] {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 8%, var(--surface-2));
+}
+
+.trial-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.trial-venue {
+  font-size: 16px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.trial-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.trial-nums {
+  display: grid;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.trial-seen {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.trial-seen-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  flex: none;
+}
+
+.trial-seen[data-live] {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.trial-seen[data-live] .trial-seen-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent);
+}
+
+.trial-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: color-mix(in oklab, var(--lamp) 75%, var(--text));
+  border: 1px solid color-mix(in oklab, var(--lamp) 50%, transparent);
+  background: color-mix(in oklab, var(--lamp) 12%, var(--surface));
+}
+
+.trial-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 14px 0;
+}
+
+.trial-chart {
+  margin-bottom: 14px;
+}
+
+.trial-chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.trial-seg {
+  min-width: 200px;
+}
+
+.trial-seg button {
+  min-height: 32px;
+}
+
+.trial-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.trial-custom {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.trial-custom-field input {
+  width: 6.5em;
+}
+
+.trial-empty {
+  display: grid;
+  gap: 6px;
+}
+
+.trial-empty p {
+  margin: 0;
+}
+
+.trial-empty-link a {
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+.trial-empty-link .btn {
+  margin-left: 4px;
+}
+
+@media (max-width: 760px) {
+  .trial-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .trial-list {
+    grid-template-columns: 1fr;
+  }
+}

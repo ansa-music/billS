@@ -8,10 +8,13 @@ const DAY_MS = 86_400_000;
 /**
  * The browser trial (apps/web, VITE_TRIAL=1): the same self-signed license, but counted
  * from the day the trial started, so it runs out after `days` however often the page reloads.
+ * `endsAt`, when given, is the end the TS cloud set (an extension, or «now» for a trial it
+ * ended) and wins over startedAt + days.
  */
 export interface TrialTerms {
   startedAt: number;
-  days: number;
+  days?: number;
+  endsAt?: number;
   companyName: string;
 }
 
@@ -26,6 +29,9 @@ export interface TrialTerms {
 export async function installDemoLicense(license: LicenseService, now: number, trial?: TrialTerms): Promise<boolean> {
   if (!license.enforced) return false;
   try {
+    const validUntil = trial?.endsAt ?? (trial?.startedAt ?? now) + (trial?.days ?? 7) * DAY_MS;
+    // A trial ended early (validUntil = now) must still be a well-formed license: from before until.
+    const validFrom = Math.min(trial?.startedAt ?? now, validUntil - 1000);
     const payload: LicensePayload = {
       v: 1,
       id: randomUUID(),
@@ -33,8 +39,8 @@ export async function installDemoLicense(license: LicenseService, now: number, t
       companyName: trial?.companyName ?? 'Демо компания',
       plan: 'trial',
       issuedAt: now,
-      validFrom: trial?.startedAt ?? now,
-      validUntil: (trial?.startedAt ?? now) + (trial?.days ?? 7) * DAY_MS,
+      validFrom,
+      validUntil,
       maxClubs: trial ? 1 : 2,
       maxTables: null,
       maxStaff: null,

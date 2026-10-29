@@ -12,6 +12,8 @@ import { hrefFor } from './router.tsx';
 import type { RouteDef } from './router.tsx';
 import type { ThemePreference } from './theme.ts';
 import { BrandMark } from './BrandMark.tsx';
+import { TRIAL } from './demo-hub/trial-store.ts';
+import { TrialBadge } from './trial/TrialBadge.tsx';
 
 /** Badge counts by route path (unpaid checks, lamp problems …). */
 export type NavBadges = Record<string, { count: number; tone: 'info' | 'danger' }>;
@@ -102,6 +104,7 @@ function SidebarImpl({
       <div className="sidebar-links">
         <NavLinks routes={routes} active={active} badges={badges} />
       </div>
+      {TRIAL && <TrialBadge />}
       <div className="sidebar-foot" data-online={online || undefined} title={online ? 'Касса на связи' : 'Нет связи с кассой'}>
         <span className="conn-dot" aria-hidden="true" />
         <span className="nav-label">{online ? 'Касса на связи' : 'Нет связи с кассой'}</span>
@@ -197,6 +200,7 @@ function BottomNavImpl({
             <div className="more-links">
               <NavLinks routes={rest} active={active} badges={badges} onNavigate={() => setOpen(false)} />
             </div>
+            {TRIAL && <TrialBadge place="sheet" />}
           </div>
         </>
       )}

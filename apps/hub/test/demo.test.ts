@@ -88,6 +88,25 @@ test('demo: the HUB signs itself a 7-day trial license so the manager sees one',
   assert.equal((state.json() as HubState).license?.state, 'active');
 });
 
+test('browser trial: an explicit end from the cloud wins over startedAt + days; ending «now» is read-only, a later end lifts it', async (t) => {
+  const { h, hub } = await demoHub(t, true);
+  const DAY = 86_400_000;
+  const startedAt = MONDAY_NOON - 3 * DAY;
+  assert.equal(await installDemoLicense(hub.license, MONDAY_NOON, { startedAt, days: 14, companyName: 'Кофейня' }), true);
+  assert.equal(hub.license.status().daysLeft, 11);
+  assert.equal(await installDemoLicense(hub.license, MONDAY_NOON, { startedAt, endsAt: MONDAY_NOON + 20 * DAY, companyName: 'Кофейня' }), true);
+  assert.equal(hub.license.status().daysLeft, 20);
+  // Ended by TS: valid until now — a moment later the counter is read-only.
+  assert.equal(await installDemoLicense(hub.license, MONDAY_NOON, { startedAt, endsAt: MONDAY_NOON, companyName: 'Кофейня' }), true);
+  h.clock.advance(1000);
+  assert.equal(hub.license.status().readOnly, true);
+  // Even a trial that "started" after its end gets a well-formed license.
+  assert.equal(await installDemoLicense(hub.license, MONDAY_NOON, { startedAt: MONDAY_NOON + DAY, endsAt: MONDAY_NOON, companyName: 'Кофейня' }), true);
+  assert.equal(await installDemoLicense(hub.license, MONDAY_NOON, { startedAt, endsAt: MONDAY_NOON + 5 * DAY, companyName: 'Кофейня' }), true);
+  assert.equal(hub.license.status().readOnly, false);
+  assert.equal(hub.license.status().daysLeft, 5);
+});
+
 test('GET /api/demo is public on a demo HUB and absent otherwise', async (t) => {
   const { app } = await demoHub(t);
   const res = await app.inject({ method: 'GET', url: '/api/demo' });

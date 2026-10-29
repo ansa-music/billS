@@ -18,7 +18,7 @@ declare module '@ts-hub/seed.ts' {
 
 declare module '@ts-hub/demo-license.ts' {
   export const DEMO_LICENSE_KEYS: Readonly<Record<string, string>>;
-  export function installDemoLicense(license: unknown, now: number, trial?: { startedAt: number; days: number; companyName: string }): Promise<boolean>;
+  export function installDemoLicense(license: unknown, now: number, trial?: { startedAt: number; days?: number; endsAt?: number; companyName: string }): Promise<boolean>;
 }
 
 declare module '@ts-hub/trial.ts' {

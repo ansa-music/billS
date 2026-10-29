@@ -52,6 +52,7 @@ import type { RegisterDeviceBody } from './api-core.ts';
 import { supabaseAnonKey, supabaseUrl } from './config.ts';
 import { forgetLocalDevices, localDeviceIds } from './localDevices.ts';
 import { nativeBridge } from './platform.ts';
+import type { TrialSnapshot, TrialView } from './trials.ts';
 import {
   OFFLINE_MESSAGE,
   edgeErrorOf,
@@ -638,6 +639,25 @@ export function blockClient(companyId: string, body: BlockClientRequest): Promis
 
 export function issueManagerKey(companyId: string): Promise<IssuedLongKey> {
   return platformEdge<IssuedLongKey>('POST', `/platform/clients/${enc(companyId)}/manager-key`);
+}
+
+// «Пробные версии»: browser trials of coffee shops that report to the cloud.
+
+export async function listTrials(): Promise<TrialView[]> {
+  return (await platformEdge<{ trials: TrialView[] }>('GET', '/platform/trials')).trials;
+}
+
+export function extendTrial(id: string, days: number): Promise<TrialView> {
+  return platformEdge<TrialView>('POST', `/platform/trials/${enc(id)}/extend`, { days });
+}
+
+export function endTrial(id: string): Promise<TrialView> {
+  return platformEdge<TrialView>('POST', `/platform/trials/${enc(id)}/end`, {});
+}
+
+/** The last SQLite copy the trial sent (base64); 404 when it has sent none yet. */
+export function fetchTrialSnapshot(id: string): Promise<TrialSnapshot> {
+  return platformEdge<TrialSnapshot>('GET', `/platform/trials/${enc(id)}/snapshot`);
 }
 
 /** Edge Function `invite-manager`: Supabase mails the manager an invitation (or a reset letter for an existing account). */
