@@ -454,3 +454,30 @@
   max-width: 400px;
   padding-top: clamp(16px, 8vh, 96px);
 }
+
+/* A focused sign-in card with a calm, branded frame. */
+.login-page:has(.login-pad):not(:has(.roster)) {
+  max-width: 420px; margin: clamp(12px, 4vh, 40px) auto;
+  padding: 28px; border: 1px solid var(--border); border-radius: 24px;
+  background: var(--surface); box-shadow: var(--shadow);
+}
+.login-page .onboarding-head { flex-direction: column; text-align: center; gap: 16px; margin-bottom: 24px; }
+.login-page .onboarding-mark { width: 52px; height: 52px; border-radius: 14px; }
+.login-page .page-title { letter-spacing: -.045em; font-size: 28px; }
+.login-ask { font-size: 14px; color: var(--text-2); line-height: 1.6; }
+.login-pad .keypad { width: 100%; max-width: 320px; }
+.login-pad .keypad-key { background: var(--surface-2); border-color: var(--border); border-radius: 12px; font-weight: 550; }
+.login-pad .keypad-enter { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.login-device { border-top: 1px solid var(--border); padding-top: 16px; }
+.onboarding-card { box-shadow: var(--shadow-sm); padding: 24px; border-radius: 18px; }
+@media (max-width: 480px) {
+  .login-page:has(.login-pad):not(:has(.roster)) { padding: 20px 16px; margin: 8px auto; border-radius: 18px; }
+  .onboarding-card { padding: 18px; }
+}
+@media (min-width: 601px) and (max-height: 820px) {
+  .login-page:has(.login-pad):not(:has(.roster)) { margin-block: 0; padding: 20px 24px; }
+  .login-page .onboarding-head { gap: 10px; margin-bottom: 8px; }
+  .login-page .onboarding-mark { width: 40px; height: 40px; }
+  .login-pad .keypad-key { min-height: 56px; }
+  .login-page .login-links { margin-top: 8px; }
+}

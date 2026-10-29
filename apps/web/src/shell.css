@@ -1117,3 +1117,21 @@
   min-width: 0;
   white-space: nowrap;
 }
+
+/* TS workspace: quiet navigation, strong current location. */
+.sidebar { padding: 20px 12px 14px; gap: 12px; }
+.sidebar-brand { padding-bottom: 24px; margin-bottom: 4px; }
+.sidebar-brand-text strong { font-size: 22px; letter-spacing: -.06em; }
+.sidebar-links { gap: 4px; }
+.nav-link { font-size: 14px; min-height: 42px; }
+.nav-link[aria-current='page'] { background: var(--accent); color: var(--accent-text); }
+.nav-link[aria-current='page'] .icon { color: inherit; }
+.nav-link[aria-current='page']::before { display: none; }
+.topbar { background: var(--surface); backdrop-filter: none; }
+.topbar-title h1 { font-size: 20px; letter-spacing: -.035em; }
+.topbar-clock { font-size: 16px; font-weight: 550; color: var(--text-2); }
+.sidebar-foot { border-top: 1px solid var(--border); padding-top: 16px; }
+@media (max-width: 600px) {
+  .topbar { padding-inline: 12px; }
+  .topbar-title h1 { font-size: 18px; }
+}
