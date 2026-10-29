@@ -19,22 +19,22 @@
 
 :root {
   color-scheme: dark;
-  --bg: #0d0f12;
-  --surface: #15181d;
-  --surface-2: #1c2026;
-  --surface-3: #242931;
-  --border: #262b33;
-  --border-strong: #353c47;
-  --text: #eceff3;
-  --text-2: #b6bdc7;
-  --muted: #838c98;
+  --bg: #101716;
+  --surface: #18211f;
+  --surface-2: #202c28;
+  --surface-3: #293833;
+  --border: #2b3b35;
+  --border-strong: #40564c;
+  --text: #f0f5f1;
+  --text-2: #bccac1;
+  --muted: #91a69a;
   --felt: #1d6b45;
   --felt-dark: #183026;
   --felt-lit: #23905c;
-  --accent: #2fa56b;
-  --accent-text: #04140b;
-  --accent-ink: #4cc68a;
-  --accent-hover: #38b878;
+  --accent: #b7ed78;
+  --accent-text: #18260d;
+  --accent-ink: #bee990;
+  --accent-hover: #c9f599;
   --accent-soft: color-mix(in oklab, var(--accent) 16%, var(--surface));
   --lamp: #ffcd5a;
   --danger: #ef5b51;
@@ -76,7 +76,7 @@
   --space-8: 48px;
   --radius-xs: 6px;
   --radius-sm: 10px;
-  --radius-md: 12px;
+  --radius-md: 10px;
   --radius: 16px;
   --radius-lg: 20px;
   --radius-pill: 999px;
@@ -99,7 +99,7 @@
   --shadow-sm: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 1px 2px rgb(0 0 0 / 0.3);
   --shadow: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 8px 24px rgb(0 0 0 / 0.25);
   --shadow-lg: 0 24px 64px rgb(0 0 0 / 0.5);
-  --nav-w: 232px;
+  --nav-w: 216px;
   --topbar-h: 64px;
   font-family: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
   font-size: 16px;
@@ -112,22 +112,22 @@
 @media (prefers-color-scheme: light) {
   :root:not([data-theme='dark']) {
     color-scheme: light;
-    --bg: #f3f4f6;
+    --bg: #f2f4ef;
     --surface: #ffffff;
-    --surface-2: #f6f7f9;
-    --surface-3: #eceef1;
-    --border: #e1e4e9;
-    --border-strong: #cbd0d8;
-    --text: #14171c;
-    --text-2: #3d444e;
-    --muted: #68707c;
+    --surface-2: #f5f7f2;
+    --surface-3: #eaf0e6;
+    --border: #dce3d7;
+    --border-strong: #c5d0bf;
+    --text: #1b291f;
+    --text-2: #465747;
+    --muted: #627260;
     --felt: #1f7a4d;
     --felt-dark: #6f8f80;
     --felt-lit: #229058;
-    --accent: #1b7f4e;
+    --accent: #285c38;
     --accent-text: #ffffff;
-    --accent-ink: #17744a;
-    --accent-hover: #186f45;
+    --accent-ink: #285c38;
+    --accent-hover: #1b482b;
     --lamp: #e3a21a;
     --danger: #c4372d;
     --danger-soft: #fde8e6;
@@ -165,22 +165,22 @@
 
 :root[data-theme='light'] {
   color-scheme: light;
-  --bg: #f3f4f6;
+  --bg: #f2f4ef;
   --surface: #ffffff;
-  --surface-2: #f6f7f9;
-  --surface-3: #eceef1;
-  --border: #e1e4e9;
-  --border-strong: #cbd0d8;
-  --text: #14171c;
-  --text-2: #3d444e;
-  --muted: #68707c;
+  --surface-2: #f5f7f2;
+  --surface-3: #eaf0e6;
+  --border: #dce3d7;
+  --border-strong: #c5d0bf;
+  --text: #1b291f;
+  --text-2: #465747;
+  --muted: #627260;
   --felt: #1f7a4d;
   --felt-dark: #6f8f80;
   --felt-lit: #229058;
-  --accent: #1b7f4e;
+  --accent: #285c38;
   --accent-text: #ffffff;
-  --accent-ink: #17744a;
-  --accent-hover: #186f45;
+  --accent-ink: #285c38;
+  --accent-hover: #1b482b;
   --lamp: #e3a21a;
   --danger: #c4372d;
   --danger-soft: #fde8e6;
@@ -1374,3 +1374,8 @@ html:has(.modal[open]) {
     filter: brightness(0.92);
   }
 }
+
+/* Shared typography: clear hierarchy for dense operational screens. */
+h1, h2, h3 { text-wrap: balance; }
+button { -webkit-tap-highlight-color: transparent; }
+::selection { background: var(--accent); color: var(--accent-text); }
