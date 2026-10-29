@@ -560,7 +560,7 @@ mod tests {
     assert_eq!(vars["HUB_DB_PATH"], data.join("hub.db").into_os_string());
     assert_eq!(vars["HUB_HOST"], OsString::from("0.0.0.0"));
     assert_eq!(vars["HUB_PORT"], OsString::from("4310"));
-    assert_eq!(vars["HUB_WEB_DIST"], PathBuf::from("/opt/TS/hub-bundle/web").into_os_string());
+    assert_eq!(vars["HUB_WEB_DIST"], bundle().web.into_os_string());
     assert_eq!(vars["HUB_GIT_SHA"], OsString::from("abc1234567"));
   }
 
@@ -612,7 +612,9 @@ mod tests {
     fs::write(dir.join("package.json"), br#"{"name":"@bills/hub","gitSha":"0123456789"}"#).unwrap();
     let b = Bundle::at(&dir).expect("bundle");
     assert_eq!(b.git_sha.as_deref(), Some("0123456789"));
-    assert_eq!(b.web, dir.join("web"));
+    // Bundle::at resolves the folder the same way (Windows expands 8.3 names such as RUNNER~1).
+    let resolved = crate::install::plain_path(&fs::canonicalize(&dir).unwrap());
+    assert_eq!(b.web, resolved.join("web"));
     fs::remove_dir_all(&dir).unwrap();
   }
 
