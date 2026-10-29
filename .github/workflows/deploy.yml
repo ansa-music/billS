@@ -44,7 +44,9 @@ env:
   CF_PAGES_CABINET: ${{ vars.CF_PAGES_CABINET || 'ts-cabinet' }}
   TS_CABINET_URL: ${{ vars.TS_CABINET_URL || secrets.TS_CABINET_URL || 'https://ts-cabinet.pages.dev' }}
   CF_PAGES_DEMO: ${{ vars.CF_PAGES_DEMO || 'ts-demo' }}
-  CF_PAGES_TRIAL: ${{ vars.CF_PAGES_TRIAL || 'ts-trial' }}
+  CF_PAGES_TRIAL: ${{ vars.CF_PAGES_TRIAL || 'ts-kofe' }}
+  # The first trial address; its Pages project is deleted once the new one is live.
+  CF_PAGES_TRIAL_OLD: ts-trial
 
 jobs:
   deploy:
@@ -181,6 +183,21 @@ jobs:
           echo "Telegram webhook: $(jq -c '{ok, description}' /tmp/ts-tg.json 2>/dev/null || echo 'нет ответа')"
 
       # ── Сайты ──────────────────────────────────────────────────────────────
+      - name: Cloudflare Pages projects
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && (env.LIVE == 'true' || github.event.pull_request.head.repo.full_name == github.repository)
+        run: |
+          for p in "$CF_PAGES_CABINET" "$CF_PAGES_DEMO" "$CF_PAGES_TRIAL"; do
+            if npx --yes wrangler@4 pages project list 2>&1 | grep -qw "$p"; then echo "проект Pages $p уже есть"; else npx --yes wrangler@4 pages project create "$p" --production-branch=main; fi
+          done
+          # Real address of the trial site (pages.dev may add a suffix when the name is taken):
+          # the cabinet links to it from «Пробные версии».
+          sub=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$CF_PAGES_TRIAL" | jq -r '.result.subdomain // empty' || true)
+          if [ -n "$sub" ]; then echo "VITE_TRIAL_URL=https://$sub" >> "$GITHUB_ENV"; echo "пробная версия: https://$sub"; fi
+          if [ "$LIVE" = "true" ] && [ "$CF_PAGES_TRIAL_OLD" != "$CF_PAGES_TRIAL" ] && npx --yes wrangler@4 pages project list 2>&1 | grep -qw "$CF_PAGES_TRIAL_OLD"; then
+            npx --yes wrangler@4 pages project delete "$CF_PAGES_TRIAL_OLD" --yes && echo "старый адрес $CF_PAGES_TRIAL_OLD удалён"
+          fi
+
       - name: Build
         env:
           VITE_SUPABASE_URL: ${{ (vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF) != '' && format('https://{0}.supabase.co', (vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF)) || '' }}
@@ -191,13 +208,6 @@ jobs:
           VITE_DEMO_LOCAL=1 npm run build -w @bills/web
           # Two-week browser trial for a coffee shop: the same in-page HUB, the person's own data.
           VITE_DEMO_LOCAL=1 VITE_TRIAL=1 npm run build -w @bills/web -- --outDir dist-trial
-
-      - name: Cloudflare Pages projects
-        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && (env.LIVE == 'true' || github.event.pull_request.head.repo.full_name == github.repository)
-        run: |
-          for p in "$CF_PAGES_CABINET" "$CF_PAGES_DEMO" "$CF_PAGES_TRIAL"; do
-            if npx --yes wrangler@4 pages project list 2>&1 | grep -qw "$p"; then echo "проект Pages $p уже есть"; else npx --yes wrangler@4 pages project create "$p" --production-branch=main; fi
-          done
 
       - name: Deploy cabinet
         id: cabinet
