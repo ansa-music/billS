@@ -2828,3 +2828,17 @@ input.pos-guest {
   .barista-bar .row { flex-wrap: wrap; }
   .pos-order { border-radius: 18px 18px 0 0; }
 }
+@media (max-width: 960px) {
+  /* Reset the desktop sticky offset when the order becomes a bottom sheet. */
+  .pos-side[data-open] .pos-order {
+    top: auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .pos-side[data-open] .pos-lines-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .pos-side[data-open] .pos-foot { flex: none; }
+}
