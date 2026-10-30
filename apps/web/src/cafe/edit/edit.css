@@ -13,6 +13,17 @@
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  flex-shrink: 0;
+}
+/* On phones the label would squeeze the search field; keep only the icon. */
+@media (max-width: 560px) {
+  .ts-design-toggle {
+    min-width: 44px;
+    justify-content: center;
+  }
+  .ts-design-toggle-text {
+    display: none;
+  }
 }
 .ts-design-toggle[aria-pressed='true'] {
   background: var(--accent, #e8590c);
