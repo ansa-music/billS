@@ -178,3 +178,26 @@
   border-top: 1px solid var(--border);
   padding-top: 12px;
 }
+
+/* TS coffee: the badge is a soft caramel pill with a breathing dot; ≥44px to tap. */
+.trial-badge {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in oklab, var(--accent) 22%, var(--border));
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 560;
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.trial-badge:hover { background: color-mix(in oklab, var(--accent) 24%, var(--surface)); color: var(--text); }
+.trial-badge-dot { width: 8px; height: 8px; box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); animation: ts-trial-pulse 2.4s var(--ease) infinite; }
+.trial-badge[data-over] { background: var(--danger-soft); border-color: color-mix(in oklab, var(--danger) 35%, var(--border)); }
+.trial-badge[data-over] .trial-badge-dot { box-shadow: 0 0 0 3px color-mix(in oklab, var(--danger) 25%, transparent); }
+@keyframes ts-trial-pulse { 50% { box-shadow: 0 0 0 6px transparent; } }
+.trial-welcome .onboarding-card { border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+@media (prefers-reduced-motion: reduce) {
+  .trial-badge-dot { animation: none; }
+  .trial-badge { transition: none; }
+}

@@ -613,3 +613,34 @@
 }
 
 /* Printing lives in print/print.css: receipt-printer forms in #print-root. */
+
+/* ── TS redesign layer: payment and shift dialogs ─────────────────────────── */
+.pay-form, .cash-form, .discount-form { gap: 14px; }
+.pay-quick, .pay-parts { gap: 8px; flex-wrap: wrap; }
+.pay-quick .btn, .pay-part {
+  min-height: 48px;
+  border-radius: 999px;
+  transition: transform .1s, box-shadow .2s;
+}
+.pay-quick .btn:not(:disabled):active, .pay-part:active { transform: scale(.96); }
+.pay-remaining, .pay-change, .pay-done-title {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  letter-spacing: -.03em;
+}
+.pay-change { color: var(--ok, var(--accent, #2f7d5b)); }
+.money-input input { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cash-panel, .cash-summary, .report, .pay-preview {
+  border-radius: var(--radius, 16px);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, color-mix(in oklab, var(--text, #222) 10%, transparent));
+  box-shadow: var(--shadow, 0 6px 18px rgb(0 0 0 / .06));
+}
+.table-scroll { max-width: 100%; overflow-x: auto; }
+.report-table td, .report-table th { font-variant-numeric: tabular-nums; }
+.report-table tbody tr:nth-child(even) { background: color-mix(in oklab, var(--text, #222) 3%, transparent); }
+.report-revenue { font-weight: 800; letter-spacing: -.03em; }
+@media (prefers-reduced-motion: reduce) {
+  .pay-quick .btn, .pay-part { transition: none; }
+  .pay-quick .btn:not(:disabled):active, .pay-part:active { transform: none; }
+}
