@@ -10,61 +10,64 @@
             --accent-hover, --accent-soft · --danger/--warn/--info + *-soft backgrounds + --on-danger/--on-warn/--on-info
             --lamp (lit table, «идёт игра»), --felt*, --plan-*, --wood-*, --brass (hall drawing), --chart-*, --seq-1…5 (charts)
    Space    8 px grid: --space-1 4 · --space-2 8 · --space-3 12 · --space-4 16 · --space-5 24 · --space-6 32 · --space-7 40 · --space-8 48
-   Radius   --radius-xs 6 · --radius-sm 10 · --radius-md 12 · --radius 16 · --radius-lg 20 · --radius-pill
+   Radius   --radius-xs 6 · --radius-sm 10 · --radius-md 12 · --radius 16 · --radius-lg 24 · --radius-pill
    Type     --fs-xs 12 · --fs-sm 13 · --fs-md 14 · --fs-base 16 · --fs-lg 18 · --fs-xl 22 · --fs-2xl 28 · --fs-3xl 36 · --fs-display 48
-            Inter Variable; all digits are tabular (money and clocks never jump).
+            Inter Variable + system stack; all digits are tabular (money and clocks never jump).
    Controls --control-sm 36 · --control 44 · --control-lg 56 (touch: +8)
    Elevation --shadow-sm (tiles) · --shadow (cards) · --shadow-lg (popovers, drawers, dialogs)
-   Motion   --dur-fast 90ms (press) · --dur 140ms (hover, open) · --ease; prefers-reduced-motion turns motion off. */
+   Motion   --dur-fast 90ms (press) · --dur 160ms (hover, open) · --ease; prefers-reduced-motion turns motion off. */
+
+/* Palette: warm coffee — espresso browns (dark, default) and latte cream (light), with a
+   caramel/roast accent. Billiard felt, lamp and plan colours stay their own. */
 
 :root {
   color-scheme: dark;
-  --bg: #101716;
-  --surface: #18211f;
-  --surface-2: #202c28;
-  --surface-3: #293833;
-  --border: #2b3b35;
-  --border-strong: #40564c;
-  --text: #f0f5f1;
-  --text-2: #bccac1;
-  --muted: #91a69a;
+  --bg: #14100d;
+  --surface: #1c1713;
+  --surface-2: #251e19;
+  --surface-3: #2f2620;
+  --border: #362c25;
+  --border-strong: #4e4035;
+  --text: #f7f0e8;
+  --text-2: #d6c7b8;
+  --muted: #ab998b;
   --felt: #1d6b45;
   --felt-dark: #183026;
   --felt-lit: #23905c;
-  --accent: #b7ed78;
-  --accent-text: #18260d;
-  --accent-ink: #bee990;
-  --accent-hover: #c9f599;
+  --accent: #e9a65f;
+  --accent-text: #241306;
+  --accent-ink: #f2bb7f;
+  --accent-hover: #f3b778;
   --accent-soft: color-mix(in oklab, var(--accent) 16%, var(--surface));
   --lamp: #ffcd5a;
-  --danger: #ef5b51;
-  --danger-soft: #3a1d1b;
+  --danger: #ef6a5a;
+  --danger-soft: #3b1e19;
   --on-danger: #1a0605;
-  --warn: #e3a72f;
-  --warn-soft: #36290f;
+  --warn: #e8c14a;
+  --warn-soft: #362c10;
   --on-warn: #1b1405;
-  --info: #5aa9e6;
-  --info-soft: #142a3c;
+  --info: #6aa8e0;
+  --info-soft: #172a3b;
   --on-info: #04121f;
-  --floor: #0f1513;
-  --floor-line: rgb(255 255 255 / 0.035);
-  --floor-line-strong: rgb(255 255 255 / 0.07);
-  --wall: #3d4c45;
+  --floor: #120e0b;
+  --floor-line: rgb(255 240 225 / 0.035);
+  --floor-line-strong: rgb(255 240 225 / 0.07);
+  --wall: #4a3d33;
   --wood-1: #7a4a2a;
   --wood-2: #44281a;
   --brass: #d9b46a;
   --plan-felt-off: #1d3a2c;
   --plan-felt-on: #26975f;
-  --chart-grid: #232e2a;
-  --chart-axis: #35443d;
-  --seq-1: #3a3021;
-  --seq-2: #62491f;
-  --seq-3: #93691f;
-  --seq-4: #c98f25;
-  --seq-5: #f7c454;
-  --overlay: rgb(0 0 0 / 0.6);
-  --skeleton: #1d2723;
-  --skeleton-hi: #26322d;
+  --chart-grid: #2a221d;
+  --chart-axis: #44372e;
+  --seq-1: #3a2a1d;
+  --seq-2: #63401f;
+  --seq-3: #955e26;
+  --seq-4: #c98a3f;
+  --seq-5: #f2bf7c;
+  --overlay: rgb(10 6 3 / 0.62);
+  --skeleton: #221b16;
+  --skeleton-hi: #2d241e;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -76,9 +79,9 @@
   --space-8: 48px;
   --radius-xs: 6px;
   --radius-sm: 10px;
-  --radius-md: 10px;
+  --radius-md: 12px;
   --radius: 16px;
-  --radius-lg: 20px;
+  --radius-lg: 24px;
   --radius-pill: 999px;
   --fs-xs: 12px;
   --fs-sm: 13px;
@@ -93,17 +96,17 @@
   --control: 44px;
   --control-lg: 56px;
   --dur-fast: 90ms;
-  --dur: 140ms;
+  --dur: 160ms;
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
-  --focus-ring: 0 0 0 3px color-mix(in oklab, var(--accent) 40%, transparent);
-  --shadow-sm: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 1px 2px rgb(0 0 0 / 0.3);
-  --shadow: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 8px 24px rgb(0 0 0 / 0.25);
-  --shadow-lg: 0 24px 64px rgb(0 0 0 / 0.5);
-  --nav-w: 216px;
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  --shadow-sm: 0 1px 0 rgb(255 240 225 / 0.04) inset, 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow: 0 1px 0 rgb(255 240 225 / 0.04) inset, 0 10px 28px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 24px 64px rgb(0 0 0 / 0.55);
+  --nav-w: 232px;
   --topbar-h: 64px;
-  font-family: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  font-family: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   font-size: 16px;
-  line-height: 1.4;
+  line-height: 1.45;
   /* tnum: money and clocks keep their width while they tick. */
   font-feature-settings: 'cv11', 'ss01', 'tnum';
   font-variant-numeric: tabular-nums;
@@ -111,108 +114,108 @@
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme='dark']) {
-    color-scheme: light;
-    --bg: #f2f4ef;
-    --surface: #ffffff;
-    --surface-2: #f5f7f2;
-    --surface-3: #eaf0e6;
-    --border: #dce3d7;
-    --border-strong: #c5d0bf;
-    --text: #1b291f;
-    --text-2: #465747;
-    --muted: #627260;
-    --felt: #1f7a4d;
-    --felt-dark: #6f8f80;
-    --felt-lit: #229058;
-    --accent: #285c38;
-    --accent-text: #ffffff;
-    --accent-ink: #285c38;
-    --accent-hover: #1b482b;
-    --lamp: #e3a21a;
-    --danger: #c4372d;
-    --danger-soft: #fde8e6;
-    --on-danger: #ffffff;
-    --warn: #9a6516;
-    --warn-soft: #fbf0db;
-    --on-warn: #ffffff;
-    --info: #2470c9;
-    --info-soft: #e3eefb;
-    --on-info: #ffffff;
-    --floor: #e3e9e5;
-    --floor-line: rgb(16 40 28 / 0.05);
-    --floor-line-strong: rgb(16 40 28 / 0.1);
-    --wall: #9fb0a7;
-    --wood-1: #8a5530;
-    --wood-2: #5b3519;
-    --brass: #c9a24c;
-    --plan-felt-off: #2c6548;
-    --plan-felt-on: #23955c;
-    --chart-grid: #e3e8e4;
-    --chart-axis: #c0ccc5;
-    --seq-1: #fbebc6;
-    --seq-2: #f5d283;
-    --seq-3: #e8b13e;
-    --seq-4: #c48812;
-    --seq-5: #8a5c05;
-    --overlay: rgb(10 24 17 / 0.45);
-    --skeleton: #e6ece8;
-    --skeleton-hi: #f3f6f4;
-    --shadow-sm: 0 1px 2px rgb(16 40 28 / 0.06);
-    --shadow: 0 1px 2px rgb(16 40 28 / 0.06), 0 6px 18px rgb(16 40 28 / 0.06);
-    --shadow-lg: 0 24px 64px rgb(16 40 28 / 0.18);
-  }
-}
-
-:root[data-theme='light'] {
   color-scheme: light;
-  --bg: #f2f4ef;
-  --surface: #ffffff;
-  --surface-2: #f5f7f2;
-  --surface-3: #eaf0e6;
-  --border: #dce3d7;
-  --border-strong: #c5d0bf;
-  --text: #1b291f;
-  --text-2: #465747;
-  --muted: #627260;
+  --bg: #f6f0e8;
+  --surface: #fffcf8;
+  --surface-2: #f8f1e8;
+  --surface-3: #efe5d8;
+  --border: #e6d9c9;
+  --border-strong: #d0bda7;
+  --text: #2a1c13;
+  --text-2: #594434;
+  --muted: #6d5646;
   --felt: #1f7a4d;
   --felt-dark: #6f8f80;
   --felt-lit: #229058;
-  --accent: #285c38;
+  --accent: #8b4a1c;
   --accent-text: #ffffff;
-  --accent-ink: #285c38;
-  --accent-hover: #1b482b;
-  --lamp: #e3a21a;
-  --danger: #c4372d;
-  --danger-soft: #fde8e6;
+  --accent-ink: #7a3f16;
+  --accent-hover: #733c14;
+  --lamp: #d98f1a;
+  --danger: #bf3a2c;
+  --danger-soft: #fbe6e1;
   --on-danger: #ffffff;
-  --warn: #9a6516;
-  --warn-soft: #fbf0db;
+  --warn: #8f600e;
+  --warn-soft: #f9eed6;
   --on-warn: #ffffff;
-  --info: #2470c9;
-  --info-soft: #e3eefb;
+  --info: #2a6bb5;
+  --info-soft: #e4edf8;
   --on-info: #ffffff;
-  --floor: #e3e9e5;
-  --floor-line: rgb(16 40 28 / 0.05);
-  --floor-line-strong: rgb(16 40 28 / 0.1);
-  --wall: #9fb0a7;
+  --floor: #ede4d8;
+  --floor-line: rgb(60 35 15 / 0.05);
+  --floor-line-strong: rgb(60 35 15 / 0.1);
+  --wall: #b4a290;
   --wood-1: #8a5530;
   --wood-2: #5b3519;
   --brass: #c9a24c;
   --plan-felt-off: #2c6548;
   --plan-felt-on: #23955c;
-  --chart-grid: #e3e8e4;
-  --chart-axis: #c0ccc5;
-  --seq-1: #fbebc6;
-  --seq-2: #f5d283;
-  --seq-3: #e8b13e;
-  --seq-4: #c48812;
-  --seq-5: #8a5c05;
-  --overlay: rgb(10 24 17 / 0.45);
-  --skeleton: #e6ece8;
-  --skeleton-hi: #f3f6f4;
-  --shadow-sm: 0 1px 2px rgb(16 40 28 / 0.06);
-  --shadow: 0 1px 2px rgb(16 40 28 / 0.06), 0 6px 18px rgb(16 40 28 / 0.06);
-  --shadow-lg: 0 24px 64px rgb(16 40 28 / 0.18);
+  --chart-grid: #ede3d7;
+  --chart-axis: #d0c1b0;
+  --seq-1: #f8e6cf;
+  --seq-2: #eec795;
+  --seq-3: #d99a55;
+  --seq-4: #b06a2a;
+  --seq-5: #7a4015;
+  --overlay: rgb(40 22 10 / 0.42);
+  --skeleton: #efe6da;
+  --skeleton-hi: #f9f4ed;
+  --shadow-sm: 0 1px 2px rgb(60 35 15 / 0.07);
+  --shadow: 0 1px 2px rgb(60 35 15 / 0.06), 0 8px 24px rgb(60 35 15 / 0.08);
+  --shadow-lg: 0 24px 64px rgb(60 35 15 / 0.2);
+  }
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f6f0e8;
+  --surface: #fffcf8;
+  --surface-2: #f8f1e8;
+  --surface-3: #efe5d8;
+  --border: #e6d9c9;
+  --border-strong: #d0bda7;
+  --text: #2a1c13;
+  --text-2: #594434;
+  --muted: #6d5646;
+  --felt: #1f7a4d;
+  --felt-dark: #6f8f80;
+  --felt-lit: #229058;
+  --accent: #8b4a1c;
+  --accent-text: #ffffff;
+  --accent-ink: #7a3f16;
+  --accent-hover: #733c14;
+  --lamp: #d98f1a;
+  --danger: #bf3a2c;
+  --danger-soft: #fbe6e1;
+  --on-danger: #ffffff;
+  --warn: #8f600e;
+  --warn-soft: #f9eed6;
+  --on-warn: #ffffff;
+  --info: #2a6bb5;
+  --info-soft: #e4edf8;
+  --on-info: #ffffff;
+  --floor: #ede4d8;
+  --floor-line: rgb(60 35 15 / 0.05);
+  --floor-line-strong: rgb(60 35 15 / 0.1);
+  --wall: #b4a290;
+  --wood-1: #8a5530;
+  --wood-2: #5b3519;
+  --brass: #c9a24c;
+  --plan-felt-off: #2c6548;
+  --plan-felt-on: #23955c;
+  --chart-grid: #ede3d7;
+  --chart-axis: #d0c1b0;
+  --seq-1: #f8e6cf;
+  --seq-2: #eec795;
+  --seq-3: #d99a55;
+  --seq-4: #b06a2a;
+  --seq-5: #7a4015;
+  --overlay: rgb(40 22 10 / 0.42);
+  --skeleton: #efe6da;
+  --skeleton-hi: #f9f4ed;
+  --shadow-sm: 0 1px 2px rgb(60 35 15 / 0.07);
+  --shadow: 0 1px 2px rgb(60 35 15 / 0.06), 0 8px 24px rgb(60 35 15 / 0.08);
+  --shadow-lg: 0 24px 64px rgb(60 35 15 / 0.2);
 }
 
 @media (pointer: coarse) {

@@ -2842,3 +2842,203 @@ input.pos-guest {
   }
   .pos-side[data-open] .pos-foot { flex: none; }
 }
+
+/* ── TS redesign layer ──────────────────────────────────────────────────────
+   Last in the file on purpose: refines the screens above without renaming
+   anything. Tokens come from the shell; fallbacks keep it usable without them. */
+.pos, .barista, .board, .pos-grid { min-width: 0; max-width: 100%; }
+
+/* Category chips: one scrollable pill row, edge-faded. */
+.pos-tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  gap: 8px;
+  padding: 6px 2px 10px;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+          mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+}
+.pos-tabs::-webkit-scrollbar { display: none; }
+.pos-tab {
+  scroll-snap-align: start;
+  min-height: 46px;
+  border-radius: 999px;
+  border: 1px solid var(--border, color-mix(in oklab, var(--text, #222) 12%, transparent));
+  background: var(--surface, #fff);
+  color: var(--text, #1b1b1b);
+  box-shadow: 0 1px 2px rgb(0 0 0 / .06);
+  transition: background .18s, color .18s, transform .12s, box-shadow .18s;
+}
+.pos-tab:hover { box-shadow: 0 3px 10px rgb(0 0 0 / .08); }
+.pos-tab:active { transform: scale(.96); }
+.pos-tab[aria-selected='true'] {
+  background: var(--accent, #2f7d5b);
+  border-color: var(--accent, #2f7d5b);
+  color: var(--accent-text, #fff);
+  box-shadow: 0 6px 16px color-mix(in oklab, var(--accent, #2f7d5b) 32%, transparent);
+}
+
+/* Product tiles: big, soft, tactile. */
+.pos-tiles { grid-template-columns: repeat(auto-fill, minmax(min(168px, 100%), 1fr)); gap: 14px; }
+.pos-tile {
+  position: relative;
+  min-height: 128px;
+  padding: 16px;
+  border-radius: var(--radius, 18px);
+  border: 1px solid var(--border, color-mix(in oklab, var(--text, #222) 10%, transparent));
+  background:
+    linear-gradient(160deg, oklch(.7 .1 var(--hue, var(--pos-hue, 150)) / .12), transparent 70%),
+    var(--surface, #fff);
+  box-shadow: var(--shadow, 0 1px 2px rgb(0 0 0 / .05), 0 8px 24px rgb(0 0 0 / .06));
+  transition: transform .14s cubic-bezier(.2, .8, .2, 1), box-shadow .2s, border-color .2s;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) {
+  .pos-tile:hover:not(:disabled) {
+    transform: translateY(-2px);
+    border-color: color-mix(in oklab, var(--accent, #2f7d5b) 45%, transparent);
+    box-shadow: 0 2px 4px rgb(0 0 0 / .05), 0 14px 32px rgb(0 0 0 / .1);
+  }
+}
+.pos-tile:not(:disabled):active {
+  transform: scale(.96);
+  box-shadow: 0 1px 2px rgb(0 0 0 / .08);
+}
+.pos-tile:focus-visible { outline: 3px solid var(--accent, #2f7d5b); outline-offset: 2px; }
+.pos-tile-name { font-size: 16px; font-weight: 650; line-height: 1.3; color: var(--text, #1b1b1b); }
+.pos-tile-price {
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: -.03em;
+  color: var(--text, #1b1b1b);
+  font-variant-numeric: tabular-nums;
+}
+.pos-tile-more { color: var(--muted, #6b6b6b); }
+.pos-tile-count {
+  box-shadow: 0 4px 10px color-mix(in oklab, var(--accent, #2f7d5b) 40%, transparent);
+  animation: ts-pop .22s cubic-bezier(.2, .9, .3, 1.4);
+}
+.pos-tile[data-in-order] {
+  border-color: var(--accent, #2f7d5b);
+  background:
+    linear-gradient(160deg, color-mix(in oklab, var(--accent, #2f7d5b) 16%, transparent), transparent 75%),
+    var(--surface, #fff);
+  box-shadow: inset 0 0 0 1px var(--accent, #2f7d5b), var(--shadow, 0 8px 24px rgb(0 0 0 / .06));
+}
+
+/* Order panel: receipt-like. */
+.pos-order {
+  border-radius: var(--radius, 20px);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, color-mix(in oklab, var(--text, #222) 10%, transparent));
+  box-shadow: var(--shadow, 0 12px 36px rgb(0 0 0 / .08));
+}
+.pos-order-head h2 { font-size: 20px; font-weight: 750; }
+.pos-line { border-bottom: 1px dashed var(--border, color-mix(in oklab, var(--text, #222) 16%, transparent)); }
+.pos-line:last-child { border-bottom: 0; }
+.pos-line-name { font-weight: 650; }
+.pos-line-sub, .pos-line-comment { color: var(--muted, #6b6b6b); }
+.pos-line-sum { font-weight: 700; font-variant-numeric: tabular-nums; }
+.pos-qty {
+  gap: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--surface-2, color-mix(in oklab, var(--text, #222) 6%, transparent));
+}
+.pos-qty output { min-width: 32px; font-size: 18px; font-weight: 750; text-align: center; font-variant-numeric: tabular-nums; }
+.pos-qty-btn {
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--surface, #fff);
+  color: var(--text, #1b1b1b);
+  font-size: 20px;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgb(0 0 0 / .12);
+  transition: transform .1s, background .15s;
+}
+.pos-qty-btn:not(:disabled):active { transform: scale(.9); }
+.pos-total {
+  padding-top: 14px;
+  border-top: 2px solid var(--text, #1b1b1b);
+  align-items: baseline;
+}
+.pos-total span { color: var(--muted, #6b6b6b); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; font-size: 13px; }
+.pos-total strong { font-size: clamp(30px, 4vw, 40px); font-weight: 800; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+.pos-pay, .pos-paybar {
+  min-height: 60px;
+  border-radius: calc(var(--radius, 18px) - 2px);
+  font-size: 19px;
+  font-weight: 750;
+  box-shadow: 0 10px 24px color-mix(in oklab, var(--accent, #2f7d5b) 35%, transparent);
+  transition: transform .12s, box-shadow .2s, filter .2s;
+}
+.pos-pay:not(:disabled):hover, .pos-paybar:not(:disabled):hover { filter: brightness(1.05); }
+.pos-pay:not(:disabled):active, .pos-paybar:not(:disabled):active { transform: scale(.98); }
+
+/* Barista: cards readable from across the counter, status colour per stage. */
+.barista-cols { gap: 16px; }
+.barista-col { --stage: var(--info, #3b7dd8); border-top: 4px solid var(--stage); }
+.barista-col[data-stage='PREPARING'] { --stage: var(--warn, #d88b1f); }
+.barista-col[data-stage='READY'] { --stage: var(--ok, var(--accent, #2f7d5b)); }
+.barista-col-head h2::before { background: var(--stage); width: 10px; height: 10px; }
+.barista-count { font-weight: 800; font-variant-numeric: tabular-nums; }
+.barista-card {
+  border-radius: var(--radius, 16px);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, color-mix(in oklab, var(--text, #222) 10%, transparent));
+  border-left: 6px solid var(--stage, var(--accent, #2f7d5b));
+  box-shadow: var(--shadow, 0 6px 18px rgb(0 0 0 / .07));
+}
+.barista-number { font-size: 36px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.barista-lines { font-size: 17px; }
+.barista-qty { font-weight: 800; color: var(--stage, var(--accent, #2f7d5b)); }
+.barista-options, .barista-guest { color: var(--muted, #6b6b6b); }
+.barista-note {
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: color-mix(in oklab, var(--warn, #d88b1f) 14%, transparent);
+}
+.barista-age[data-late='warn'] { color: var(--warn, #b86e00); font-weight: 700; }
+.barista-age[data-late='late'] {
+  color: var(--danger, #c0392b);
+  font-weight: 800;
+  animation: ts-pulse 1.6s ease-in-out infinite;
+}
+.barista-actions .btn { min-height: 48px; border-radius: 12px; }
+
+/* Guest board: huge numbers, the ready column glows. */
+.board-col { border-radius: var(--radius, 24px); }
+.board-numbers li {
+  border-radius: calc(var(--radius, 18px) - 2px);
+  box-shadow: var(--shadow, 0 8px 24px rgb(0 0 0 / .08));
+}
+.board-number { font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
+.board-col[data-kind='ready'] .board-numbers li {
+  background: color-mix(in oklab, var(--ok, var(--accent, #2f7d5b)) 16%, var(--surface, #fff));
+  outline: 2px solid color-mix(in oklab, var(--ok, var(--accent, #2f7d5b)) 50%, transparent);
+}
+
+/* Reports: soft bars in the top list. */
+.cafe-top-name { font-weight: 650; overflow-wrap: anywhere; }
+.cafe-top-qty { font-weight: 750; font-variant-numeric: tabular-nums; }
+.cafe-top-bar { border-radius: 999px; overflow: hidden; }
+.cafe-kv dd { font-variant-numeric: tabular-nums; font-weight: 650; }
+
+@keyframes ts-pop { from { transform: scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes ts-pulse { 50% { opacity: .55; } }
+
+@media (max-width: 600px) {
+  .pos-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .pos-tile { min-height: 112px; padding: 12px; }
+  .pos-tile-price { font-size: 19px; }
+  .barista-number { font-size: 30px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pos-tab, .pos-tile, .pos-qty-btn, .pos-pay, .pos-paybar { transition: none; }
+  .pos-tile:not(:disabled):active, .pos-tile:hover:not(:disabled), .pos-tab:active { transform: none; }
+  .pos-tile-count, .barista-age[data-late='late'] { animation: none; }
+}

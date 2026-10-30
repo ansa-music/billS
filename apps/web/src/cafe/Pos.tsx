@@ -64,6 +64,9 @@ import {
   writeLast,
 } from './pos-model.ts';
 import './cafe.css';
+import { EditGrid, lookStyle, TileBadge, TilePhoto } from './edit/EditGrid.tsx';
+import type { TileLook } from './edit/useTileLook.ts';
+import { ordered, useTileLook } from './edit/useTileLook.ts';
 
 const HITS = 'hits';
 /** The «Заказ 17» card stays this long after the HUB confirmed, then the counter is ready for the next guest. */
@@ -117,6 +120,9 @@ export function PosPage() {
   const desk = useDesk({ state, actor, refresh: hub.refresh, notify: hub.notify });
   const { catalog, error: catalogError } = useCachedCatalog(hub.version);
   const narrow = useMedia('(max-width: 960px)');
+  // «Редактировать дизайн»: the owner dresses the tiles in place; selling is paused meanwhile.
+  const [designing, setDesigning] = useState(false);
+  const tileLook = useTileLook();
 
   const [draft, setDraft] = useState<Draft>(() => emptyDraft());
   const draftRef = useRef(draft);
@@ -413,7 +419,7 @@ export function PosPage() {
   // ── Keyboard (desktop counter) ────────────────────────────────────────────
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   keyRef.current = (e: KeyboardEvent) => {
-    if (shiftDialog || guestOpen || document.querySelector('dialog[open]')) return;
+    if (designing || shiftDialog || guestOpen || document.querySelector('dialog[open]')) return;
     const typing = isTyping(e.target);
     if (e.key === 'Escape') {
       if (typing) (e.target as HTMLElement).blur();
@@ -487,7 +493,7 @@ export function PosPage() {
   // ── Tiles ─────────────────────────────────────────────────────────────────
   const tiles = useMemo(
     () =>
-      shown.map((p) => {
+      ordered(shown, tileLook.looks.order).map((p) => {
         const options = optionsOf(p);
         const price = options.length ? (tryPrice(p, defaultChoices(options)).priced?.unitPrice ?? p.price) : p.price;
         const left = p.stock === null ? null : Math.max(0, p.stock - (pendingStock.get(p.id) ?? 0));
@@ -502,7 +508,7 @@ export function PosPage() {
           options: options.length > 0,
         };
       }),
-    [shown, pendingStock, inOrder, hueOf, money],
+    [shown, pendingStock, inOrder, hueOf, money, tileLook.looks.order],
   );
 
   if (!sorted) {
@@ -595,6 +601,14 @@ export function PosPage() {
                 </div>
               )}
             </div>
+            <button
+              type="button"
+              className="ts-design-toggle"
+              aria-pressed={designing}
+              onClick={() => setDesigning((d) => !d)}
+            >
+              <span aria-hidden="true">✎</span> {designing ? 'Готово' : 'Редактировать дизайн'}
+            </button>
           </div>
           {multiplier !== null && (
             <p className="pos-mult-note" role="status">
@@ -632,8 +646,18 @@ export function PosPage() {
             <p className="empty">В меню пока нет товаров. Добавьте их в разделе «Меню».</p>
           ) : tiles.length === 0 ? (
             <p className="empty pos-noresult">Ничего не нашлось по «{query}».</p>
+          ) : designing ? (
+            <EditGrid
+              tiles={tiles}
+              looks={tileLook.looks.tiles}
+              patch={tileLook.patch}
+              reorder={tileLook.reorder}
+              reset={tileLook.reset}
+              undo={tileLook.undo}
+              onDone={() => setDesigning(false)}
+            />
           ) : (
-            <MenuGrid tiles={tiles} onTap={onTap} />
+            <MenuGrid tiles={tiles} looks={tileLook.looks.tiles} onTap={onTap} />
           )}
 
           {narrow && (optionsPanel || plainComment) && (
@@ -983,21 +1007,32 @@ interface Tile {
 }
 
 /** The menu grid; re-renders only when the tiles change (not on the HUB clock tick). */
-const MenuGrid = memo(function MenuGrid({ tiles, onTap }: { tiles: Tile[]; onTap: (id: string) => void }) {
+const MenuGrid = memo(function MenuGrid({
+  tiles,
+  looks,
+  onTap,
+}: {
+  tiles: Tile[];
+  looks: Record<string, TileLook>;
+  onTap: (id: string) => void;
+}) {
   return (
     <div className="pos-tiles" role="group" aria-label="Товары">
       {tiles.map((t) => (
         <button
           key={t.id}
           type="button"
-          className="pos-tile"
-          style={{ '--hue': t.hue } as CSSProperties}
+          className={looks[t.id] ? 'pos-tile ts-tile' : 'pos-tile'}
+          style={lookStyle(t.hue, looks[t.id])}
+          data-photo={looks[t.id]?.photo ? '' : undefined}
           data-in-order={t.count > 0 || undefined}
           data-out={t.out || undefined}
           disabled={t.out}
           // pointerdown would add on a scroll gesture; click is fast with touch-action: manipulation.
           onClick={() => onTap(t.id)}
         >
+          <TilePhoto look={looks[t.id]} />
+          <TileBadge look={looks[t.id]} />
           <span className="pos-tile-name">{t.name}</span>
           <span className="pos-tile-foot">
             <span className="pos-tile-price">{t.price}</span>

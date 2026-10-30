@@ -481,3 +481,22 @@
   .login-pad .keypad-key { min-height: 56px; }
   .login-page .login-links { margin-top: 8px; }
 }
+
+/* TS coffee: warm cards, a soft crema glow behind the head, roomy touch targets. */
+.onboarding-head .page-title { letter-spacing: -0.035em; }
+.onboarding-mark { border-radius: 12px; filter: drop-shadow(0 6px 16px rgb(0 0 0 / 0.22)); }
+.onboarding-card {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 5%, var(--surface)), var(--surface) 60%);
+  border-color: var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+.onboarding .btn,
+.login-page .btn { min-height: var(--control); }
+.onboarding-link { min-height: 44px; color: var(--accent-ink); }
+.login-pad .keypad-key { border-radius: var(--radius-md); transition: background-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease); }
+.login-pad .keypad-key:active { transform: scale(0.97); }
+@media (prefers-reduced-motion: reduce) {
+  .login-pad .keypad-key { transition: none; }
+  .login-pad .keypad-key:active { transform: none; }
+}
