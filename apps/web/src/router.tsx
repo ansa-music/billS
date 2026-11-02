@@ -103,7 +103,7 @@ export const ROUTES: RouteDef[] = [
   { path: '/settings', title: 'Настройки клуба', short: 'Клуб', cafeTitle: 'Настройки', cafeShort: 'Настройки', icon: 'settings', action: 'settings.view' },
   { path: '/owner', title: 'Кабинет управляющего', short: 'Кабинет', cafeTitle: 'Выручка', cafeShort: 'Выручка', icon: 'owner', action: 'reports.view' },
   { path: '/platform', title: 'Платформа', icon: 'platform', action: 'platform.view' },
-  // Installers for the owner phone and the cash-desk computer; linked from the staff menu in the top bar.
+  // This screen as an app, the owner phone app and the mini-PC image; linked from the staff menu in the top bar.
   { path: '/apps', title: 'Приложения', icon: 'download', action: null, hidden: true },
   { path: '/login', title: 'Вход', icon: 'user', action: null, hidden: true },
 ];

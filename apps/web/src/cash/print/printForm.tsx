@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
-import { isDesktopApp, printSilently } from '../../desktop.ts';
 import type { Paper } from './paper.ts';
 import { getPaper } from './paper.ts';
 import './print.css';
@@ -19,7 +18,8 @@ let cleanup: (() => void) | null = null;
  * Prints one form on the receipt printer: renders it into #print-root (a direct child of
  * <body>; @media print shows only that, open dialogs included), sizes the page to the paper
  * width and the form's height, calls window.print() and removes everything on `afterprint`.
- * In the TS desktop app the same print view goes to the receipt printer without the dialog.
+ * The cash desk runs in the browser, so this is always the browser's own print dialog (Chrome
+ * and Edge offer the printer picked last time, so the cashier chooses the receipt printer once).
  *
  * An array prints each form on a page of its own (two copies of a receipt: the printer cuts
  * between them); the page is as tall as the tallest form.
@@ -71,17 +71,8 @@ export function printForm(form: ReactNode | readonly ReactNode[], paper: Paper =
     document.getElementById(PAGE_STYLE_ID)?.remove();
     page.textContent = `@page { size: ${paper}mm ${heightMm}mm; margin: 0; }`;
     document.head.append(page);
-    const withDialog = () => {
-      if (done) return;
-      window.addEventListener('afterprint', onAfterPrint);
-      window.print();
-    };
-    if (!isDesktopApp()) {
-      withDialog();
-      return;
-    }
-    // TS desktop app: straight to the receipt printer; if that fails, the usual print dialog.
-    printSilently(Number(paper), heightMm).then(finish, withDialog);
+    window.addEventListener('afterprint', onAfterPrint);
+    window.print();
   };
 
   // A picture (the receipt logo) has no height until it is decoded, even from a data URL:

@@ -175,24 +175,6 @@
   color: var(--muted);
 }
 
-.dl-others {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 4px;
-  font-size: 13px;
-}
-
-.dl-others a {
-  color: var(--muted);
-  text-underline-offset: 3px;
-}
-
-.dl-others a:hover {
-  color: var(--text);
-}
-
 .dl-qr {
   display: flex;
   align-items: center;

@@ -26,7 +26,6 @@
     "test:supabase": "node --test --test-concurrency=1 \"supabase/tests/**/*.test.ts\"",
     "bundle:edge": "node scripts/bundle-edge.mjs",
     "vapid": "node scripts/vapid-keys.mjs",
-    "desktop:signing-key": "node scripts/tauri-signing-key.mjs",
     "android:keystore": "node scripts/android-keystore.mjs"
   },
   "devDependencies": {

@@ -2,19 +2,18 @@
 // current main and pushes it. The workflow builds the files and creates the public GitHub Release
 // that the «Скачать приложение» page offers.
 //
-//   node scripts/release.mjs desktop          ПК кассы (.msi, .deb)      → тег desktop-v<версия>
 //   node scripts/release.mjs mobile           телефон владельца (APK)    → тег mobile-v<версия>
 //   node scripts/release.mjs minipc           образ для мини-ПК (.iso)   → тег minipc-v<версия>
-//   node scripts/release.mjs desktop 0.2.0    своя версия вместо «следующей»
+//   node scripts/release.mjs mobile 0.2.0     своя версия вместо «следующей»
 //   флаги: --yes (не спрашивать), --dry-run (только показать, что будет сделано)
 //
 // The version comes from the tag: the workflows patch it into the app at build time, so nothing
-// has to be edited or committed before a release.
+// has to be edited or committed before a release. The cash desk itself has no installer: it runs
+// in the browser.
 import { execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
 
 const KINDS = {
-  desktop: { label: 'TS для ПК кассы (.msi и .deb)', workflow: 'desktop.yml' },
   mobile: { label: 'TS для Android (APK)', workflow: 'mobile.yml' },
   minipc: { label: 'TS для мини-ПК (образ для флешки)', workflow: 'minipc.yml' },
 };
@@ -37,7 +36,7 @@ const parse = (v) => (/^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : nul
 const compare = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 
 if (!KINDS[kind]) {
-  fail(`укажите, что выпускать: ${Object.keys(KINDS).join(', ')}. Например: node scripts/release.mjs desktop`);
+  fail(`укажите, что выпускать: ${Object.keys(KINDS).join(', ')}. Например: node scripts/release.mjs mobile`);
 }
 if (wanted !== undefined && !parse(wanted)) fail(`версия должна быть вида 1.2.3, а не «${wanted}»`);
 

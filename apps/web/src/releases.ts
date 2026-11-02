@@ -3,7 +3,7 @@ import type { GithubRelease, ReleaseCatalog } from '@bills/domain';
 import { buildReleaseCatalog, releasesApiUrl } from '@bills/domain';
 
 /**
- * The latest GitHub release of each app (tags desktop-v…, mobile-v…, general) with the installers, for the «Приложения»
+ * The latest GitHub release of each app (tags mobile-v…, minipc-v…, general) with its files, for the «Приложения»
  * page (#/apps). The same hook as in apps/cloud-web. Straight from the browser to api.github.com (public repo,
  * no token); the answer is kept in sessionStorage for 10 minutes so flipping
  * between pages does not eat the 60-requests-per-hour anonymous limit.

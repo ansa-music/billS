@@ -56,13 +56,13 @@ function stepText(id: StepId, club: OnboardingClub): StepText {
       };
     case 'install':
       return {
-        title: 'Установите TS на компьютер кассы или мини-ПК',
-        text: 'Программа работает в заведении даже без интернета: касса, смены и отчёты.',
+        title: 'Поставьте мини-ПК и откройте кассу в браузере',
+        text: 'Мини-ПК хранит данные заведения и работает даже без интернета, а касса открывается в браузере компьютера или планшета.',
       };
     case 'connect':
       return {
         title: 'Подключите кассу',
-        text: 'Вставьте код в программу TS на кассе — она сама свяжется с этим кабинетом.',
+        text: 'Вставьте код на экране кассы TS — она сама свяжется с этим кабинетом.',
       };
     case 'login':
       return {
@@ -160,18 +160,19 @@ function StepActions({
     case 'install':
       return (
         <>
+          {/* No program for the cash-desk computer: the cash desk is the browser on any computer or tablet. */}
+          <p className="hint">
+            Касса работает в браузере любого компьютера или планшета в заведении — программу скачивать не нужно. Адрес
+            кассы покажет мини-ПК, а в Chrome или Edge её можно поставить значком, как приложение.
+          </p>
           <div className="dl-pair">
-            <a className="btn btn-primary btn-big" href={downloadHref('windows')}>
-              <span>Скачать для Windows</span>
-              <small>компьютер кассы</small>
-            </a>
-            <a className="btn btn-big" href={downloadHref('minipc')}>
+            <a className="btn btn-primary btn-big" href={downloadHref('minipc')}>
               <span>Скачать для мини-ПК</span>
               <small>образ на флешку</small>
             </a>
           </div>
           <p className="hint">
-            Другие системы и инструкции — на странице{' '}
+            Мини-ПК нет, а компьютер кассы на Windows? HUB можно поставить на него — инструкции на странице{' '}
             <a className="link-inline" href="#/apps">
               «Скачать»
             </a>

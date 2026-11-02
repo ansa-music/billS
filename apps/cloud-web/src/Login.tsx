@@ -241,7 +241,7 @@ export function Login({
           </p>
         </section>
         <a className="link login-apps" href="#/apps">
-          Скачать программу для кассы и телефона
+          Скачать приложение для телефона и мини-ПК
         </a>
         {teamLink}
       </main>
@@ -513,7 +513,7 @@ export function Login({
         )}
       </form>
       <a className="link login-apps" href="#/apps">
-        Скачать программу для кассы и телефона
+        Скачать приложение для телефона и мини-ПК
       </a>
       {teamLink}
     </main>
