@@ -73,6 +73,10 @@ for (let day = 0; day < days; day++) {
   }
 }
 
+// A long key too (MGR-…), as a director who also signs in from the cabinet has: it must keep working after a move.
+const director = (hub.db.prepare("SELECT id FROM staff WHERE roles LIKE '%manager%' LIMIT 1").get() as { id: string }).id;
+const longKey = hub.auth.issueKey({ staffId: director, label: 'ПК директора', actor: { id: director, name: actor, role: 'manager', roles: ['manager'] } }).key;
+
 const file = join(dir, 'snapshot.db');
 db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
 hub.close();
@@ -80,4 +84,4 @@ db.close();
 const bytes = readFileSync(file);
 writeFileSync(out, bytes.toString('base64'));
 rmSync(dir, { recursive: true, force: true });
-console.log(`trial snapshot: ${made} orders, ${bytes.length} bytes (${Math.round((bytes.length * 4) / 3)} base64) → ${out}; director key ${key}`);
+console.log(`trial snapshot: ${made} orders, ${bytes.length} bytes (${Math.round((bytes.length * 4) / 3)} base64) → ${out}; director key ${key}, long key ${longKey}`);

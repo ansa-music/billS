@@ -110,6 +110,15 @@ export function CloudCafeGate({ code, children }: { code: string; children: Reac
     window.addEventListener(AUTH_CHANGED_EVENT, onAuth);
     return () => window.removeEventListener(AUTH_CHANGED_EVENT, onAuth);
   }, []);
+  // Room for the line under the sign-in screen, so it never covers «Вход поддержки» (cloud.css).
+  useEffect(() => {
+    const html = document.documentElement;
+    if (signedIn) delete html.dataset.cloudGate;
+    else html.dataset.cloudGate = '';
+    return () => {
+      delete html.dataset.cloudGate;
+    };
+  }, [signedIn]);
   // The café's name for the line (a device that came by a link has not seen it yet).
   useEffect(() => {
     if (venue) return;

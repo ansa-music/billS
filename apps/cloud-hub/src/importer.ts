@@ -107,6 +107,8 @@ export interface ImportState {
   seed: SchemaTemplate['seed'];
   rows: number;
   totalRows: number;
+  /** Rows written into the café so far (Cloudflare's unit: index rows count too). */
+  written?: number;
   fromMigration: number;
   venue: string | null;
   steps: number;
@@ -123,6 +125,8 @@ export interface ImportProgress {
   done: number;
   rows: number;
   totalRows: number;
+  /** Rows written into the café so far (Cloudflare bills them; index rows count too). */
+  written: number;
   bytes: number;
   steps: number;
   error: string | null;
@@ -228,8 +232,14 @@ export class Importer {
     this.#newestMigration = newestMigration;
   }
 
+  /** Rows written by the current step (what Cloudflare bills; index rows included). */
+  #written = 0;
+
   #exec(sql: string, ...bindings: Bind[]): Array<Record<string, unknown>> {
-    return this.#storage.sql.exec(sql, ...bindings).toArray() as Array<Record<string, unknown>>;
+    const cursor = this.#storage.sql.exec(sql, ...bindings);
+    const rows = cursor.toArray() as Array<Record<string, unknown>>;
+    this.#written += cursor.rowsWritten;
+    return rows;
   }
 
   #ensureTables(): void {
@@ -342,7 +352,9 @@ export class Importer {
     const SQL = state.phase === 'open' || state.phase === 'plan' || (state.phase === 'rows' && state.tables.length > 0) ? await this.#loadSqlJs() : null;
     try {
       return this.#storage.transactionSync(() => {
+        this.#written = 0;
         const next = this.#run(state, SQL);
+        next.written = (next.written ?? 0) + this.#written;
         next.steps++;
         next.failures = 0;
         this.#save(next);
@@ -606,6 +618,7 @@ export function importProgress(state: ImportState): ImportProgress {
     done: Math.round(done * 100) / 100,
     rows: state.rows,
     totalRows: state.totalRows,
+    written: state.written ?? 0,
     bytes: state.bytes,
     steps: state.steps,
     error: state.phase === 'failed' ? state.error : null,

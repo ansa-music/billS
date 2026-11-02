@@ -1,5 +1,9 @@
 /* «Облачная касса» (VITE_CLOUD_HUB=1): the café line before sign-in and the details of the menu badge. */
 
+html[data-cloud-gate] body {
+  padding-bottom: calc(72px + env(safe-area-inset-bottom));
+}
+
 .cloud-gate {
   position: fixed;
   left: 50%;

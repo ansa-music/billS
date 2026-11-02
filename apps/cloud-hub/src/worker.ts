@@ -12,7 +12,9 @@
  *
  *   POST /admin/cafes
  *        {venue, managerName, withMenu?, timezone?, terms?}
- *        → 201 {code, codeShown, venue, managerName, managerKey, terms, license}
+ *        → 201 {code, codeShown, status: 'ready', venue, managerName, managerKey (6 digits), steps, terms, license}
+ *          The schema comes from the build in a few steps (importer.ts startTemplate), driven by this call; should
+ *          it answer 202 {code, status: 'importing'}, `…/import/continue` finishes it and hands out managerKey once.
  *
  *   POST /admin/cafes/import
  *        {snapshot (base64 of the trial's SQLite file, as Supabase trials.snapshot), newManagerKey?, managerName?, terms?}
