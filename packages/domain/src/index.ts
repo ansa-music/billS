@@ -28,6 +28,7 @@ export * from './guest.ts';
 export * from './booking.ts';
 export * from './trial.ts';
 export * from './trial-watch.ts';
+export * from './trial-move.ts';
 export * from './trial-link.ts';
 export * from './trial-link-crypto.ts';
 export * from './trial-link-realtime.ts';

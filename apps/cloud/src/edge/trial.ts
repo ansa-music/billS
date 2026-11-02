@@ -1,9 +1,10 @@
 import { TRIAL_SNAPSHOT_MAX_BYTES } from '@bills/domain';
 import { reportTrial, startTrial, trialTermsOf } from '../trial.ts';
 import { createWatchLink, revokeWatchLinks, watchLinksStatus, watchSnapshot, watchState, withWatching } from '../trial-watch.ts';
+import { finishMove, movedError, moveState, regenerateCafeCode, startMove, withMove } from '../trial-move.ts';
 import type { EdgeContext } from './context.ts';
 import type { EdgeRequest } from './http.ts';
-import { bearerToken, errorResponse, json, notFound, readJson, routeOf } from './http.ts';
+import { bearerToken, errorResponse, json, notFound, readJson, readOptionalJson, routeOf } from './http.ts';
 import { clientIp } from './signup.ts';
 
 /**
@@ -26,6 +27,14 @@ import { clientIp } from './signup.ts';
  *   POST /trial/watch/revoke  {id} (Bearer trial)  → {revoked}
  *   GET  /trial/watch          (Bearer viewer)     → TrialWatchState (401 WATCH_LINK_REVOKED, 429 RATE_LIMITED)
  *   GET  /trial/watch/snapshot (Bearer viewer)     → TrialWatchSnapshot (404 SNAPSHOT_NOT_FOUND)
+ *
+ * «У меня уже есть TS — войти» (apps/cloud/src/trial-move.ts): the report's body may carry `needCode`, its
+ * answer `cafeCode` (once) and `sendSnapshot`; a token retired by a move gets 410 TRIAL_MOVED on report/terms.
+ *   POST /trial/code          {id} (Bearer trial)  → TrialCafeCode («Сменить код»; 429 past 10 an hour)
+ *   POST /trial/move/start    {code}               → TrialMoveStart (401 CAFE_CODE_WRONG, 429 RATE_LIMITED)
+ *   GET  /trial/move          (Bearer ticket)      → TrialMoveState (401 MOVE_TICKET_INVALID, 410 MOVE_EXPIRED)
+ *   POST /trial/move/finish   {acceptOlder?} (Bearer ticket) → TrialMoveFinish
+ *                             (409 MOVE_SUPERSEDED / MOVE_NOT_FRESH, 404 SNAPSHOT_NOT_FOUND)
  */
 export const TRIAL_CORS: Readonly<Record<string, string>> = {
   'Access-Control-Allow-Origin': '*',
@@ -54,11 +63,13 @@ export async function handleTrial(req: EdgeRequest, ctx: EdgeContext): Promise<R
     if (m === 'POST' && clean === '/trial/report') {
       const token = bearerToken(req);
       const body = await readJson(req, REPORT_BODY_LIMIT);
-      const terms = await reportTrial(ctx.db, ctx.now(), token, body);
-      return json(200, await withWatching(ctx.db, ctx.now(), body, terms), headers);
+      const terms = await reportTrial(ctx.db, ctx.now(), token, body).catch(rethrowMoved(ctx, token, body));
+      return json(200, await withMove(ctx.db, ctx.now(), body, await withWatching(ctx.db, ctx.now(), body, terms)), headers);
     }
     if (m === 'GET' && clean === '/trial/terms') {
-      return json(200, await trialTermsOf(ctx.db, ctx.now(), bearerToken(req), query.get('id')), headers);
+      const token = bearerToken(req);
+      const terms = await trialTermsOf(ctx.db, ctx.now(), token, query.get('id')).catch(rethrowMoved(ctx, token, { id: query.get('id') }));
+      return json(200, terms, headers);
     }
     if (m === 'POST' && clean === '/trial/watch/links') {
       return json(201, await createWatchLink(ctx.db, ctx.now(), bearerToken(req), await readJson(req)), headers);
@@ -75,8 +86,36 @@ export async function handleTrial(req: EdgeRequest, ctx: EdgeContext): Promise<R
     if (m === 'GET' && clean === '/trial/watch/snapshot') {
       return json(200, await watchSnapshot(ctx.db, ctx.now(), bearerToken(req), clientIp(req)), headers);
     }
+    const move = await moveRoute(req, clean, m, ctx);
+    if (move) return json(move.status, move.body, headers);
     return notFound(headers);
   } catch (e) {
     return errorResponse(e, ctx.log, headers);
   }
+}
+
+/** A refused report or terms call of a cash desk that was moved away: 410 TRIAL_MOVED instead of 401. */
+function rethrowMoved(ctx: EdgeContext, token: string | null, body: unknown): (e: unknown) => Promise<never> {
+  return async (e) => {
+    throw await movedError(ctx.db, e, token, typeof body === 'object' && body !== null ? (body as { id?: unknown }).id : undefined);
+  };
+}
+
+/** «Код кофейни» and moving the cash desk (apps/cloud/src/trial-move.ts); null when the path is not one of them. */
+async function moveRoute(req: EdgeRequest, path: string, m: string, ctx: EdgeContext): Promise<{ status: number; body: unknown } | null> {
+  if (m === 'POST' && path === '/trial/code') {
+    return { status: 200, body: await regenerateCafeCode(ctx.db, ctx.now(), bearerToken(req), await readJson(req)) };
+  }
+  if (m === 'POST' && path === '/trial/move/start') {
+    return { status: 201, body: await startMove(ctx.db, ctx.now(), await readJson(req), clientIp(req)) };
+  }
+  if (m === 'GET' && path === '/trial/move') {
+    return { status: 200, body: await moveState(ctx.db, ctx.now(), bearerToken(req), clientIp(req)) };
+  }
+  if (m === 'POST' && path === '/trial/move/finish') {
+    const res = await finishMove(ctx.db, ctx.now(), bearerToken(req), await readOptionalJson(req), clientIp(req));
+    ctx.log(`trial: касса пробной версии ${res.id} перенесена на другой компьютер`);
+    return { status: 200, body: res };
+  }
+  return null;
 }

@@ -7,7 +7,7 @@
  * Contract (supabase/functions/trial): base `${VITE_SUPABASE_URL}/functions/v1/trial`
  *   POST /start  {venue, managerName, timezone, startedAt}  → {id, token, startedAt, endsAt, status}
  *                (the cloud counts the 14 days from this browser's startedAt, not from the call)
- *   POST /report Bearer token, {id, stats, snapshot?}       → {status, endsAt, message?, watching?}
+ *   POST /report Bearer token, {id, stats, snapshot?, needCode?} → {status, endsAt, message?, watching?, cafeCode?, sendSnapshot?}
  *   GET  /terms?id=  Bearer token                          → {status, endsAt, message?}
  * Without VITE_SUPABASE_URL everything here is off. Nothing waits on the network: a failed
  * call is tried again on the next tick.
@@ -17,8 +17,10 @@ import { TRIAL_SNAPSHOT_MAX_BYTES, workingDay } from '@bills/domain';
 import type { DatabaseSync } from './shims/sqlite.ts';
 import type { TrialInfo } from './trial-store.ts';
 import { isStatus } from './trial-store.ts';
-import type { TrialReportAnswer } from '@bills/domain';
-import { TRIAL_WATCH, trialReportEveryMs, trialSnapshotDue } from '@bills/domain';
+import type { TrialReportAnswer, TrialReportMoveFields } from '@bills/domain';
+import { TRIAL_SNAPSHOT, TRIAL_WATCH, trialReportEveryMs, trialSnapshotDueNow } from '@bills/domain';
+import type { ForcedCopy } from './trial-move.ts';
+import { deskMove, httpError } from './trial-move.ts';
 
 export type { TrialStats, TrialTerms };
 type TrialDayStats = TrialStats['days'][number];
@@ -54,7 +56,8 @@ async function call(path: string, init: RequestInit & { token?: string | undefin
   const timer = controller ? setTimeout(() => controller.abort(), TIMEOUT_MS) : undefined;
   try {
     const res = await fetch(`${TRIAL_CLOUD_URL}${path}`, { ...rest, headers, cache: 'no-store', ...(controller ? { signal: controller.signal } : {}) });
-    if (!res.ok) throw new Error(`trial ${path}: HTTP ${res.status}`);
+    // With the cloud's code (trial-move.ts reads 410 TRIAL_MOVED: «Касса перенесена»).
+    if (!res.ok) throw await httpError(path, res);
     return await res.json();
   } finally {
     clearTimeout(timer);
@@ -162,10 +165,21 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(s);
 }
 
-/** POST /report with the answer's `watching` kept: a phone is looking («Смотреть с телефона»). */
-async function cloudReportWatching(id: string, token: string, stats: TrialStats, snapshot?: string): Promise<TrialReportAnswer> {
-  const req: TrialReportRequest = { id, stats, ...(snapshot ? { snapshot } : {}) };
+/**
+ * POST /report with the answer's `watching` kept: a phone is looking («Смотреть с телефона»). `extra` and
+ * `onBody`: the move fields of the request and the whole answer (trial-move.ts: café code, «send a fresh copy»).
+ */
+async function cloudReportWatching(
+  id: string,
+  token: string,
+  stats: TrialStats,
+  snapshot?: string,
+  extra: TrialReportMoveFields = {},
+  onBody?: (body: unknown) => void,
+): Promise<TrialReportAnswer> {
+  const req: TrialReportRequest & TrialReportMoveFields = { id, stats, ...(snapshot ? { snapshot } : {}), ...extra };
   const body = await call('/report', { method: 'POST', token, body: JSON.stringify(req) });
+  onBody?.(body);
   const terms = parseTerms(body);
   if (!terms) throw new Error('trial /report: unexpected answer');
   return (body as { watching?: unknown }).watching === true ? { ...terms, watching: true } : terms;
@@ -188,13 +202,16 @@ export interface TrialCloudDeps {
   persist(patch: Partial<TrialInfo>): void;
   /** The cloud's terms changed: re-install the HUB's license. */
   applyTerms(terms: TrialTerms): void;
+  /** Another computer took the cash desk over (trial-move.ts): lock this one read-only. */
+  onMoved?(): void;
 }
 
 /**
  * Starts the link: POST /start once (retried until it answers), then a report every 5 minutes,
  * 20 s after the first change, and a last one (without the copy) when the page goes away.
  * While a phone watches (the report's answer says `watching`, or a watch link was just made) the
- * reports come every minute and carry the copy whenever it changed; otherwise the copy goes every 30 minutes.
+ * reports come every minute and carry the copy whenever it changed; otherwise a changed copy goes 2 minutes
+ * after the last change (with the 5-minute report while busy).
  * Returns null when this build has no cloud or the coffee shop is a local-only copy.
  */
 export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
@@ -215,15 +232,32 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
     if (licenseChanged) deps.applyTerms(terms);
   };
 
-  const snapshot = (): { data: string; hash: string } | null => {
-    if (!trialSnapshotDue(Date.now(), info.snapshotAt, watched()) || db.isTransaction) return null;
+  // The copy goes 2 minutes after the last change (or with the 5-minute report while busy), not every
+  // 30 minutes (TRIAL_SNAPSHOT: why that fits Supabase Free); `force` — a move asked for it, changed or not.
+  let lastChangeAt: number | null = null;
+  let forceCopy = false;
+  let tooBig = false;
+  const snapshot = (force = false): { data: string; hash: string } | null => {
+    if (db.isTransaction) return null;
+    if (!force && !trialSnapshotDueNow(Date.now(), { lastSnapshotAt: info.snapshotAt, lastChangeAt, watched: watched() })) return null;
     const bytes = db.export();
-    if (bytes.length > SNAPSHOT_MAX_BYTES) return null;
+    tooBig = bytes.length > SNAPSHOT_MAX_BYTES;
+    if (tooBig) return null;
     const hash = fingerprint(bytes);
-    return hash === info.snapshotHash ? null : { data: toBase64(bytes), hash };
+    return hash === info.snapshotHash && !force ? null : { data: toBase64(bytes), hash };
   };
+  // «У меня уже есть TS — войти» (trial-move.ts): the café code, a fresh copy when a move asks, «Касса перенесена».
+  const move = deskMove({
+    info,
+    persist: deps.persist,
+    reportWithCopy: () => reportWithCopy(),
+    unsynced: () => !db.isTransaction && fingerprint(db.export()) !== info.snapshotHash,
+    onMoved: () => deps.onMoved?.(),
+  });
 
   const tick = async (): Promise<TrialTerms | null> => {
+    // Moved away: this computer is no longer the cash desk and never reports again.
+    if (move.stopped) return null;
     try {
       if (!info.cloudId || !info.cloudToken) {
         // startedAt: a trial that registers late (offline at first, opened after an update) keeps its own term.
@@ -231,13 +265,16 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
         deps.persist({ cloudId: started.id, cloudToken: started.token });
         take(started);
       }
-      const snap = snapshot();
-      const terms = await cloudReportWatching(info.cloudId!, info.cloudToken!, collectStats(db), snap?.data);
+      const force = forceCopy;
+      forceCopy = false;
+      const snap = snapshot(force);
+      const terms = await cloudReportWatching(info.cloudId!, info.cloudToken!, collectStats(db), snap?.data, move.fields(), (body) => move.onAnswer(body));
       watchedByCloud = terms.watching === true;
       if (snap) deps.persist({ snapshotAt: Date.now(), snapshotHash: snap.hash });
       take(terms);
       return terms;
     } catch (err) {
+      if (move.onError(err)) return null;
       console.warn('[trial] the TS cloud did not answer, will try again', err);
       return null;
     }
@@ -251,6 +288,15 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
     }
     return running;
   };
+  /** A report with the copy right now, after one already on its way (trial-move.ts: a move waits for it). */
+  const reportWithCopy = async (): Promise<ForcedCopy> => {
+    while (running) await running;
+    forceCopy = true;
+    const before = info.snapshotAt;
+    const terms = await reportNow();
+    if (tooBig) return 'too-big';
+    return terms && info.snapshotAt !== before ? 'sent' : 'failed';
+  };
   const watchSoon = () => {
     watchedUntil = Date.now() + TRIAL_WATCH.watchingMs;
     // After a report already on its way (it may have gone without the copy).
@@ -263,13 +309,19 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
     if (Date.now() - lastAttempt >= trialReportEveryMs(watched())) void reportNow();
   }, REPORT_TICK_MS);
   let firstChange = true;
+  let quietTimer: ReturnType<typeof setTimeout> | undefined;
   deps.onChange(() => {
+    lastChangeAt = Date.now();
+    clearTimeout(quietTimer);
+    quietTimer = setTimeout(() => {
+      if (lastChangeAt !== null && lastChangeAt > (info.snapshotAt ?? 0)) void reportNow();
+    }, TRIAL_SNAPSHOT.quietMs + 1000);
     if (!firstChange) return;
     firstChange = false;
     setTimeout(() => void reportNow(), FIRST_CHANGE_DELAY_MS);
   });
   window.addEventListener('pagehide', () => {
-    if (!info.cloudId || !info.cloudToken) return;
+    if (!info.cloudId || !info.cloudToken || move.stopped) return;
     try {
       void fetch(`${TRIAL_CLOUD_URL}/report`, {
         method: 'POST',

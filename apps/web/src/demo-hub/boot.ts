@@ -31,6 +31,7 @@ import { startTrialCloud } from './trial-cloud.ts';
 import { setWatchSoonHook } from './trial-watch.ts';
 import { installEventSource, installFetch } from './page-api.ts';
 import { installTrialLinkHost } from './link-host.ts';
+import { movedLicenseView, registerTrialSaverHalt } from './trial-move.ts';
 
 // watch-hub.ts and older callers import the page stand-ins from here.
 export { installEventSource, installFetch };
@@ -195,18 +196,21 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
   }
   // After the club exists: the license names this HUB by its club (before it, signing fails and
   // licenses would be switched off for the whole session).
-  await installTrialLicense(hub, info, now);
+  // A cash desk that was moved to another computer stays read-only (trial-move.ts).
+  await installTrialLicense(hub, movedLicenseView(info), now);
   hub.start();
 
   // Ask the browser not to evict the coffee shop under storage pressure (best effort).
   void navigator.storage?.persist?.().catch(() => false);
   // A copy from the cabinet comes without the manager's code: give the manager a new one to sign in with.
-  if (saved && !info.managerKey) {
+  // A café moved in from another computer (trial-move.ts) keeps its people's codes: none is added.
+  if (saved && !info.managerKey && !info.movedIn) {
     const managerKey = trialKey();
     hub.auth.issueFixedKeys([{ roles: ['manager'], name: info.managerName || 'Директор', key: managerKey }]);
     updateCurrentTrial({ managerKey });
   }
   const saver = keepTrialSaved(db, hub, info);
+  registerTrialSaverHalt(saver.halt);
   installFetch(app, saver.changed);
   installEventSource(hub);
   // «Подключить устройство»: phones and tablets of the staff work through this tab's HUB (link-host.ts).
@@ -240,7 +244,11 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
       saver.saveNow();
     },
     applyTerms: (_terms: TrialTerms) => {
-      void installTrialLicense(hub, info, Date.now()).catch((err: unknown) => console.warn('[trial] could not apply the new terms', err));
+      void installTrialLicense(hub, movedLicenseView(info), Date.now()).catch((err: unknown) => console.warn('[trial] could not apply the new terms', err));
+    },
+    // «Касса перенесена на другой компьютер»: no new orders here (trial-move.ts).
+    onMoved: () => {
+      void installTrialLicense(hub, movedLicenseView(info), Date.now()).catch((err: unknown) => console.warn('[trial] could not lock the moved cash desk', err));
     },
   });
   if (link) {
@@ -267,18 +275,21 @@ async function installTrialLicense(hub: Hub, info: TrialInfo, now: number): Prom
 }
 
 /** Like keepSaved, into IndexedDB; the first save happens right away so a new trial survives a reload. */
-function keepTrialSaved(db: DatabaseSync, hub: Hub, info: TrialInfo): { changed: () => void; saveNow: () => void } {
+function keepTrialSaved(db: DatabaseSync, hub: Hub, info: TrialInfo): { changed: () => void; saveNow: () => void; halt: () => void } {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let writing: Promise<void> = Promise.resolve();
+  // Halted when a café moved in from another computer replaces this one (trial-move.ts), until the reload.
+  let halted = false;
   const save = () => {
     clearTimeout(timer);
     timer = undefined;
+    if (halted) return;
     if (db.isTransaction) {
       timer = setTimeout(save, 50);
       return;
     }
     const rec: TrialRecord = { ...info, db: db.export(), savedAt: Date.now() };
-    writing = writing.then(() => saveTrial(rec)).catch((err: unknown) => console.warn('[trial] could not save the coffee shop', err));
+    writing = writing.then(() => (halted ? undefined : saveTrial(rec))).catch((err: unknown) => console.warn('[trial] could not save the coffee shop', err));
   };
   const changed = () => {
     clearTimeout(timer);
@@ -293,5 +304,12 @@ function keepTrialSaved(db: DatabaseSync, hub: Hub, info: TrialInfo): { changed:
   });
   window.addEventListener('pagehide', flush);
   save();
-  return { changed, saveNow: save };
+  return {
+    changed,
+    saveNow: save,
+    halt: () => {
+      halted = true;
+      clearTimeout(timer);
+    },
+  };
 }

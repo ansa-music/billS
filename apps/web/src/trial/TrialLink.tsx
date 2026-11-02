@@ -119,6 +119,10 @@ function TrialLinkDialog({ onClose }: { onClose: () => void }) {
   useEffect(() => setCopied(false), [view, secret]);
 
   const url = secret ? `${window.location.origin}${window.location.pathname}${linkHash(secret, view)}` : null;
+  // «Отправить в WhatsApp»: for a second computer (or a TV) that cannot scan the QR code.
+  const whatsApp = url
+    ? `https://wa.me/?text=${encodeURIComponent(`${view === 'board' ? 'TS — экран заказов' : 'TS — откройте и войдите своим кодом'}: ${url}`)}`
+    : null;
 
   const copy = () => {
     if (!url) return;
@@ -164,14 +168,22 @@ function TrialLinkDialog({ onClose }: { onClose: () => void }) {
             <p className="muted">
               {view === 'board'
                 ? 'Откройте код на телевизоре или планшете над стойкой — появится экран заказов, входить не нужно.'
-                : 'Наведите камеру телефона на код (или отправьте ссылку сотруднику) — откроется TS. Каждый входит своим кодом и видит то, что разрешено его роли.'}
+                : 'Наведите камеру телефона на код (или отправьте ссылку сотруднику) — откроется TS. Каждый входит своим кодом и видит то, что разрешено его роли.'}{' '}
+              Для компьютера без камеры — «Скопировать ссылку» или «Отправить в WhatsApp» и откройте ссылку на нём.
             </p>
             <div className="trial-watch-link">
               <input readOnly value={url} aria-label="Ссылка для устройства" onFocus={(e) => e.currentTarget.select()} />
               <button type="button" className="btn btn-small" onClick={copy}>
-                {copied ? 'Скопировано' : 'Скопировать'}
+                {copied ? 'Скопировано' : 'Скопировать ссылку'}
               </button>
             </div>
+            {whatsApp && (
+              <div className="trial-details-actions">
+                <a className="btn btn-small" href={whatsApp} target="_blank" rel="noopener noreferrer">
+                  Отправить в WhatsApp
+                </a>
+              </div>
+            )}
           </>
         ) : error ? (
           <p className="trial-watch-error" role="alert">

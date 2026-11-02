@@ -1,0 +1,128 @@
+/* «У меня уже есть TS — войти» (TrialSignIn.tsx, TrialMove.tsx). Builds on onboarding.css and trial.css. */
+
+.trial-choice {
+  display: grid;
+  gap: 12px;
+}
+
+@media (min-width: 640px) {
+  .trial-choice:not(.trial-ways) {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.trial-choice-card {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-height: 112px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+
+.trial-choice-card strong {
+  font-size: var(--fs-lg);
+  line-height: 1.25;
+}
+
+.trial-choice-card span {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.trial-choice-card:hover {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+  background: color-mix(in oklab, var(--accent) 6%, var(--surface));
+}
+
+.trial-choice-card:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.trial-choice-card[data-kind='new'] {
+  border-color: color-mix(in oklab, var(--accent) 35%, var(--border));
+  background: var(--accent-soft);
+}
+
+.trial-choice-card[data-kind='signin'] {
+  border-width: 2px;
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+}
+
+.trial-choice-note {
+  margin-top: 16px;
+  text-align: center;
+}
+
+.trial-code-input {
+  font-size: 1.5rem !important;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+}
+
+.trial-move-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 1.4em;
+}
+
+.trial-move-code {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.trial-move-warn {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklab, var(--warn) 55%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--warn) 12%, var(--surface));
+}
+
+.trial-moved-banner .license-banner-text {
+  display: grid;
+  gap: 6px;
+}
+
+.trial-moved-banner p {
+  margin: 0;
+}
+
+.trial-moved-hint {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.trial-moved-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.login-shell > .trial-moved-banner {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto 16px;
+  box-sizing: border-box;
+}
+
+.trial-cafe-code .trial-details-key code {
+  white-space: nowrap;
+}

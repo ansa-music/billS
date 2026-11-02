@@ -1,23 +1,26 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { BrandMark } from '../BrandMark.tsx';
 import { Field } from '../ui.tsx';
 import type { NewTrial } from '../demo-hub/boot.ts';
-import { restoreBackup, TRIAL_DAYS } from '../demo-hub/trial-store.ts';
+import { TRIAL_DAYS } from '../demo-hub/trial-store.ts';
+import type { TrialEntryMode } from './TrialSignIn.tsx';
+import { TrialEntry } from './TrialSignIn.tsx';
 import '../onboarding/onboarding.css';
 import './trial.css';
 
 /**
  * First visit of the browser trial: two fields and one button. The coffee shop is created in
  * this browser, then «Готово» shows the director's (role manager) six-digit key once, big, to write down.
- * «Уже пробовали на другом устройстве?» restores a «Скачать копию» file instead.
+ * First the choice «Новая кофейня» / «У меня уже есть TS — войти» (TrialSignIn.tsx: move the cash desk here,
+ * work with it as a device, or restore a «Скачать копию» file) — the form only for a new café.
  */
 export function TrialWelcome({ onStart, onRestored }: { onStart: (t: NewTrial) => void; onRestored: () => void }) {
+  const [mode, setMode] = useState<TrialEntryMode>('choose');
   const [venue, setVenue] = useState('');
   const [managerName, setManagerName] = useState('');
   const [withMenu, setWithMenu] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const file = useRef<HTMLInputElement>(null);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -27,6 +30,8 @@ export function TrialWelcome({ onStart, onRestored }: { onStart: (t: NewTrial) =
     }
     onStart({ venue: venue.trim(), managerName: managerName.trim(), withMenu });
   };
+
+  if (mode !== 'new') return <TrialEntry mode={mode} onMode={setMode} onRestored={onRestored} />;
 
   return (
     <section className="page onboarding trial-welcome">
@@ -73,23 +78,10 @@ export function TrialWelcome({ onStart, onRestored }: { onStart: (t: NewTrial) =
       </form>
 
       <p className="onboarding-foot">
-        Уже пробовали на другом устройстве?{' '}
-        <button type="button" className="onboarding-link" onClick={() => file.current?.click()}>
-          Восстановить из копии
+        Кофейня уже работает на другом компьютере?{' '}
+        <button type="button" className="onboarding-link" onClick={() => setMode('signin')}>
+          У меня уже есть TS — войти
         </button>
-        <input
-          ref={file}
-          type="file"
-          accept=".json,application/json"
-          hidden
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (!f) return;
-            restoreBackup(f)
-              .then(onRestored)
-              .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Не удалось прочитать копию'));
-          }}
-        />
       </p>
     </section>
   );

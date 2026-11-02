@@ -1,10 +1,12 @@
 import type { Action, Business, LicenseState, LicenseStatus, RoleSet } from '@bills/domain';
-import { ACTION_MODULE, MODULE_LABEL, decide, licenseGateOf } from '@bills/domain';
+import { ACTION_MODULE, MODULE_LABEL, decide, licenseGateOf, TRIAL_MOVED_MESSAGE } from '@bills/domain';
 import { currentTrial, TRIAL } from './demo-hub/trial-store.ts';
 import { isWatchMode } from './demo-hub/watch-mode.ts';
 import { WatchBanner } from './trial/WatchBanner.tsx';
 import { isLinkMode } from './demo-hub/link-mode.ts';
 import { LinkBanner } from './trial/LinkBanner.tsx';
+import { TrialMovedBanner } from './trial/TrialMove.tsx';
+import { trialMovedAway } from './demo-hub/trial-move.ts';
 
 /**
  * The license of this branch as screens see it: the banner in the shell and
@@ -44,6 +46,8 @@ export function blockedReason(roles: RoleSet, action: Action, license: LicenseSt
     case 'forbidden':
       return 'Недостаточно прав для этого действия.';
     case 'read_only':
+      // A trial cash desk moved to another computer is read-only for that reason, not an expired licence.
+      if (TRIAL && trialMovedAway(currentTrial())) return TRIAL_MOVED_MESSAGE;
       return `Только чтение: ${license?.message ?? READ_ONLY_TEXT}`;
     case 'module_off': {
       const mod = ACTION_MODULE[action];
@@ -68,11 +72,17 @@ export function LicenseBanner({ license }: { license: LicenseStatus | null | und
   }
   // A phone watching a trial cash desk: «Только просмотр · данные кассы на 14:32» instead.
   if (isWatchMode()) return <WatchBanner />;
-  return <LicenseStrip license={license} />;
+  // A cash desk moved to another computer: «Касса перенесена» and what to do (trial/TrialMove.tsx), not the strip.
+  return (
+    <>
+      <TrialMovedBanner />
+      <LicenseStrip license={license} />
+    </>
+  );
 }
 
 function LicenseStrip({ license }: { license: LicenseStatus | null | undefined }) {
-  if (!license) return null;
+  if (!license || (TRIAL && trialMovedAway(currentTrial()))) return null;
   const tone = licenseTone(license.state);
   if (tone === 'ok' && !license.readOnly) return null;
   // Browser trial: the days left are on the badge in the menu; only read-only mode gets the strip.

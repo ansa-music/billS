@@ -45,6 +45,7 @@ import { CafeNeedsCounterModule } from './onboarding/CafeLicense.tsx';
 import { useSetupGate } from './onboarding/setup.ts';
 import { WatchBanner } from './trial/WatchBanner.tsx';
 import { LinkBanner } from './trial/LinkBanner.tsx';
+import { TrialMovedBanner } from './trial/TrialMove.tsx';
 import { isLinkMode } from './demo-hub/link-mode.ts';
 
 /** Route path → page. The table of routes (titles, icons, permissions) lives in router.tsx. */
@@ -190,6 +191,7 @@ export function App() {
       <div className="login-shell">
         <WatchBanner />
         <LinkBanner />
+        <TrialMovedBanner />
         <LoginPage next={next} />
       </div>
     );

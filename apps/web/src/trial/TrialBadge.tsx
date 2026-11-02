@@ -3,6 +3,8 @@ import { Modal } from '../ui.tsx';
 import { currentTrial, daysLeft, downloadBackup, subscribeTrial, TRIAL, trialEndsAt, trialOver, trialVersion } from '../demo-hub/trial-store.ts';
 import { openTrialWatch, TrialWatchHost, useCanWatchFromPhone } from './TrialWatch.tsx';
 import { openTrialLink, TrialLinkHost, useCanLinkDevices } from './TrialLink.tsx';
+import { trialMovedAway } from '../demo-hub/trial-move.ts';
+import { TrialCafeCodeSection, TrialMovedState, TrialMoveHost } from './TrialMove.tsx';
 
 /**
  * Browser trial (VITE_TRIAL=1): a quiet line at the bottom of the menu — «Пробная · 12 дн.» —
@@ -21,9 +23,11 @@ export function TrialBadge({ place = 'sidebar' }: { place?: 'sidebar' | 'sheet' 
   const [open, setOpen] = useState(false);
   const info = TRIAL ? currentTrial() : null;
   if (!info) return null;
-  const over = trialOver(info);
+  // «Касса перенесена на другой компьютер» (TrialMove.tsx): read-only like a finished trial.
+  const moved = trialMovedAway(info);
+  const over = trialOver(info) || moved;
   const left = daysLeft(info);
-  const label = over ? 'Пробная завершена' : `Пробная · ${left} дн.`;
+  const label = moved ? 'Касса перенесена' : over ? 'Пробная завершена' : `Пробная · ${left} дн.`;
   return (
     <>
       <button
@@ -31,7 +35,7 @@ export function TrialBadge({ place = 'sidebar' }: { place?: 'sidebar' | 'sheet' 
         className="trial-badge"
         data-place={place}
         data-over={over || undefined}
-        title={over ? (info.message ?? 'Пробный период завершён') : `Пробная версия: осталось ${left} ${daysWord(left)}`}
+        title={moved ? 'Касса перенесена на другой компьютер' : over ? (info.message ?? 'Пробный период завершён') : `Пробная версия: осталось ${left} ${daysWord(left)}`}
         aria-haspopup="dialog"
         onClick={() => setOpen(true)}
       >
@@ -46,6 +50,7 @@ export function TrialBadge({ place = 'sidebar' }: { place?: 'sidebar' | 'sheet' 
         <>
           <TrialWatchHost />
           <TrialLinkHost />
+          <TrialMoveHost />
         </>
       )}
     </>
@@ -59,13 +64,16 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
   const canWatch = useCanWatchFromPhone();
   const canLink = useCanLinkDevices();
   if (!info) return null;
+  const moved = trialMovedAway(info);
   const over = trialOver(info);
   const left = daysLeft(info);
   const until = new Date(trialEndsAt(info)).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
   return (
     <Modal open title="Пробная версия" onClose={onClose}>
       <div className="trial-details">
-        {over ? (
+        {moved ? (
+          <TrialMovedState />
+        ) : over ? (
           <p className="trial-details-state" data-over="">
             {info.message ?? 'Пробный период завершён: данные можно смотреть и скачать, новые заказы недоступны.'}
           </p>
@@ -93,7 +101,7 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
           </button>
           {showKey ? (
             <p className="trial-details-key">
-              {info.managerName}: <code>{info.managerKey}</code>
+              {info.managerName}: {info.managerKey ? <code>{info.managerKey}</code> : 'тот же код, что был на старом компьютере'}
             </p>
           ) : (
             <button
@@ -107,7 +115,8 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
             </button>
           )}
         </div>
-        {canLink && (
+        <TrialCafeCodeSection onClose={onClose} />
+        {canLink && !moved && (
           <div className="trial-details-watch">
             <p className="muted">Телефоны и планшеты сотрудников, экран заказов на телевизоре — работают вместе с этой кассой.</p>
             <button
@@ -122,7 +131,7 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
             </button>
           </div>
         )}
-        {canWatch && (
+        {canWatch && !moved && (
           <div className="trial-details-watch">
             <p className="muted">Смотреть, что происходит на кассе, можно и с телефона — одновременно с кассой.</p>
             <button
