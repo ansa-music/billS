@@ -7,6 +7,7 @@
  */
 
 import type { TrialStatus } from '@bills/domain';
+import type { StoredLinkDevice } from './link-control.ts';
 
 const DB_NAME = 'ts-trial';
 const STORE = 'trial';
@@ -43,6 +44,12 @@ export interface TrialInfo {
    * copy): someone viewing the data, not the trial itself — it never calls /start or /report.
    */
   localOnly?: boolean;
+  /**
+   * «Подключить устройство»: the link secret (only here, in the QR code and on paired devices — never in a
+   * backup copy, never sent to the TS cloud) and the devices seen (link-host.ts).
+   */
+  linkSecret?: string;
+  linkDevices?: StoredLinkDevice[];
 }
 
 export interface TrialRecord extends TrialInfo {

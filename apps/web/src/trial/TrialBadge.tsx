@@ -2,6 +2,7 @@ import { useEffect, useReducer, useState, useSyncExternalStore } from 'react';
 import { Modal } from '../ui.tsx';
 import { currentTrial, daysLeft, downloadBackup, subscribeTrial, TRIAL, trialEndsAt, trialOver, trialVersion } from '../demo-hub/trial-store.ts';
 import { openTrialWatch, TrialWatchHost, useCanWatchFromPhone } from './TrialWatch.tsx';
+import { openTrialLink, TrialLinkHost, useCanLinkDevices } from './TrialLink.tsx';
 
 /**
  * Browser trial (VITE_TRIAL=1): a quiet line at the bottom of the menu — «Пробная · 12 дн.» —
@@ -41,7 +42,12 @@ export function TrialBadge({ place = 'sidebar' }: { place?: 'sidebar' | 'sheet' 
         </span>
       </button>
       {open && <TrialDetails onClose={() => setOpen(false)} />}
-      {place === 'sidebar' && <TrialWatchHost />}
+      {place === 'sidebar' && (
+        <>
+          <TrialWatchHost />
+          <TrialLinkHost />
+        </>
+      )}
     </>
   );
 }
@@ -51,6 +57,7 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const canWatch = useCanWatchFromPhone();
+  const canLink = useCanLinkDevices();
   if (!info) return null;
   const over = trialOver(info);
   const left = daysLeft(info);
@@ -100,6 +107,21 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
             </button>
           )}
         </div>
+        {canLink && (
+          <div className="trial-details-watch">
+            <p className="muted">Телефоны и планшеты сотрудников, экран заказов на телевизоре — работают вместе с этой кассой.</p>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                onClose();
+                openTrialLink();
+              }}
+            >
+              Подключить устройство
+            </button>
+          </div>
+        )}
         {canWatch && (
           <div className="trial-details-watch">
             <p className="muted">Смотреть, что происходит на кассе, можно и с телефона — одновременно с кассой.</p>

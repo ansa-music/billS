@@ -14,7 +14,6 @@ import { DEMO_KEYS } from '@bills/domain';
 import { systemClock } from '@ts-hub/clock.ts';
 import { openDb } from '@ts-hub/db.ts';
 import { buildApp } from '@ts-hub/http/app.ts';
-import type { ChangeEvent } from '@ts-hub/hub.ts';
 import { Hub } from '@ts-hub/hub.ts';
 import { SimulatorLampDriver } from '@ts-hub/lamps/simulator.ts';
 import { SimulatorUps } from '@ts-hub/power/ups.ts';
@@ -30,6 +29,11 @@ import { loadTrial, saveTrial, setCurrentTrial, TRIAL_DAYS, updateCurrentTrial }
 import type { TrialTerms } from './trial-cloud.ts';
 import { startTrialCloud } from './trial-cloud.ts';
 import { setWatchSoonHook } from './trial-watch.ts';
+import { installEventSource, installFetch } from './page-api.ts';
+import { installTrialLinkHost } from './link-host.ts';
+
+// watch-hub.ts and older callers import the page stand-ins from here.
+export { installEventSource, installFetch };
 
 const SAVE_DEBOUNCE_MS = 800;
 
@@ -205,6 +209,25 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
   const saver = keepTrialSaved(db, hub, info);
   installFetch(app, saver.changed);
   installEventSource(hub);
+  // «Подключить устройство»: phones and tablets of the staff work through this tab's HUB (link-host.ts).
+  if (!info.localOnly) {
+    installTrialLinkHost({
+      inject: (req) => app.inject(req),
+      changed: saver.changed,
+      onChange: (listener) => {
+        const l = (e: object) => listener(e);
+        hub.events.on('changed', l);
+        return () => hub.events.off('changed', l);
+      },
+      secret: () => info.linkSecret ?? null,
+      devices: () => info.linkDevices ?? [],
+      saveSecret: (linkSecret) => {
+        updateCurrentTrial({ linkSecret });
+        saver.saveNow();
+      },
+      rememberDevices: (linkDevices) => updateCurrentTrial({ linkDevices }),
+    });
+  }
 
   // The TS cloud: reports of how the trial goes, and its terms back (never waited for).
   const link = startTrialCloud({
@@ -271,87 +294,4 @@ function keepTrialSaved(db: DatabaseSync, hub: Hub, info: TrialInfo): { changed:
   window.addEventListener('pagehide', flush);
   save();
   return { changed, saveNow: save };
-}
-
-function isHubPath(url: URL): boolean {
-  return url.origin === window.location.origin && (url.pathname.startsWith('/api/') || url.pathname === '/metrics');
-}
-
-/** Same-origin /api/* requests go to the in-page HUB; everything else to the network. */
-export function installFetch(app: Pick<MiniFastify, 'inject'>, changed: () => void): void {
-  const networkFetch = window.fetch.bind(window);
-  window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const request = input instanceof Request ? input : null;
-    const url = new URL(request ? request.url : String(input), window.location.href);
-    if (!isHubPath(url)) return networkFetch(input, init);
-    const method = (init?.method ?? request?.method ?? 'GET').toUpperCase();
-    const headers: Record<string, string> = {};
-    new Headers(init?.headers ?? request?.headers).forEach((value, key) => {
-      headers[key] = value;
-    });
-    let payload: string | undefined;
-    if (init?.body !== undefined && init.body !== null) payload = typeof init.body === 'string' ? init.body : await new Response(init.body).text();
-    else if (request && method !== 'GET' && method !== 'HEAD') payload = await request.text();
-    const res = await app.inject({ method, url: url.pathname + url.search, headers, ...(payload !== undefined ? { payload } : {}) });
-    if (method !== 'GET' && method !== 'HEAD') changed();
-    const empty = res.statusCode === 204 || res.statusCode === 205 || res.statusCode === 304;
-    return new Response(empty ? null : res.body, { status: res.statusCode, headers: res.headers });
-  };
-}
-
-/** `new EventSource('/api/events')` subscribes to the in-page HUB's change events. */
-export function installEventSource(hub: Pick<Hub, 'events'>): void {
-  const NetworkEventSource = window.EventSource;
-
-  class DemoEventSource extends EventTarget {
-    static readonly CONNECTING = 0;
-    static readonly OPEN = 1;
-    static readonly CLOSED = 2;
-    readonly CONNECTING = 0;
-    readonly OPEN = 1;
-    readonly CLOSED = 2;
-    readonly url: string;
-    readonly withCredentials = false;
-    readyState = 0;
-    onopen: ((e: Event) => void) | null = null;
-    onmessage: ((e: MessageEvent) => void) | null = null;
-    onerror: ((e: Event) => void) | null = null;
-    #onChange: (e: ChangeEvent) => void = () => {};
-    #ping: ReturnType<typeof setInterval> | undefined;
-
-    constructor(url: string | URL, init?: EventSourceInit) {
-      super();
-      this.url = new URL(String(url), window.location.href).href;
-      if (!isHubPath(new URL(this.url))) {
-        // Not the HUB: a real stream (returning an object from a constructor replaces `this`).
-        return new NetworkEventSource(url, init) as unknown as DemoEventSource;
-      }
-      // Events arrive asynchronously, as over the network: never inside the HUB's own call.
-      this.#onChange = (e) => setTimeout(() => this.#emit('changed', JSON.stringify(e)), 0);
-      hub.events.on('changed', this.#onChange);
-      this.#ping = setInterval(() => this.#emit('ping', '{}'), 15_000);
-      setTimeout(() => {
-        if (this.readyState === 2) return;
-        this.readyState = 1;
-        const open = new Event('open');
-        this.onopen?.(open);
-        this.dispatchEvent(open);
-      }, 0);
-    }
-
-    #emit(type: string, data: string): void {
-      if (this.readyState !== 1) return;
-      const event = new MessageEvent(type, { data });
-      if (type === 'message') this.onmessage?.(event);
-      this.dispatchEvent(event);
-    }
-
-    close(): void {
-      this.readyState = 2;
-      hub.events.off('changed', this.#onChange);
-      clearInterval(this.#ping);
-    }
-  }
-
-  window.EventSource = DemoEventSource as unknown as typeof EventSource;
 }

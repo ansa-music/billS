@@ -45,6 +45,8 @@ export interface InjectOptions {
   url: string;
   headers?: Headers;
   payload?: string | object;
+  /** Who is asking (`req.ip`): a linked device («link:<id>»), so wrong keys lock out that device only. */
+  remoteAddress?: string;
 }
 
 export interface InjectResponse {
@@ -356,6 +358,7 @@ export class MiniFastify {
     }
     const req: Record<string, unknown> = {
       id: `req-${++requestCounter}`,
+      ip: options.remoteAddress,
       method,
       url,
       headers,

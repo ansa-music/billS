@@ -7,6 +7,7 @@ import { QrCode } from '../QrCode.tsx';
 import { Modal } from '../ui.tsx';
 import { createWatchLink, revokeWatchLinks, watchAvailable, watchLinksStatus, watchUrl, WatchHttpError } from '../demo-hub/trial-watch.ts';
 import { currentTrial, subscribeTrial, TRIAL, trialVersion } from '../demo-hub/trial-store.ts';
+import { TrialLinkMenuItem } from './TrialLink.tsx';
 import './trial.css';
 
 /**
@@ -48,8 +49,17 @@ export function TrialWatchHost() {
   return createPortal(<TrialWatchDialog onClose={() => setOpen(false)} />, document.body);
 }
 
-/** The staff menu's line «Смотреть с телефона». */
+/** The staff menu's trial lines: «Подключить устройство» (TrialLink.tsx) and «Смотреть с телефона». */
 export function TrialWatchMenuItem({ onPick }: { onPick: () => void }) {
+  return (
+    <>
+      <TrialLinkMenuItem onPick={onPick} />
+      <WatchMenuItem onPick={onPick} />
+    </>
+  );
+}
+
+function WatchMenuItem({ onPick }: { onPick: () => void }) {
   if (!useCanWatchFromPhone()) return null;
   return (
     <button

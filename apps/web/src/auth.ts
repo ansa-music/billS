@@ -3,6 +3,7 @@ import type { Action, AuthStaff, Role } from '@bills/domain';
 import { can, isRole, normalizeAccessKey, primaryRole } from '@bills/domain';
 import { UNAUTHORIZED_EVENT, command, loginWithKey, setAuthToken } from './api.ts';
 import { isWatchMode } from './demo-hub/watch-mode.ts';
+import { isLinkMode, LINK_AUTH_KEY } from './demo-hub/link-mode.ts';
 
 /**
  * Who is signed in on this screen. A session comes from an access key
@@ -18,10 +19,11 @@ export interface AuthSession {
 }
 
 /**
- * A phone watching a trial cash desk («Смотреть с телефона», demo-hub/watch-mode.ts) keeps its own
- * session: signing in there never signs this browser's own trial, or a cash desk in another tab, out.
+ * A phone watching a trial cash desk («Смотреть с телефона», demo-hub/watch-mode.ts) and a device working
+ * through it («Подключить устройство», demo-hub/link-mode.ts) keep their own sessions: signing in there
+ * never signs this browser's own trial, or a cash desk in another tab, out.
  */
-const authKey = (): string => (isWatchMode() ? 'bills.watch.auth' : 'bills.auth');
+const authKey = (): string => (isLinkMode() ? LINK_AUTH_KEY : isWatchMode() ? 'bills.watch.auth' : 'bills.auth');
 const ACTOR_KEY = 'bills.actor';
 const DEVICE_KEY = 'bills.device';
 /** Pre-key staff picker (removed); cleared on the next write so old tablets do not keep it around. */
