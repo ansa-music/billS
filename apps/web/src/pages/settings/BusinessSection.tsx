@@ -28,7 +28,7 @@ export function BusinessSection({ club, online, isBusy, run, onSaved, canEdit }:
 
   return (
     <Section title="Тип заведения">
-      {!canEdit && <p className="hint">Тип заведения меняет управляющий.</p>}
+      {!canEdit && <p className="hint">Тип заведения меняет {current === 'cafe' ? 'директор' : 'управляющий'}.</p>}
       <div className="business-types" role="radiogroup" aria-label="Тип заведения">
         {BUSINESS_TYPES.map((t) => (
           <button

@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
-import type { AuditEntryView, AuditListResponse, Role, StaffView } from '@bills/domain';
+import type { AuditEntryView, AuditListResponse, Business, DeleteStaffResponse, Role, StaffView } from '@bills/domain';
 import { normalizeRoles, primaryRole } from '@bills/domain';
 import type { Actor } from './auth.ts';
 import { assertMayManage, cloudManaged, rolesOf, scopeOf } from './auth.ts';
@@ -9,7 +9,7 @@ import { afterCommit, all, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import type { HubEvents } from './events.ts';
 import { record } from './journal.ts';
-import { clubId } from './views.ts';
+import { businessTypeOf, clubId } from './views.ts';
 
 /** PIN storage: "scrypt$<salt hex>$<hash hex>". A PIN is 4–6 digits. */
 export function hashPin(pin: string): string {
@@ -62,6 +62,13 @@ export interface UpdateStaffInput {
   by?: Actor | undefined;
 }
 
+export interface DeleteStaffInput {
+  staffId: string;
+  actor: string;
+  /** The signed-in person: not themselves, only people whose roles they could assign. */
+  by?: Actor | undefined;
+}
+
 export interface AuditQuery {
   actor?: string | undefined;
   tableId?: string | undefined;
@@ -86,6 +93,8 @@ interface StaffRow {
   table_ids: string;
   created_at: number;
   updated_at: number;
+  /** Set when a coffee shop's director deleted the person (migration 020); the row stays for history. */
+  deleted_at: number | null;
   active_keys?: number;
 }
 
@@ -146,10 +155,15 @@ function toAuditView(row: AuditRow): AuditEntryView {
   };
 }
 
-function checkRoles(input: readonly unknown[]): Role[] {
-  const r = normalizeRoles(input);
+function checkRoles(input: readonly unknown[], business: Business): Role[] {
+  const r = normalizeRoles(input, business);
   if (!r.ok) throw new HubError(422, 'ROLE_INVALID', r.message);
   return r.roles;
+}
+
+/** The company's manager is «Директор» in a coffee shop. */
+function lastManager(business: Business): HubError {
+  return new HubError(409, 'LAST_MANAGER', business === 'cafe' ? 'Нельзя убрать последнего директора' : 'Нельзя убрать последнего управляющего');
 }
 
 const sameRoles = (a: readonly Role[], b: readonly Role[]) => JSON.stringify(a) === JSON.stringify(b);
@@ -160,6 +174,12 @@ const sameRoles = (a: readonly Role[], b: readonly Role[]) => JSON.stringify(a) 
  * known (`by`), they may create and edit only people whose roles they could
  * assign, never change their own roles or dismiss themselves. People synced
  * from the cloud (origin 'cloud') are edited in the manager's cabinet only.
+ *
+ * A coffee shop (settings.business.type = cafe) differs: its admin manages the
+ * staff below them (CAFE_ASSIGNABLE_ROLES), people are not switched off but
+ * deleted by the director (`delete`), and the list shows only who works there.
+ * A deleted row stays in the table (marked `deleted_at`, inactive, keys revoked):
+ * names in the journal, receipts, the archive and reports keep reading it.
  */
 export class StaffService {
   readonly deps: StaffServiceDeps;
@@ -168,19 +188,32 @@ export class StaffService {
     this.deps = deps;
   }
 
-  /** Everyone of the club, active first then by name. Inactive («уволен») rows are kept. */
+  /**
+   * Everyone of the club, active first then by name. Inactive («уволен») rows are kept in a billiard
+   * club; a coffee shop lists only the people who work there (switched off there = removed). Deleted
+   * people are never listed.
+   */
   list(): StaffView[] {
     const db = this.deps.db;
+    const onlyActive = businessTypeOf(db) === 'cafe' ? 'AND s.is_active = 1' : '';
     return all<StaffRow>(
       db,
-      `SELECT s.*, (SELECT COUNT(*) FROM access_keys k WHERE k.staff_id = s.id AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > ?)) AS active_keys FROM staff s WHERE s.club_id = ? ORDER BY s.is_active DESC, s.name COLLATE NOCASE, s.created_at`,
+      `SELECT s.*, (SELECT COUNT(*) FROM access_keys k WHERE k.staff_id = s.id AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > ?)) AS active_keys
+       FROM staff s WHERE s.club_id = ? AND s.deleted_at IS NULL ${onlyActive}
+       ORDER BY s.is_active DESC, s.name COLLATE NOCASE, s.created_at`,
       this.deps.clock.now(),
       clubId(db),
     ).map(toStaffView);
   }
 
+  /** One person; 404 for someone deleted. */
   get(staffId: string): StaffView {
-    const row = one<StaffRow>(this.deps.db, `SELECT s.*, (SELECT COUNT(*) FROM access_keys k WHERE k.staff_id = s.id AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > ?)) AS active_keys FROM staff s WHERE s.id = ?`, this.deps.clock.now(), staffId);
+    const row = one<StaffRow>(
+      this.deps.db,
+      `SELECT s.*, (SELECT COUNT(*) FROM access_keys k WHERE k.staff_id = s.id AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > ?)) AS active_keys FROM staff s WHERE s.id = ? AND s.deleted_at IS NULL`,
+      this.deps.clock.now(),
+      staffId,
+    );
     if (!row) throw new HubError(404, 'STAFF_NOT_FOUND', 'Сотрудник не найден');
     return toStaffView(row);
   }
@@ -190,9 +223,10 @@ export class StaffService {
     const now = this.deps.clock.now();
     return transaction(db, () => {
       const club = clubId(db);
+      const business = businessTypeOf(db);
       const name = cleanName(input.name);
-      const roles = checkRoles(input.roles);
-      if (input.by) assertMayManage(input.by, roles);
+      const roles = checkRoles(input.roles, business);
+      if (input.by) assertMayManage(input.by, roles, business);
       this.#assertNameFree(club, name, null);
       const scope = scopeOf(roles);
       if (scope === 'club') this.#assertStaffLimit(club, null);
@@ -233,20 +267,25 @@ export class StaffService {
     const now = this.deps.clock.now();
     return transaction(db, () => {
       const row = this.#row(input.staffId);
-      if (row.origin === 'cloud') throw cloudManaged();
+      const business = businessTypeOf(db);
+      if (row.origin === 'cloud') throw cloudManaged(business);
       const current = rolesOf(row);
-      const nextRoles = input.roles !== undefined ? checkRoles(input.roles) : current;
+      const nextRoles = input.roles !== undefined ? checkRoles(input.roles, business) : current;
       const rolesChanged = !sameRoles(nextRoles, current);
       if (input.by) {
         // You may edit only people whose roles you could assign; your own roles and employment are not yours to change.
-        if (input.by.id !== row.id) assertMayManage(input.by, current);
+        if (input.by.id !== row.id) assertMayManage(input.by, current, business);
         if (rolesChanged) {
           if (input.by.id === row.id) throw new HubError(403, 'ROLE_NOT_ALLOWED', 'Свои роли изменить нельзя');
-          assertMayManage(input.by, nextRoles);
+          assertMayManage(input.by, nextRoles, business);
         }
         if (input.by.id === row.id && input.isActive === false) {
           throw new HubError(403, 'ROLE_NOT_ALLOWED', 'Нельзя уволить самого себя');
         }
+      }
+      // A coffee shop does not keep switched-off people around: its director deletes them («Удалить»).
+      if (business === 'cafe' && input.isActive === false && row.is_active === 1) {
+        throw new HubError(422, 'STAFF_DELETE_INSTEAD', 'В кофейне сотрудника не отключают, а удаляют: «Удалить» в списке сотрудников (может директор)');
       }
       const changed: Record<string, unknown> = {};
       const sets: string[] = [];
@@ -290,9 +329,7 @@ export class StaffService {
       // The club must always keep someone who can manage it.
       const willBeActive = input.isActive ?? row.is_active === 1;
       const losesManager = current.includes('manager') && row.is_active === 1 && (!willBeActive || !nextRoles.includes('manager'));
-      if (losesManager && this.#activeManagers(row.club_id, row.id) === 0) {
-        throw new HubError(409, 'LAST_MANAGER', 'Нельзя убрать последнего управляющего');
-      }
+      if (losesManager && this.#activeManagers(row.club_id, row.id) === 0) throw lastManager(business);
       // A person who starts counting against the license's staff limit (hired back, or no longer a manager).
       const counted = (active: boolean, roles: Role[]) => active && scopeOf(roles) === 'club';
       if (counted(willBeActive, nextRoles) && !counted(row.is_active === 1, current)) this.#assertStaffLimit(row.club_id, row.id);
@@ -311,6 +348,52 @@ export class StaffService {
       });
       afterCommit(db, () => this.deps.events.changed({ kind: 'staff' }));
       return this.get(row.id);
+    });
+  }
+
+  /**
+   * «Удалить» in a coffee shop (`staff.delete`: the director, and the platform). The person is gone
+   * from the staff list, the login roster and every picker: marked deleted and inactive, every key
+   * revoked, every session ended. The row itself stays — the journal, receipts, the archive and
+   * reports name people by it (and keys and sessions reference it). Not yourself, not the last
+   * director, not someone from the cabinet (changed there). 409 STAFF_DELETE_CAFE_ONLY elsewhere.
+   */
+  delete(input: DeleteStaffInput): DeleteStaffResponse {
+    const db = this.deps.db;
+    const now = this.deps.clock.now();
+    return transaction(db, () => {
+      const business = businessTypeOf(db);
+      if (business !== 'cafe') {
+        throw new HubError(409, 'STAFF_DELETE_CAFE_ONLY', 'Удалить сотрудника можно только в кофейне — здесь его отключают');
+      }
+      const row = this.#row(input.staffId);
+      if (row.origin === 'cloud') throw cloudManaged(business);
+      const roles = rolesOf(row);
+      if (input.by) {
+        if (input.by.id === row.id) throw new HubError(403, 'ROLE_NOT_ALLOWED', 'Нельзя удалить самого себя');
+        assertMayManage(input.by, roles, business);
+      }
+      if (roles.includes('manager') && row.is_active === 1 && this.#activeManagers(row.club_id, row.id) === 0) {
+        throw lastManager(business);
+      }
+      run(db, 'UPDATE staff SET is_active = 0, deleted_at = ?, updated_at = ? WHERE id = ?', now, now, row.id);
+      const keysRevoked = run(
+        db,
+        'UPDATE access_keys SET revoked_at = ?, revoked_by = ? WHERE staff_id = ? AND revoked_at IS NULL',
+        now,
+        input.actor,
+        row.id,
+      );
+      const sessionsEnded = run(db, 'UPDATE auth_sessions SET revoked_at = ? WHERE staff_id = ? AND revoked_at IS NULL', now, row.id);
+      record(db, now, {
+        actor: input.actor,
+        action: 'staff.deleted',
+        entityType: 'staff',
+        entityId: row.id,
+        data: { name: row.name, roles, keysRevoked, sessionsEnded },
+      });
+      afterCommit(db, () => this.deps.events.changed({ kind: 'staff' }));
+      return { id: row.id, name: row.name, deletedAt: now };
     });
   }
 
@@ -402,8 +485,9 @@ export class StaffService {
     return { entries, nextBefore, actors };
   }
 
+  /** A person who can still be changed: 404 for an unknown or deleted one. */
   #row(staffId: string): StaffRow {
-    const row = one<StaffRow>(this.deps.db, 'SELECT * FROM staff WHERE id = ?', staffId);
+    const row = one<StaffRow>(this.deps.db, 'SELECT * FROM staff WHERE id = ? AND deleted_at IS NULL', staffId);
     if (!row) throw new HubError(404, 'STAFF_NOT_FOUND', 'Сотрудник не найден');
     return row;
   }

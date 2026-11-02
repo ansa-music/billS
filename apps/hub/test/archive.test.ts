@@ -139,7 +139,7 @@ test('the barista does not change the menu (403) but keeps the stop list', async
   assert.equal((await call(hub, tokens.admin, 'POST', `/api/bar/products/${p.id}/update`, { price: p.price + 100_00 })).status, 200);
 });
 
-test('revenue is for seniors and up: X report 403 for the cashier and the barista, blind count at close', async (t) => {
+test('revenue is for seniors and up: X report 403 for the cashier, blind count at close; the barista closes the day', async (t) => {
   const h = harness(t);
   const { hub, tokens } = await cafe(h);
   const shift = await openShift(hub, tokens.cashier);
@@ -147,7 +147,7 @@ test('revenue is for seniors and up: X report 403 for the cashier and the barist
   assert.equal(shift.expectedCash, null);
   await order(hub, tokens.cashier, 'Круассан', 2, 'CASH');
 
-  for (const who of ['cashier', 'bartender', 'combo', 'waiter'] as const) {
+  for (const who of ['cashier', 'waiter'] as const) {
     const report = await call(hub, tokens[who], 'GET', `/api/shifts/${shift.id}/report`);
     assert.equal(report.status, 403, who);
     assert.equal((await call(hub, tokens[who], 'GET', '/api/insights')).status, 403, who);
@@ -155,6 +155,16 @@ test('revenue is for seniors and up: X report 403 for the cashier and the barist
     const state = await call<HubState>(hub, tokens[who], 'GET', '/api/state');
     assert.equal(state.status, 200, who);
     assert.equal(state.body.shift?.expectedCash, null, who);
+  }
+  // A coffee shop's barista is often alone at the counter: the X and Z reports and the drawer are theirs
+  // (shift.report), but still no revenue page or insights.
+  for (const who of ['bartender', 'combo'] as const) {
+    const report = await call<ShiftReport>(hub, tokens[who], 'GET', `/api/shifts/${shift.id}/report`);
+    assert.equal(report.status, 200, who);
+    assert.equal(report.body.net.total, 1800_00, who);
+    assert.equal((await call(hub, tokens[who], 'GET', '/api/insights')).status, 403, who);
+    assert.equal((await call(hub, tokens[who], 'GET', '/api/reports/summary')).status, 403, who);
+    assert.equal((await call<HubState>(hub, tokens[who], 'GET', '/api/state')).body.shift?.expectedCash, 11_800_00, who);
   }
   for (const who of ['senior', 'admin', 'manager'] as const) {
     const report = await call<ShiftReport>(hub, tokens[who], 'GET', `/api/shifts/${shift.id}/report`);

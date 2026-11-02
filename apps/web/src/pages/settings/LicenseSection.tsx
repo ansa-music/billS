@@ -6,6 +6,7 @@ import { HubRequestError, command, fetchJson } from '../../api.ts';
 import { actorName } from '../../auth.ts';
 import { LICENSE_STATE_LABEL, licenseTone } from '../../license.tsx';
 import { Field, Loading, Section, formatDate, formatDateTime } from '../../ui.tsx';
+import { useHub } from '../../useHub.tsx';
 
 const PLAN_LABEL: Record<LicensePayload['plan'], string> = { trial: 'Пробная', paid: 'Оплаченная' };
 const TONE_TAG = { ok: 'tag tag-ok', warn: 'tag tag-warn', danger: 'tag tag-danger' } as const;
@@ -290,6 +291,7 @@ export function LicenseSection({
   canInstall: boolean;
 }) {
   const { info, error, reload } = useLicenseInfo(version);
+  const { business } = useHub();
   return (
     <Section title="Лицензия">
       {error && <p className="field-error">{error}</p>}
@@ -299,7 +301,7 @@ export function LicenseSection({
           {canInstall ? (
             <InstallForm hubId={info.hubId} timeZone={timeZone} online={online} onInstalled={() => void reload()} />
           ) : (
-            <p className="hint">Лицензию устанавливает управляющий или поддержка TS.</p>
+            <p className="hint">Лицензию устанавливает {business === 'cafe' ? 'директор' : 'управляющий'} или поддержка TS.</p>
           )}
         </LicenseFacts>
       )}

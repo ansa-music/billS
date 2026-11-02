@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { RosterPerson } from '@bills/domain';
+import type { BusinessType, RosterPerson } from '@bills/domain';
 import { SHORT_KEY_LENGTH, deviceNameFromUserAgent, isDemoKeyShape, keyKindOf, nameInitials, normalizeAccessKey, rolesLabel } from '@bills/domain';
 import { HubRequestError } from './api.ts';
 import { readDevice, useAuth, writeDevice } from './auth.ts';
@@ -53,10 +53,14 @@ function deviceName(): string {
  */
 export function LoginPage({ next }: { next: string }) {
   const { login } = useAuth();
-  const { demo } = useDemo();
+  const { demo, business: demoBusiness } = useDemo();
   const { query } = useLocation();
   const linkKey = normalizeAccessKey(query.get('key') ?? '');
   const [roster, setRoster] = useState<RosterPerson[] | null>(null);
+  // The venue, from the roster: a coffee shop names the roles its own way («Бариста», «Директор»).
+  const [rosterBusiness, setRosterBusiness] = useState<BusinessType>('billiards');
+  const business = demo ? demoBusiness : rosterBusiness;
+  const cafe = business === 'cafe';
   const [view, setView] = useState<View>(() =>
     linkKey && !/^\d+$/.test(linkKey) ? { kind: 'support' } : linkKey ? { kind: 'keypad', person: null } : { kind: 'roster' },
   );
@@ -81,7 +85,12 @@ export function LoginPage({ next }: { next: string }) {
   useEffect(() => {
     if (demo) return;
     let alive = true;
-    const load = () => void fetchRoster().then((people) => alive && people !== null && setRoster(people));
+    const load = () =>
+      void fetchRoster().then((r) => {
+        if (!alive || r === null) return;
+        setRoster(r.people);
+        setRosterBusiness(r.business);
+      });
     load();
     const t = setInterval(load, ROSTER_REFRESH_MS);
     return () => {
@@ -238,7 +247,7 @@ export function LoginPage({ next }: { next: string }) {
                   {nameInitials(p.name)}
                 </span>
                 <span className="roster-name">{p.name}</span>
-                <span className="roster-role">{rolesLabel(p.roles)}</span>
+                <span className="roster-role">{rolesLabel(p.roles, business)}</span>
               </button>
             </li>
           ))}
@@ -263,7 +272,7 @@ export function LoginPage({ next }: { next: string }) {
       void submit(key);
     };
     return (
-      <Page title="Вход поддержки" subtitle="Для управляющего и поддержки TS: длинный ключ из букв и цифр.">
+      <Page title="Вход поддержки" subtitle={`Для ${cafe ? 'директора' : 'управляющего'} и поддержки TS: длинный ключ из букв и цифр.`}>
         <form className="form login-form" onSubmit={onSubmit} autoComplete="off">
           <Field label="Длинный ключ" hint="Регистр и пробелы не важны — ключ подправится сам.">
             <input
@@ -327,7 +336,7 @@ export function LoginPage({ next }: { next: string }) {
             <span className="roster-avatar roster-avatar-big" aria-hidden="true">
               {nameInitials(person.name)}
             </span>
-            <span className="roster-role">{rolesLabel(person.roles)}</span>
+            <span className="roster-role">{rolesLabel(person.roles, business)}</span>
           </div>
         ) : null}
         <p className="login-ask">
@@ -335,7 +344,9 @@ export function LoginPage({ next }: { next: string }) {
             ? 'Демо: наберите ключ из 4 цифр или нажмите «Войти как …» ниже.'
             : person
               ? 'Введите свой ключ — 6 цифр'
-              : 'Введите свой ключ — 6 цифр. Его выдаёт управляющий.'}
+              : cafe
+                ? 'Введите свой ключ — 6 цифр. Его выдаёт директор или управляющий.'
+                : 'Введите свой ключ — 6 цифр. Его выдаёт управляющий.'}
         </p>
         <div key={shake} className="keypad" data-shake={shake > 0 || undefined} role="group" aria-label="Цифровая клавиатура">
           <div className="keypad-dots" aria-hidden="true">

@@ -67,6 +67,7 @@ function actorHeaderOf(req: FastifyRequest): string | null {
 export function registerAuth(app: FastifyInstance, hub: Hub, options: AuthHookOptions = {}): void {
   app.addHook('onRequest', async (req) => {
     req.license = hub.license;
+    req.business = () => hub.business();
     const token = bearerOf(req);
     if (token) {
       const resolved = hub.auth.resolve(token);
@@ -104,7 +105,7 @@ export function registerAuth(app: FastifyInstance, hub: Hub, options: AuthHookOp
 
   app.get('/api/auth/roster', async (_req, reply): Promise<RosterResponse> => {
     reply.header('cache-control', 'no-store');
-    return { people: hub.auth.roster() };
+    return { people: hub.auth.roster(), business: hub.business() };
   });
 
   app.get('/api/auth/me', async (req): Promise<MeResponse> => {

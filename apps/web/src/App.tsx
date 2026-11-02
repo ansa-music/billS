@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Action } from '@bills/domain';
-import { ACTION_MODULE, canNow, decide, licenseGateOf } from '@bills/domain';
+import { ACTION_MODULE, can as roleCan, canNow, decide, licenseGateOf } from '@bills/domain';
 import { LicenseBanner, blockedReason } from './license.tsx';
 import type { ReactNode } from 'react';
 import { setManualMode } from './api.ts';
@@ -74,7 +74,7 @@ const PAGES: Record<string, (query: URLSearchParams, business: BusinessType) => 
 export function App() {
   const hub = useHubConnection();
   const { path, query } = useLocation();
-  const { staff, role, roles, can, logout } = useAuth();
+  const { staff, role, roles, logout } = useAuth();
   const now = useNow();
   const { theme, cycle } = useTheme();
   const [toast, setToast] = useState<string | null>(null);
@@ -127,8 +127,11 @@ export function App() {
   }, [theme, display?.theme, display?.cardSize, display?.waiterSees, roles]);
 
   const license = hub.state?.license ?? null;
-  const allowedNow = useCallback((action: Action) => canNow(roles, action, licenseGateOf(license)), [roles, license]);
-  const whyBlocked = useCallback((action: Action) => blockedReason(roles, action, license), [roles, license]);
+  // Rights follow the kind of venue too: a coffee shop adds a few (the barista closes the shift, the
+  // admin hires staff, the director deletes people) — the same table the HUB checks.
+  const can = useCallback((action: Action) => roleCan(roles, action, business), [roles, business]);
+  const allowedNow = useCallback((action: Action) => canNow(roles, action, licenseGateOf(license), business), [roles, license, business]);
+  const whyBlocked = useCallback((action: Action) => blockedReason(roles, action, license, business), [roles, license, business]);
 
   const closeToast = useCallback(() => setToast(null), []);
   // Drops the session on the HUB (best effort), then shows the login page.
@@ -207,6 +210,7 @@ export function App() {
     actor,
     role,
     roles,
+    business,
     can,
     license,
     canNow: allowedNow,
@@ -224,7 +228,7 @@ export function App() {
 
   // Pages follow the role; a module the license lacks hides its pages too. Read-only mode keeps every page.
   const pageAllowed = (action: Action) => {
-    const d = decide(roles, action, licenseGateOf(license));
+    const d = decide(roles, action, licenseGateOf(license), business);
     return d === 'ok' || d === 'read_only';
   };
   const visible = routesOf(business).filter((r) => !r.hidden && r.action !== null && pageAllowed(r.action));
@@ -253,7 +257,7 @@ export function App() {
     route.action &&
     business === 'cafe' &&
     ACTION_MODULE[route.action] === 'bar' &&
-    decide(roles, route.action, licenseGateOf(license)) === 'module_off'
+    decide(roles, route.action, licenseGateOf(license), business) === 'module_off'
   ) {
     // A coffee shop is its counter: say once and plainly why it is closed instead of «Нет доступа».
     content = <CafeNeedsCounterModule canSeeLicense={can('license.view')} />;
@@ -316,7 +320,7 @@ export function App() {
             {content}
           </main>
         </div>
-        <BottomNav routes={visible} active={path} badges={badges} staff={staff} onLogout={signOut} />
+        <BottomNav routes={visible} active={path} badges={badges} staff={staff} business={business} onLogout={signOut} />
         {toast && <Toast message={toast} onClose={closeToast} />}
       </div>
     </HubContext.Provider>

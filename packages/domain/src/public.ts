@@ -1,3 +1,4 @@
+import type { BusinessType } from './cafe.ts';
 import type { Role } from './permissions.ts';
 
 /**
@@ -71,4 +72,6 @@ export interface DemoInfo {
   keys: typeof DEMO_KEYS;
   /** When the demo database is wiped next, epoch ms. */
   resetAt: number;
+  /** The demo venue: a coffee shop names the roles of its keys its own way. Absent = billiards. */
+  business?: BusinessType;
 }

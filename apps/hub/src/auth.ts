@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { AccessKeyView, AuthStaff, KeyKind, LoginAttemptView, LoginResponse, Role, RosterPerson } from '@bills/domain';
+import type { AccessKeyView, AuthStaff, Business, KeyKind, LoginAttemptView, LoginResponse, Role, RosterPerson } from '@bills/domain';
 import {
   canAssignRoles,
   DEMO_LOGIN_THROTTLE,
@@ -30,7 +30,7 @@ import { afterCommit, all, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import type { HubEvents } from './events.ts';
 import { record, SYSTEM } from './journal.ts';
-import { clubId, loadSettings } from './views.ts';
+import { businessTypeOf, clubId, loadSettings } from './views.ts';
 
 /**
  * Who is acting, as resolved from the session token. `id` is null only for
@@ -233,11 +233,12 @@ export class AuthService {
     const now = this.deps.clock.now();
     return transaction(db, () => {
       const staff = this.#staff(input.staffId);
-      if (staff.origin === 'cloud') throw cloudManaged();
+      const business = businessTypeOf(db);
+      if (staff.origin === 'cloud') throw cloudManaged(business);
       if (staff.is_active !== 1) throw new HubError(409, 'STAFF_INACTIVE', 'Сотрудник уволен: ключ выдать нельзя');
       const roles = rolesOf(staff);
       // A spare key for yourself (another device) is always yours to take.
-      if (input.actor.id !== staff.id) assertMayManage(input.actor, roles);
+      if (input.actor.id !== staff.id) assertMayManage(input.actor, roles, business);
       const label = (input.label ?? '').trim().slice(0, 80) || null;
       const days = input.expiresInDays;
       if (days !== undefined && (!Number.isInteger(days) || days < 1 || days > 3650)) {
@@ -272,8 +273,9 @@ export class AuthService {
       const key = one<KeyRow>(db, 'SELECT * FROM access_keys WHERE id = ?', keyId);
       if (!key) throw new HubError(404, 'KEY_NOT_FOUND', 'Ключ не найден');
       const staff = this.#staff(key.staff_id);
-      if (key.origin === 'cloud') throw cloudManaged();
-      if (actor.id !== staff.id) assertMayManage(actor, rolesOf(staff));
+      const business = businessTypeOf(db);
+      if (key.origin === 'cloud') throw cloudManaged(business);
+      if (actor.id !== staff.id) assertMayManage(actor, rolesOf(staff), business);
       if (key.revoked_at !== null) return toKeyView(key);
       run(db, 'UPDATE access_keys SET revoked_at = ?, revoked_by = ? WHERE id = ?', now, actor.name, key.id);
       run(db, 'UPDATE auth_sessions SET revoked_at = ? WHERE key_id = ? AND revoked_at IS NULL', now, key.id);
@@ -746,14 +748,18 @@ function locked(retryAfterMs: number, why: string): HubError {
   return new HubError(429, 'LOGIN_LOCKED', `${why}. Попробуйте через ${wait}.`, { retryAfterMs });
 }
 
-export function cloudManaged(): HubError {
-  return new HubError(409, 'STAFF_CLOUD_MANAGED', 'Сотрудник заведён в кабинете управляющего — измените его в кабинете');
+export function cloudManaged(business?: Business): HubError {
+  const cabinet = business === 'cafe' ? 'в кабинете директора' : 'в кабинете управляющего';
+  return new HubError(409, 'STAFF_CLOUD_MANAGED', `Сотрудник заведён ${cabinet} — измените его в кабинете`);
 }
 
-/** The hierarchy: you may manage (hire, edit, issue keys to) only people whose every role you may assign. */
-export function assertMayManage(actor: Actor, targetRoles: readonly Role[]): void {
-  if (!canAssignRoles(actor.roles, targetRoles)) {
-    throw new HubError(403, 'ROLE_NOT_ALLOWED', `Ваша роль не позволяет управлять сотрудником с ролью «${rolesLabel(targetRoles)}»`);
+/**
+ * The hierarchy: you may manage (hire, edit, issue keys to) only people whose every role you may
+ * assign in this kind of venue (a coffee shop's admin manages the staff below them).
+ */
+export function assertMayManage(actor: Actor, targetRoles: readonly Role[], business?: Business): void {
+  if (!canAssignRoles(actor.roles, targetRoles, business)) {
+    throw new HubError(403, 'ROLE_NOT_ALLOWED', `Ваша роль не позволяет управлять сотрудником с ролью «${rolesLabel(targetRoles, business)}»`);
   }
 }
 

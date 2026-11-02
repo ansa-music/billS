@@ -1,7 +1,8 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { AuthStaff, HubState } from '@bills/domain';
+import type { AuthStaff, BusinessType, HubState } from '@bills/domain';
 import { rolesLabel } from '@bills/domain';
+import { businessOf } from './cafe/cafe.ts';
 import { CloudStatus } from './CloudStatus.tsx';
 import { formatClock } from './format.ts';
 import { PowerBadge } from './PowerBadge.tsx';
@@ -126,12 +127,15 @@ function BottomNavImpl({
   active,
   badges,
   staff,
+  business,
   onLogout,
 }: {
   routes: RouteDef[];
   active: string;
   badges: NavBadges;
   staff?: AuthStaff | undefined;
+  /** Role words of this venue (a coffee shop says «Бариста», «Директор»). */
+  business?: BusinessType | undefined;
   onLogout?: (() => void) | undefined;
 }) {
   const [open, setOpen] = useState(false);
@@ -181,7 +185,7 @@ function BottomNavImpl({
                 <span className="avatar">{initials(staff.name)}</span>
                 <span className="more-who-text">
                   <strong>{staff.name}</strong>
-                  <span className="muted">{rolesLabel(staff.roles)}</span>
+                  <span className="muted">{rolesLabel(staff.roles, business)}</span>
                 </span>
                 {onLogout && (
                   <button
@@ -210,7 +214,7 @@ function BottomNavImpl({
 
 export const BottomNav = memo(
   BottomNavImpl,
-  (a, b) => a.staff === b.staff && a.onLogout === b.onLogout && sameNav(a, b),
+  (a, b) => a.staff === b.staff && a.business === b.business && a.onLogout === b.onLogout && sameNav(a, b),
 );
 
 /** «Марат Управляющий» → «МУ». */
@@ -292,6 +296,7 @@ export function Topbar(props: {
   busy: boolean;
 }) {
   const { state, staff } = props;
+  const business = businessOf(state.settings);
   const fullscreen = useFullscreen();
   const alerts = state.alerts;
   const fullscreenLabel = fullscreen.active ? 'Выйти из полноэкранного режима' : 'На весь экран';
@@ -370,7 +375,7 @@ export function Topbar(props: {
               </span>
               <span className="actor-text">
                 <span className="actor-name">{staff.name}</span>
-                <span className="actor-role">{rolesLabel(staff.roles)}</span>
+                <span className="actor-role">{rolesLabel(staff.roles, business)}</span>
               </span>
               <Icon name="chevron-down" size={16} className="actor-chevron" />
             </span>
@@ -382,7 +387,7 @@ export function Topbar(props: {
                 <span className="avatar">{initials(staff.name)}</span>
                 <span className="actor-who-text">
                   <strong>{staff.name}</strong>
-                  <span className="muted">{rolesLabel(staff.roles)}</span>
+                  <span className="muted">{rolesLabel(staff.roles, business)}</span>
                 </span>
               </div>
               <p className="hint">Имя попадает в журнал действий. Другой сотрудник входит своим ключом.</p>

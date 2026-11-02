@@ -1,8 +1,8 @@
 /** Staff of one branch (#/clubs/:id/staff): people, their roles and six-digit keys. */
 import { useCallback, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { CloudKeyView, CloudStaffView, IssueCloudKeyResponse, Role, StaffRole } from '@bills/domain';
-import { ROLE_LABEL, STAFF_ROLES, normalizeRoles, rolesLabel } from '@bills/domain';
+import type { BusinessType, CloudKeyView, CloudStaffView, IssueCloudKeyResponse, Role, StaffRole } from '@bills/domain';
+import { STAFF_ROLES, normalizeRoles, roleLabel, rolesLabel } from '@bills/domain';
 import { createStaff, issueStaffKey, listBranches, listStaff, revokeKey, updateStaff } from './api.ts';
 import { CopyValue, ShownOnce } from './cabinet-ui.tsx';
 import { useCompanyLicense } from './Company.tsx';
@@ -10,7 +10,8 @@ import { clubHref, usePoll } from './hooks.ts';
 import { describeCabinetError, isKeyLive, kzDate, keyStateText, shortKeyProblem } from './license-form.ts';
 import { Section, loadingText } from './shared.tsx';
 
-function RolePicker({ roles, onChange }: { roles: Role[]; onChange: (r: Role[]) => void }) {
+/** A coffee shop names the roles its own way («Управляющий», «Бариста»); billiards by default. */
+function RolePicker({ roles, business, onChange }: { roles: Role[]; business: BusinessType; onChange: (r: Role[]) => void }) {
   return (
     <fieldset className="lic-fieldset">
       <legend>Роли (можно несколько)</legend>
@@ -22,7 +23,7 @@ function RolePicker({ roles, onChange }: { roles: Role[]; onChange: (r: Role[]) 
               checked={roles.includes(r)}
               onChange={(e) => onChange(e.target.checked ? [...roles, r] : roles.filter((x) => x !== r))}
             />
-            {ROLE_LABEL[r]}
+            {roleLabel(r, business)}
           </label>
         ))}
       </div>
@@ -32,11 +33,13 @@ function RolePicker({ roles, onChange }: { roles: Role[]; onChange: (r: Role[]) 
 
 function StaffForm({
   initial,
+  business,
   submitLabel,
   onSubmit,
   onCancel,
 }: {
   initial: { name: string; roles: Role[] };
+  business: BusinessType;
   submitLabel: string;
   onSubmit: (v: { name: string; roles: Role[] }) => Promise<void>;
   onCancel: () => void;
@@ -50,7 +53,7 @@ function StaffForm({
     e.preventDefault();
     if (busy) return;
     setError(null);
-    const norm = normalizeRoles(roles);
+    const norm = normalizeRoles(roles, business);
     if (!norm.ok) {
       setError(norm.message);
       return;
@@ -75,8 +78,8 @@ function StaffForm({
         <span>Имя</span>
         <input required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
       </label>
-      <RolePicker roles={roles} onChange={setRoles} />
-      {roles.length > 0 && <p className="hint">{rolesLabel(roles)}</p>}
+      <RolePicker roles={roles} business={business} onChange={setRoles} />
+      {roles.length > 0 && <p className="hint">{rolesLabel(roles, business)}</p>}
       {error && (
         <p className="form-error" role="alert">
           {error}
@@ -222,7 +225,17 @@ function KeyList({ keys, busy, onRevoke }: { keys: CloudKeyView[]; busy: boolean
 
 type RowMode = 'view' | 'edit' | 'key';
 
-function StaffRow({ staff, readOnly, onChanged }: { staff: CloudStaffView; readOnly: boolean; onChanged: () => void }) {
+function StaffRow({
+  staff,
+  business,
+  readOnly,
+  onChanged,
+}: {
+  staff: CloudStaffView;
+  business: BusinessType;
+  readOnly: boolean;
+  onChanged: () => void;
+}) {
   const [mode, setMode] = useState<RowMode>('view');
   const [issued, setIssued] = useState<IssueCloudKeyResponse | null>(null);
   const [busy, setBusy] = useState(false);
@@ -254,7 +267,7 @@ function StaffRow({ staff, readOnly, onChanged }: { staff: CloudStaffView; readO
           {staff.name}
           {!staff.isActive && <span className="tag tag-warn">не активен</span>}
         </strong>
-        <span className="hint">{rolesLabel(staff.roles)}</span>
+        <span className="hint">{rolesLabel(staff.roles, business)}</span>
         <KeyList keys={staff.keys} busy={busy || readOnly} onRevoke={revoke} />
         {issued && (
           <ShownOnce onDone={() => setIssued(null)} note={<p className="hint">Сообщите ключ сотруднику лично. Вход — в кассе этого заведения.</p>}>
@@ -264,6 +277,7 @@ function StaffRow({ staff, readOnly, onChanged }: { staff: CloudStaffView; readO
         {mode === 'edit' && (
           <StaffForm
             initial={{ name: staff.name, roles: staff.roles }}
+            business={business}
             submitLabel="Сохранить"
             onCancel={() => setMode('view')}
             onSubmit={async (v) => {
@@ -322,6 +336,7 @@ export function StaffPage({ clubId }: { clubId: string }) {
   const [adding, setAdding] = useState(false);
 
   const branch = branches.data?.find((b) => b.id === clubId) ?? null;
+  const business: BusinessType = branch?.businessType === 'cafe' ? 'cafe' : 'billiards';
   const status = lic.data?.license?.status ?? null;
   // No license at all is read-only too; while it loads, let the cloud decide.
   const readOnly = lic.data ? (status ? status.readOnly : true) : false;
@@ -373,6 +388,7 @@ export function StaffPage({ clubId }: { clubId: string }) {
         {adding && (
           <StaffForm
             initial={{ name: '', roles: ['waiter'] }}
+            business={business}
             submitLabel="Добавить"
             onCancel={() => setAdding(false)}
             onSubmit={async (v) => {
@@ -388,7 +404,7 @@ export function StaffPage({ clubId }: { clubId: string }) {
           ) : (
             <ul className="plain-list">
               {staff.data.map((s) => (
-                <StaffRow key={s.id} staff={s} readOnly={readOnly} onChanged={() => void staff.reload()} />
+                <StaffRow key={s.id} staff={s} business={business} readOnly={readOnly} onChanged={() => void staff.reload()} />
               ))}
             </ul>
           )
@@ -396,7 +412,7 @@ export function StaffPage({ clubId }: { clubId: string }) {
           <p className="empty">{loadingText(staff.error, 'сотрудников')}</p>
         )}
         <p className="hint">
-          Управляющие и команда TS входят своими длинными ключами — здесь их нет. Изменения доходят до кассы заведения при
+          {business === 'cafe' ? 'Директор' : 'Управляющие'} и команда TS входят своими длинными ключами — здесь их нет. Изменения доходят до кассы заведения при
           следующей синхронизации (обычно за несколько секунд).
         </p>
       </Section>

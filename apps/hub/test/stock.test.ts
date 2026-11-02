@@ -541,7 +541,7 @@ test('permissions: a barista receives deliveries; recipes, counts and write-offs
     assert.deepEqual(await who.post('/api/stock/ingredients', { name: 'Сливки', unit: 'мл' }), { status: 403, code: 'FORBIDDEN' }, name);
   }
 
-  const admin = as(await tokenOf('Асель Администратор'));
+  const admin = as(await tokenOf('Асель Управляющая'));
   assert.equal(await admin.get('/api/stock/movements'), 200);
   assert.equal((await admin.post('/api/stock/counts', { lines: [{ ingredientId: milk.id, counted: 5000 }] })).status, 201);
   assert.equal((await admin.post('/api/stock/writeoffs', { ingredientId: milk.id, quantity: 100, reason: 'Скисло' })).status, 201);

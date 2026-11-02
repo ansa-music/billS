@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { DemoInfo } from '@bills/domain';
+import type { BusinessType, DemoInfo } from '@bills/domain';
 import { DEMO_KEYS, rolesLabel } from '@bills/domain';
 import { hubUrl } from './api.ts';
 import { DEMO_LOCAL, resetDemo } from './demo-hub/storage.ts';
@@ -29,7 +29,7 @@ function loadDemo(): Promise<DemoInfo | null> {
   return cached;
 }
 
-export function useDemo(): { demo: boolean; keys: DemoInfo['keys'] } {
+export function useDemo(): { demo: boolean; keys: DemoInfo['keys']; business: BusinessType } {
   const [info, setInfo] = useState<DemoInfo | null>(null);
   useEffect(() => {
     let alive = true;
@@ -38,7 +38,7 @@ export function useDemo(): { demo: boolean; keys: DemoInfo['keys'] } {
       alive = false;
     };
   }, []);
-  return { demo: BUILT_AS_DEMO || info !== null, keys: info?.keys ?? DEMO_KEYS };
+  return { demo: BUILT_AS_DEMO || info !== null, keys: info?.keys ?? DEMO_KEYS, business: info?.business === 'cafe' ? 'cafe' : 'billiards' };
 }
 
 /** Strip under the top bar on every page of the demo. */
@@ -78,8 +78,10 @@ export function DemoBanner({ cafe = false }: { cafe?: boolean }) {
  * only on a demo HUB.
  */
 export function DemoKeys({ onLogin, busy }: { onLogin: (key: string) => void; busy?: boolean }) {
-  const { demo, keys } = useDemo();
+  const { demo, keys, business } = useDemo();
   if (!demo) return null;
+  // A coffee shop names the roles its own way («Войти как директор»); billiards keep the written labels.
+  const labelOf = (k: DemoInfo['keys'][number]) => (business === 'cafe' ? rolesLabel(k.roles, business) : k.label || rolesLabel(k.roles));
   return (
     <aside className="login-help demo-keys" aria-label="Демо-вход">
       <p>
@@ -92,7 +94,7 @@ export function DemoKeys({ onLogin, busy }: { onLogin: (key: string) => void; bu
         {keys.map((k) => (
           <li key={k.key}>
             <button type="button" className="btn demo-key" disabled={busy} onClick={() => onLogin(k.key)}>
-              <span className="demo-key-role">Войти как {(k.label || rolesLabel(k.roles)).toLowerCase()}</span>
+              <span className="demo-key-role">Войти как {labelOf(k).toLowerCase()}</span>
               <code>{k.key}</code>
             </button>
           </li>

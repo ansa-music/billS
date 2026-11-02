@@ -11,6 +11,15 @@
  *    (waiter + cashier…); their rights are the union.
  */
 
+import type { BusinessType } from './cafe.ts';
+
+/**
+ * The kind of venue a check is made for (club setting `business.type`). Words and a few rights
+ * differ in a coffee shop (CAFE_ROLE_LABEL, CAFE_ASSIGNABLE_ROLES, CAFE_GRANTS); null or absent
+ * means a billiard club, whose words and rights are the defaults.
+ */
+export type Business = BusinessType | null | undefined;
+
 export const PLATFORM_ROLES = ['owner', 'tech'] as const;
 export type PlatformRole = (typeof PLATFORM_ROLES)[number];
 
@@ -31,6 +40,22 @@ export const ROLE_LABEL: Record<Role, string> = {
   bartender: 'Бармен / бариста',
   waiter: 'Официант',
 };
+
+/**
+ * A coffee shop names its people its own way (client feedback): the company's manager is
+ * «Директор», the branch administrator is «Управляющий», the bartender is «Бариста». The role
+ * codes stay the same; only the words differ, and only in a coffee shop.
+ */
+export const CAFE_ROLE_LABEL: Partial<Record<Role, string>> = {
+  manager: 'Директор',
+  admin: 'Управляющий',
+  bartender: 'Бариста',
+};
+
+/** The word for a role in this kind of venue; billiard words by default. */
+export function roleLabel(role: Role, business?: Business): string {
+  return (business === 'cafe' ? CAFE_ROLE_LABEL[role] : undefined) ?? ROLE_LABEL[role];
+}
 
 /** Roles that stand alone: a person is the owner, or tech, or a manager — never combined. */
 export const EXCLUSIVE_ROLES: readonly Role[] = ['owner', 'tech', 'manager'];
@@ -63,7 +88,10 @@ function asList(roles: RoleSet): readonly Role[] {
  * an exclusive role (owner / tech / manager) alone. Returns the canonical list
  * (in ROLES order) or an error message in Russian.
  */
-export function normalizeRoles(input: readonly unknown[]): { ok: true; roles: Role[] } | { ok: false; message: string } {
+export function normalizeRoles(
+  input: readonly unknown[],
+  business?: Business,
+): { ok: true; roles: Role[] } | { ok: false; message: string } {
   if (!Array.isArray(input) || input.length === 0) return { ok: false, message: 'Выберите хотя бы одну роль' };
   const set = new Set<Role>();
   for (const r of input) {
@@ -73,7 +101,7 @@ export function normalizeRoles(input: readonly unknown[]): { ok: true; roles: Ro
   const roles = ROLES.filter((r) => set.has(r));
   const exclusive = roles.filter((r) => EXCLUSIVE_ROLES.includes(r));
   if (exclusive.length > 0 && roles.length > 1) {
-    return { ok: false, message: `Роль «${ROLE_LABEL[exclusive[0]!]}» не совмещается с другими` };
+    return { ok: false, message: `Роль «${roleLabel(exclusive[0]!, business)}» не совмещается с другими` };
   }
   return { ok: true, roles };
 }
@@ -84,11 +112,11 @@ export function primaryRole(roles: RoleSet): Role | null {
   return ROLES.find((r) => list.includes(r)) ?? null;
 }
 
-/** "Официант + кассир". */
-export function rolesLabel(roles: RoleSet): string {
+/** "Официант + кассир"; a coffee shop's words with `business = 'cafe'` («Бариста», «Директор»…). */
+export function rolesLabel(roles: RoleSet, business?: Business): string {
   const list = ROLES.filter((r) => asList(roles).includes(r));
   if (list.length === 0) return '—';
-  const text = list.map((r) => ROLE_LABEL[r].toLowerCase()).join(' + ');
+  const text = list.map((r) => roleLabel(r, business).toLowerCase()).join(' + ');
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
@@ -109,17 +137,30 @@ export const ASSIGNABLE_ROLES: Record<Role, readonly Role[]> = {
   waiter: [],
 };
 
+/**
+ * A coffee shop: its «Управляющий» (admin) hires, edits and keys the staff below them — never
+ * an administrator or a manager (client feedback). Everyone else as in ASSIGNABLE_ROLES.
+ */
+export const CAFE_ASSIGNABLE_ROLES: Partial<Record<Role, readonly Role[]>> = {
+  admin: ['senior', 'cashier', 'bartender', 'waiter'],
+};
+
+/** Roles someone holding `role` may give in this kind of venue. */
+export function assignableRoles(role: Role, business?: Business): readonly Role[] {
+  return (business === 'cafe' ? CAFE_ASSIGNABLE_ROLES[role] : undefined) ?? ASSIGNABLE_ROLES[role];
+}
+
 /** May someone holding `by` give every role of `target` (create or change)? */
-export function canAssignRoles(by: RoleSet, target: RoleSet): boolean {
+export function canAssignRoles(by: RoleSet, target: RoleSet, business?: Business): boolean {
   const mine = asList(by);
   const theirs = asList(target);
   if (mine.length === 0 || theirs.length === 0) return false;
-  return theirs.every((t) => mine.some((m) => ASSIGNABLE_ROLES[m].includes(t)));
+  return theirs.every((t) => mine.some((m) => isRole(m) && assignableRoles(m, business).includes(t)));
 }
 
 /** Kept for older call sites: one target role. */
-export function canAssignRole(by: RoleSet, target: Role): boolean {
-  return canAssignRoles(by, [target]);
+export function canAssignRole(by: RoleSet, target: Role, business?: Business): boolean {
+  return canAssignRoles(by, [target], business);
 }
 
 const PLATFORM: readonly Role[] = ['owner', 'tech'];
@@ -187,7 +228,10 @@ export const ACTIONS = {
   'rules.edit': ADMIN,
   // Staff
   'staff.view': ADMIN,
-  'staff.edit': M, // hire, change roles, issue and revoke keys
+  'staff.edit': M, // hire, change roles, issue and revoke keys (a coffee shop's admin too: CAFE_GRANTS)
+  // Remove a person for good: gone from the staff list, the login and every picker; the name stays in
+  // the journal, receipts and reports. Only in a coffee shop (CAFE_ONLY_ACTIONS), only its director.
+  'staff.delete': M,
   'audit.view': SENIOR,
   // Money
   'shift.open': CASH,
@@ -199,6 +243,9 @@ export const ACTIONS = {
   'check.edit': CASH, // create a check, add or remove its lines
   'game.cancel': CASH, // void an unpaid game (the domain still asks for an approval)
   'shift.cash': CASH, // cash in / cash out of the drawer
+  // The shift's money: cash expected in the drawer, the X and Z reports (screen and print). Whoever
+  // opens and closes a shift without it counts the drawer blind (apps/hub/src/blind.ts).
+  'shift.report': SENIOR,
   // Equipment and power
   'lamp.blink': SENIOR,
   'lamps.manual': CASH, // switch the emergency manual mode on
@@ -220,6 +267,26 @@ export type Action = keyof typeof ACTIONS;
 
 export const ACTION_NAMES = Object.keys(ACTIONS) as Action[];
 
+/**
+ * A coffee shop adds these rights on top of ACTIONS (client feedback):
+ *  - the barista is often alone at the counter: opens and closes the cash shift, counts the
+ *    drawer, takes the X and Z reports, and settles a «счёт потом» check (a shift does not close
+ *    while one is open; the counter already takes payment) — still no menu, revenue page,
+ *    refunds, discounts, staff or settings;
+ *  - its «Управляющий» (admin) hires and keys the staff below them (CAFE_ASSIGNABLE_ROLES).
+ */
+export const CAFE_GRANTS: Partial<Record<Action, readonly Role[]>> = {
+  'shift.open': ['bartender'],
+  'shift.close': ['bartender'],
+  'shift.cash': ['bartender'],
+  'shift.report': ['bartender'],
+  'payment.take': ['bartender'],
+  'staff.edit': ['admin'],
+};
+
+/** Actions that exist only in a coffee shop: nobody may do them in a billiard club, the platform neither. */
+export const CAFE_ONLY_ACTIONS: ReadonlySet<Action> = new Set<Action>(['staff.delete']);
+
 const PLATFORM_ONLY: ReadonlySet<Action> = new Set<Action>(['platform.view', 'clients.edit', 'platform.staff']);
 
 function roleCan(role: Role, action: Action): boolean {
@@ -229,13 +296,20 @@ function roleCan(role: Role, action: Action): boolean {
   return (ACTIONS[action] as readonly Role[]).includes(role);
 }
 
-/** True when any of the roles may perform the action (rights are the union). Unknown or missing → false. */
-export function can(roles: RoleSet, action: Action): boolean {
-  return asList(roles).some((r) => isRole(r) && roleCan(r, action));
+/**
+ * True when any of the roles may perform the action (rights are the union). Unknown or missing → false.
+ * `business` is the kind of venue: a coffee shop adds CAFE_GRANTS and opens CAFE_ONLY_ACTIONS;
+ * without it (or for billiards) the table above is the whole answer.
+ */
+export function can(roles: RoleSet, action: Action, business?: Business): boolean {
+  const cafe = business === 'cafe';
+  if (!cafe && CAFE_ONLY_ACTIONS.has(action)) return false;
+  const extra = cafe ? CAFE_GRANTS[action] : undefined;
+  return asList(roles).some((r) => isRole(r) && (roleCan(r, action) || (extra?.includes(r) ?? false)));
 }
 
-export function allowedActions(roles: RoleSet): Action[] {
-  return ACTION_NAMES.filter((a) => can(roles, a));
+export function allowedActions(roles: RoleSet, business?: Business): Action[] {
+  return ACTION_NAMES.filter((a) => can(roles, a, business));
 }
 
 // ── License gate ────────────────────────────────────────────────────────────
@@ -299,6 +373,7 @@ export const READ_ONLY_ACTIONS: ReadonlySet<Action> = new Set<Action>([
   'check.edit',
   'game.cancel',
   'shift.cash',
+  'shift.report',
   'lamps.manual',
   'lamps.manual_off',
   'reports.view',
@@ -322,8 +397,8 @@ export type Decision = 'ok' | 'forbidden' | 'read_only' | 'module_off';
  * The full check: role first, then the license. The platform (owner, tech) is
  * never limited by a client's license — support must be able to fix things.
  */
-export function decide(roles: RoleSet, action: Action, license: LicenseGate | null | undefined): Decision {
-  if (!can(roles, action)) return 'forbidden';
+export function decide(roles: RoleSet, action: Action, license: LicenseGate | null | undefined, business?: Business): Decision {
+  if (!can(roles, action, business)) return 'forbidden';
   if (!license) return 'ok';
   if (asList(roles).some((r) => isPlatformRole(r))) return 'ok';
   const mod = ACTION_MODULE[action];
@@ -333,6 +408,6 @@ export function decide(roles: RoleSet, action: Action, license: LicenseGate | nu
 }
 
 /** `can` with the license applied, for screens: hide what the HUB would refuse anyway. */
-export function canNow(roles: RoleSet, action: Action, license: LicenseGate | null | undefined): boolean {
-  return decide(roles, action, license) === 'ok';
+export function canNow(roles: RoleSet, action: Action, license: LicenseGate | null | undefined, business?: Business): boolean {
+  return decide(roles, action, license, business) === 'ok';
 }

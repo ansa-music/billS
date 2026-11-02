@@ -7,7 +7,7 @@ import type { Db } from './db.ts';
 import { afterCommit, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import { HubEvents } from './events.ts';
-import type { GuardSettings, GuardSettingsPatch } from '@bills/domain';
+import type { BusinessType, GuardSettings, GuardSettingsPatch } from '@bills/domain';
 import { getGuardSettings, guardManualMode, guardStaffNames, guardTableOpened, setGuardSettings } from './guard.ts';
 import type { LicenseOptions } from './license.ts';
 import { LicenseService } from './license.ts';
@@ -36,7 +36,7 @@ import { getManualMode, isManualMode, managerMatcher, setManualMode } from './ma
 import type { SyncOptions } from './sync.ts';
 import { SyncWorker, syncStatus } from './sync.ts';
 import type { HubState, SessionView } from './views.ts';
-import { buildState, loadSession } from './views.ts';
+import { buildState, businessTypeOf, loadSession } from './views.ts';
 
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 export const MAX_BLINK_TIMES = 10;
@@ -218,6 +218,11 @@ export class Hub {
       this.prepaid.settleStopped(input.sessionId);
       return loadSession(this.db, input.sessionId, this.clock.now());
     });
+  }
+
+  /** The kind of venue (settings.business.type): every rights check and role word passes it on. */
+  business(): BusinessType {
+    return businessTypeOf(this.db);
   }
 
   /** `staffNames`: managers also see who is behind a «Сторож» alert (never part of the push text). */

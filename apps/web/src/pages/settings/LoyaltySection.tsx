@@ -102,7 +102,7 @@ export function LoyaltySection({ club, online, isBusy, run, reload, canEdit }: S
             Гость называет номер телефона — касса узнаёт его, показывает бонусы или штампы и сама предлагает подарок. Без SMS и приложений.
             Бонусы и подарки — это скидка в чеке, в кассе и X/Z-отчётах только настоящие деньги.
           </p>
-          {!canEdit && <p className="hint">Программу настраивает управляющий.</p>}
+          {!canEdit && <p className="hint">Программу настраивает {cafe ? 'директор' : 'управляющий'}.</p>}
           <label className="check">
             <input type="checkbox" checked={draft.enabled} disabled={disabled} onChange={(e) => setDraft((d) => ({ ...d, enabled: e.target.checked }))} />
             Включить программу — на кассе появится кнопка «Гость»

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import type { Action, HubState, LicenseStatus, MeResponse, OpenTableRequest, Role } from '@bills/domain';
+import type { Action, BusinessType, HubState, LicenseStatus, MeResponse, OpenTableRequest, Role } from '@bills/domain';
 import { HubRequestError, UNAUTHORIZED_EVENT, command, fetchJson, fetchState, getAuthToken, hubUrl } from './api.ts';
 import { AUTH_CHANGED_EVENT, actorName, readAuth, writeAuth } from './auth.ts';
 
@@ -183,7 +183,9 @@ export interface HubContextValue {
   role: Role | null;
   /** Everything the signed-in person holds; rights are the union. */
   roles: readonly Role[];
-  /** Role check only (see packages/domain permissions.ts): pages, what to show at all. */
+  /** What the venue is (settings.business.type): role words and a few rights differ in a coffee shop. */
+  business: BusinessType;
+  /** Role check only, for this kind of venue (see packages/domain permissions.ts): pages, what to show at all. */
   can: (action: Action) => boolean;
   /** License of this branch (state.license); null when not enforced. */
   license: LicenseStatus | null;

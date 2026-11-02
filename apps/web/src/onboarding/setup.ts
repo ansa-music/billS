@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { HubSetupRequest, HubSetupResponse, HubSetupStatus, RosterPerson, RosterResponse } from '@bills/domain';
+import type { BusinessType, HubSetupRequest, HubSetupResponse, HubSetupStatus, RosterPerson, RosterResponse } from '@bills/domain';
 import { extractHubSetupCode } from '@bills/domain';
 import { hubUrl } from '../api.ts';
 
@@ -136,13 +136,14 @@ export async function waitUntilConnected(signal: AbortSignal, timeoutMs = 90_000
 /**
  * GET /api/auth/roster: people to pick on «Кто на смене?» — empty when switched off or nobody has
  * a six-digit key yet, also on an older HUB without the route (404); null when the HUB is unreachable.
+ * `business` names the venue, so roles are shown in its words (billiards from an older HUB).
  */
-export async function fetchRoster(): Promise<RosterPerson[] | null> {
+export async function fetchRoster(): Promise<{ people: RosterPerson[]; business: BusinessType } | null> {
   try {
     const res = await fetch(hubUrl('/api/auth/roster'), { cache: 'no-store' });
-    if (!res.ok) return res.status === 404 ? [] : null;
+    if (!res.ok) return res.status === 404 ? { people: [], business: 'billiards' } : null;
     const body = (await res.json()) as Partial<RosterResponse>;
-    return Array.isArray(body.people) ? body.people : [];
+    return { people: Array.isArray(body.people) ? body.people : [], business: body.business === 'cafe' ? 'cafe' : 'billiards' };
   } catch {
     return null;
   }
