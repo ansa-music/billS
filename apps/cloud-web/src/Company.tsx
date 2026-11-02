@@ -197,7 +197,8 @@ function BranchConnect({ res, onDone }: { res: CreateBranchResponse; onDone: () 
         initial={{ hubId: res.hubId, apiKey: res.hubApiKey }}
       />
       <p className="hint">
-        Код можно открыть позже: «Первые шаги» → «Подключите кассу». Программа для кассы — на странице{' '}
+        Код можно открыть позже: «Первые шаги» → «Подключите кассу». Касса работает в браузере, образ для мини-ПК — на
+        странице{' '}
         <a className="link-inline" href="#/apps">
           «Скачать»
         </a>

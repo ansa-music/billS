@@ -7,11 +7,8 @@ import {
   MINIPC_COMMAND_STEPS,
   MINIPC_GUIDE_URL,
   MINIPC_IMAGE_STEPS,
-  PLATFORM_NAME,
+  WINDOWS_HUB_GUIDE_URL,
   assetFileText,
-  assetLinkText,
-  computerDownload,
-  computerSteps,
   detectPlatform,
   downloadCards,
   releaseVersionText,
@@ -26,12 +23,14 @@ import { Page, Section } from '../ui.tsx';
 import './apps.css';
 
 /**
- * «Приложения» (#/apps): the cash-desk app for Windows, the owner app for
- * Android, the USB image of the club's mini-PC (with the one-command install
- * as the alternative), iPhone via the home screen, and this very screen as a
- * PWA. The visitor's device goes first. Files come from GitHub Releases; the
- * cards, their order and texts are shared with the owner cabinet through
- * @bills/domain. Hidden from the navigation, linked from the staff menu and the owner page.
+ * «Приложения» (#/apps): this very screen as an installed app (PWA) — the way
+ * onto the cash-desk computer, since the cash desk runs in the browser — then
+ * the owner app for Android, the USB image of the club's mini-PC (with the
+ * one-command install as the alternative) and iPhone via the home screen. On a
+ * computer the screen section goes first, on a phone its own card does. Files
+ * come from GitHub Releases; the cards, their order and texts are shared with
+ * the owner cabinet through @bills/domain. Hidden from the navigation, linked
+ * from the staff menu and the owner page.
  */
 
 function devicePlatform(): VisitorPlatform {
@@ -47,7 +46,6 @@ const PHONE_PATH =
 
 /** Device pictures of the cards (not in icons.tsx: only this page draws them). */
 const DEVICE_PATHS: Record<DownloadCard, string> = {
-  computer: 'M3 4.5h18v11.5H3z M8.5 20h7 M12 16v4',
   android: PHONE_PATH,
   ios: PHONE_PATH,
   minipc: 'M4.5 7.5h15a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 15V9a1.5 1.5 0 0 1 1.5-1.5z M6.5 12h4 M16.5 12h1',
@@ -225,21 +223,6 @@ function Download({
   );
 }
 
-function OtherFiles({ assets }: { assets: ReleaseAsset[] }) {
-  if (assets.length === 0) return null;
-  return (
-    <ul className="dl-others" aria-label="Другие версии">
-      {assets.map((a) => (
-        <li key={a.url}>
-          <a href={a.url} download>
-            {assetLinkText(a)}
-          </a>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function IosCard({ current, wide }: { current: boolean; wide: boolean }) {
   const address = `${location.origin}/`;
   return (
@@ -279,7 +262,10 @@ function IosCard({ current, wide }: { current: boolean; wide: boolean }) {
   );
 }
 
-/** This hall screen as an installed app (PWA), with the browser's own install prompt when it offers one. */
+/**
+ * This screen as an installed app (PWA), with the browser's own install prompt when it offers one. It is
+ * how TS goes onto the cash-desk computer: the cash desk runs in the browser, there is no program to download.
+ */
 function ScreenSection() {
   const standalone = useStandalone();
   const install = useInstallPrompt();
@@ -291,8 +277,9 @@ function ScreenSection() {
         ) : (
           <>
             <p className="muted">
-              Экран зала можно поставить на планшет или компьютер значком, как обычное приложение: он откроется без
-              адресной строки и будет обновляться сам.
+              Касса работает в браузере — скачивать программу для компьютера не нужно. Поставьте этот экран на
+              компьютер кассы или планшет значком, как обычное приложение: он откроется без адресной строки и будет
+              обновляться сам.
             </p>
             {install.kind === 'native' && (
               <div>
@@ -302,7 +289,8 @@ function ScreenSection() {
               </div>
             )}
             <ul className="dl-steps">
-              <li>Android, Chrome на компьютере: меню ⋮ → «Установить приложение» или «Добавить на главный экран».</li>
+              <li>Компьютер, Chrome или Edge: значок установки справа в адресной строке или меню браузера → «Установить».</li>
+              <li>Android: меню ⋮ → «Установить приложение» или «Добавить на главный экран».</li>
               <li>iPhone, iPad: Safari → «Поделиться» → «На экран „Домой“».</li>
             </ul>
           </>
@@ -316,44 +304,18 @@ export function AppsPage() {
   const state = useLatestRelease();
   const platform = devicePlatform();
   const catalog = state.status === 'ok' ? state.release : null;
-  const { order, current } = downloadCards(platform, catalog);
+  const { order, current } = downloadCards(platform);
   const onComputer = platform === 'windows' || platform === 'linux' || platform === 'mac';
   // The device's card spans the row; an odd card left over at the end spans it too.
   const rest = order.length - (current ? 1 : 0);
   const isWide = (card: DownloadCard, i: number) => card === current || (i === order.length - 1 && rest % 2 === 1);
 
-  const computer = computerDownload(catalog, platform);
-  const system = computer.primary?.platform ?? 'windows';
   const apk = catalog?.android[0];
   const image = catalog?.minipc[0];
   // Known to have no image (not just still loading or unreachable): the command is the way for now.
   const noImage = !image && (state.status === 'ok' || state.status === 'none');
 
   const cards: Record<DownloadCard, (wide: boolean) => ReactNode> = {
-    computer: (wide) => (
-      <Card
-        key="computer"
-        card="computer"
-        kicker={DOWNLOAD_TEXT.computer.kicker}
-        title={PLATFORM_NAME[system]}
-        current={current === 'computer'}
-        wide={wide}
-        main={
-          <>
-            <p className="dl-lead">{DOWNLOAD_TEXT.computer.lead}</p>
-            <Download
-              state={state}
-              asset={computer.primary}
-              release={catalog?.desktopRelease ?? null}
-              label={`Скачать для ${PLATFORM_NAME[system]}`}
-              soon={DOWNLOAD_TEXT.computer.soon}
-            />
-            <OtherFiles assets={computer.others} />
-          </>
-        }
-        more={<Steps steps={computerSteps(system)} />}
-      />
-    ),
     android: (wide) => (
       <Card
         key="android"
@@ -432,9 +394,14 @@ export function AppsPage() {
               <Steps steps={MINIPC_COMMAND_STEPS} />
             </details>
             <p className="dl-note">
-              {DOWNLOAD_TEXT.minipc.windows}{' '}
               <a className="dl-inline-link" href={MINIPC_GUIDE_URL} target="_blank" rel="noreferrer">
                 {DOWNLOAD_TEXT.minipc.guide}
+              </a>
+            </p>
+            <p className="dl-note">
+              {DOWNLOAD_TEXT.minipc.windows}{' '}
+              <a className="dl-inline-link" href={WINDOWS_HUB_GUIDE_URL} target="_blank" rel="noreferrer">
+                {DOWNLOAD_TEXT.minipc.windowsGuide}
               </a>
             </p>
           </>
@@ -445,7 +412,7 @@ export function AppsPage() {
   };
 
   return (
-    <Page title="Приложения" subtitle="Программы TS для компьютера кассы, телефона владельца и мини-ПК клуба.">
+    <Page title="Приложения" subtitle="Касса работает в браузере. Здесь — приложение для телефона владельца и образ для мини-ПК.">
       <div className="apps-page">
         {state.status === 'error' && (
           <p className="dl-alert" role="status">
@@ -455,8 +422,10 @@ export function AppsPage() {
             </a>
           </p>
         )}
+        {/* On a computer this screen as an app is what to install: it goes first. */}
+        {onComputer && <ScreenSection />}
         <div className="dl-cards">{order.map((card, i) => cards[card](isWide(card, i)))}</div>
-        <ScreenSection />
+        {!onComputer && <ScreenSection />}
         <p className="apps-foot">
           <a className="link" href={releasesPageUrl()} target="_blank" rel="noreferrer">
             {DOWNLOAD_TEXT.allVersions}

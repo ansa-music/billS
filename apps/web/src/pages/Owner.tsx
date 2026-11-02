@@ -29,7 +29,7 @@ const QUICK_LINKS: QuickLink[] = [
   { to: '/bar', label: 'Бар и меню', action: 'catalog.edit', billiards: true },
   { to: '/bar', label: 'Меню', action: 'catalog.edit', cafe: true },
   { to: '/stats', label: 'Отчёты: смена, продажи, прибыль', action: 'reports.view', cafe: true },
-  { to: '/apps', label: 'Приложение на телефон и кассу', action: 'reports.view' },
+  { to: '/apps', label: 'Приложение на телефон', action: 'reports.view' },
 ];
 
 export function OwnerPage() {

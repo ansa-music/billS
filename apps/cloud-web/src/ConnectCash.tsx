@@ -145,8 +145,8 @@ export function ConnectCash({
         <div className="connect-grid">
           <div className="connect-code">
             <p className="connect-how">
-              В программе TS на кассе нажмите «Подключить» и вставьте код. Или отсканируйте QR телефоном, подключённым
-              к Wi-Fi заведения.
+              На экране кассы TS вставьте код и нажмите «Подключить». Или отсканируйте QR телефоном, подключённым к
+              Wi-Fi заведения.
             </p>
             <span className="copy-label">Код подключения</span>
             <code className="connect-code-text">{shown.code}</code>

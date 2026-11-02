@@ -88,8 +88,6 @@ apps/web          экраны клуба (React + Vite): вход по ключ
                   настройки, кабинет владельца
 apps/cloud        облако (Fastify): компании, клубы, владельцы, приём outbox, настройки вниз, отчёты
 apps/cloud-web    кабинет владельца сети (React + Vite): все клубы, выручка, загрузка столов, тарифы
-apps/desktop      приложение TS для ПК кассы и мини-ПК (Tauri 2, Rust): окно с интерфейсом HUB, киоск, тихая печать чеков,
-                  автозапуск, установка HUB службой, автообновление; установщики .msi и .deb
 scripts/local.mjs своя копия клуба (HUB + экраны) на отдельных портах и с отдельной базой
 supabase/         публичное облако на Supabase: миграции (схема, RLS, отчёты RPC), Edge Functions sync/owner/notify, тесты на PGlite
 deploy/           установка HUB в клубе: Linux (systemd, бэкапы, обновления с откатом), Windows, удалённая поддержка
@@ -97,7 +95,8 @@ docs/             регламенты: эксплуатация для упра
                   публичный доступ бесплатно — Supabase + Cloudflare/GitHub Pages (PUBLIC_DEPLOY_RU),
                   монтаж оборудования для электрика (INSTALL_HARDWARE_RU: щиток, реле, датчики, ключ ручного режима),
                   тестовый стенд ESP32 + реле + датчик тока + лампы 220 В (HARDWARE_TEST_BENCH_RU), фискализация (FISCAL_RU),
-                  план приложений TS: браузер/PWA, приложение для ПК кассы и мини-ПК, мобильное приложение владельца (APP_PLAN_RU)
+                  план приложений TS: браузер/PWA, мобильное приложение владельца (APP_PLAN_RU; приложения для ПК нет —
+                  касса работает в браузере)
 firmware/esp32-relay   прошивка контроллера ESP32: 8 реле, датчики тока, HTTP API, память состояния
 ```
 
@@ -195,7 +194,7 @@ TS можно запустить для всей сети клубов **без 
   ```
 - **Доступ снаружи.** Рекомендуемый — Tailscale (`sudo bills tailscale`, по желанию `--https`): бесплатная частная сеть, кабинет видят только устройства владельца и HUB других клубов, в интернет ничего не открыто. Альтернатива — Cloudflare Tunnel (`sudo bills tunnel quick` — временный адрес `*.trycloudflare.com` для показа; `sudo bills tunnel token <ТОКЕН>` — постоянный адрес на своём домене). Запасной — бесплатное имя DuckDNS + HTTPS через Caddy (`sudo bills duckdns --domain … --token … --https`, нужен «белый» IP).
 - **Другие клубы** получают ключ `sudo bills cloud add-club --name "…"` на главном мини-ПК и подключаются `sudo bills connect-cloud --url http://<имя-в-tailscale>:4320 --hub-id … --key …` (Windows — `deploy/windows/connect-cloud.ps1`).
-- **Приложения без магазинов.** Страница «Скачать приложение» в кабинете (`#/apps`) и на экранах клуба раздаёт файлы из GitHub Releases: Android — APK напрямую, ПК — установщик, iPhone — кабинет через Safari «На экран „Домой“» (PWA).
+- **Приложения без магазинов.** Страница «Скачать приложение» в кабинете (`#/apps`) и на экранах клуба раздаёт файлы из GitHub Releases: Android — APK напрямую, мини-ПК — образ для флешки, iPhone — кабинет через Safari «На экран „Домой“» (PWA). Компьютеру кассы скачивать нечего: касса работает в браузере и ставится значком (PWA).
 - **Платное — только при росте:** Google Play $25 один раз, Apple $99 в год, VPS в Казахстане — когда сеть вырастет и кабинет должен работать независимо от главного клуба.
 
 ## Установка в клубе
@@ -402,7 +401,7 @@ npm run start:hub
 
 ### Установка на планшет и ПК (PWA)
 
-Интерфейс — устанавливаемое веб-приложение (PWA): магазины приложений не нужны, ничего скачивать отдельно не надо. Сотрудник открывает адрес HUB в браузере, нажимает «Установить» — и дальше работает с иконки на весь экран, без адресной строки. План и статус — в [docs/APP_PLAN_RU.md](docs/APP_PLAN_RU.md), фаза 1.
+Интерфейс — устанавливаемое веб-приложение (PWA): магазины приложений не нужны, ничего скачивать отдельно не надо. Сотрудник открывает адрес HUB в браузере, нажимает «Установить» — и дальше работает с иконки на весь экран, без адресной строки. Так же ставится и компьютер кассы: отдельного приложения для ПК нет (от него отказались 2026-11-03 — касса целиком работает в браузере). Чеки печатаются через окно печати браузера (`apps/web/src/cash/print/`): принтер чеков выбирается в нём, Chrome и Edge запоминают последний. План и статус — в [docs/APP_PLAN_RU.md](docs/APP_PLAN_RU.md), фаза 1.
 
 **Как поставить.** Открыть `http://<адрес-хаба>:4310/` (адрес мини-ПК в сети клуба, например `http://192.168.1.10:4310/`) и войти по ключу. Дальше:
 
@@ -423,29 +422,6 @@ npm run start:hub
 **Проверка для разработчика.** `npm run build`, затем конфигурация `pwa-check` (`node scripts/local.mjs --hub-port=4800 --db=pwa-check --dist`): HUB отдаёт собранный `dist` на `http://localhost:4800/` (localhost браузер считает безопасным, флаг не нужен). В консоли браузера `navigator.serviceWorker.getRegistrations()` должен вернуть одну регистрацию, вкладка Application → Manifest в DevTools — манифест с иконками. Установку можно проверить без установки: вызвать в консоли событие `beforeinstallprompt` — появится плашка (скриншот: [docs/img/pwa-install-banner.jpg](docs/img/pwa-install-banner.jpg)); обновление — изменить `apps/web/dist/sw.js` и вызвать `(await navigator.serviceWorker.getRegistration()).update()` → плашка «Доступна новая версия», «Обновить» перезагружает экран с сохранённым входом. `npm run audit:pwa` прогоняет Lighthouse через `npx @lhci/cli` (нужен установленный Chrome; пакет в зависимости репозитория не добавлен, скачивается при запуске) по `http://localhost:4800/`, отчёт в `.lighthouseci/`; отдельной категории «PWA» в Lighthouse 12+ больше нет — установимость смотрят в DevTools → Application → Manifest. В dev-режиме (`npm run dev:web`) service worker не регистрируется, установка проверяется только на собранном `dist`.
 
 Иконки «TS» (`apps/web/public/icons/`) рисует `npm run icons` (`scripts/icons.mjs`, чистый JS, без сети и зависимостей); манифест — `apps/web/public/manifest.webmanifest`; service worker собирает `vite-plugin-pwa` (`apps/web/vite.config.ts`); плашки установки и обновления — `apps/web/src/pwa.tsx`. HUB отдаёт `manifest.webmanifest` с типом `application/manifest+json`, а `sw.js`, `index.html` и иконки — с `Cache-Control: no-cache` (тест `apps/hub/test/static.test.ts`).
-
-### Приложение для ПК
-
-**TS для Windows и Linux** (`apps/desktop`, [Tauri 2](https://tauri.app)) — тот же интерфейс клуба в своём окне, для ПК кассы и мини-ПК у экрана зала. Окно использует системный движок (WebView2 на Windows, WebKitGTK на Linux), установщик ≈ 5–10 МБ. Интерфейс приложение не хранит у себя: окно открывает HUB клуба (`http://<адрес-хаба>:4310/`), поэтому новые версии экранов приходят вместе с обновлением HUB, как у планшетов.
-
-**Установка.** `.msi` для Windows 10/11 и `.deb` для Ubuntu 22.04+ собирает GitHub Actions (`.github/workflows/desktop.yml`): установщики — в артефактах каждого запуска и в релизе по тегу `desktop-v<версия>`. Без подписи издателя Windows SmartScreen при первом запуске покажет «Неизвестный издатель» → «Подробнее» → «Выполнить в любом случае».
-
-![Настройки устройства в приложении TS для ПК](docs/img/desktop-settings.png)
-
-**Первый запуск.** Приложение ищет HUB само: `hub.local` (имя ПК с HUB по mDNS — назовите его `hub`), этот же ПК, затем вся сеть /24 на порту 4310 (проверяет `/api/health`). Один найденный HUB открывается сразу, несколько — на выбор; можно ввести адрес вручную (`192.168.1.10` → `http://192.168.1.10:4310`). Адрес запоминается; если HUB не отвечает (нет света, Wi‑Fi), экран «HUB не отвечает» повторяет попытку каждые 5 секунд. Настройки устройства из любого экрана TS: **Ctrl+Shift+S**.
-
-**Настройки устройства** (файл `settings.json` в `%APPDATA%\app.ts.desktop\` или `~/.config/app.ts.desktop/`):
-- **Киоск-режим** — окно на весь экран без рамки, нельзя закрыть (Alt+F4 не действует), экран не гаснет (Windows). Изменить настройки, сменить HUB или закрыть TS — только после ключа управляющего, владельца или супер-админа (приложение проверяет ключ входом на HUB и сразу закрывает эту сессию). Клавишу Windows и Ctrl+Alt+Del киоск не перехватывает: для полной блокировки ПК — «Ограниченный доступ» (Assigned Access) Windows с этим приложением.
-- **Автозапуск** при входе в Windows/сеанс Linux (`tauri-plugin-autostart`; для кассы включите автовход пользователя).
-- **Принтер чеков** — из списка принтеров системы или «по умолчанию». Кнопка печати чека в «Кассе» в приложении печатает сразу, без окна печати: `apps/web` видит `window.__TAURI__` (`apps/web/src/desktop.ts`) и вызывает команду `print_receipt`, которая печатает ту же вёрстку чека (`cash/print/*`) через WebView2 (`ICoreWebView2_16::Print`) или WebKitGTK (`PrintOperation`) на выбранный принтер с размером страницы по ширине ленты и высоте чека. В браузере и при ошибке принтера — обычный `window.print()` с диалогом.
-
-**HUB на этом же ПК.** «Установить HUB на этот ПК» в настройках запускает те же скрипты, что и ручная установка (`deploy/windows/install.ps1` от администратора — задача «billS HUB» при старте системы; на Linux `pkexec bash deploy/linux/install.sh` — systemd `bills-hub.service`), они лежат внутри установщика. После установки приложение подключается к `127.0.0.1:4310`.
-
-**Автообновление.** «Проверить обновления» в настройках: `tauri-plugin-updater` читает `latest.json` последнего релиза GitHub (`releases/latest/download/latest.json`), проверяет подпись открытым ключом из `tauri.conf.json` и ставит новую версию по кнопке (в киоске — после ключа управляющего); игры и деньги в HUB, перезапуск окна их не трогает. Закрытый ключ подписи — секреты репозитория `TAURI_SIGNING_PRIVATE_KEY` и `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (без них CI собирает установщики без файлов обновления).
-
-**Права страниц.** Страницам HUB разрешены только `print_receipt` и `open_settings` (`src-tauri/capabilities/hub.json`); остальные команды — только локальной странице настроек (`apps/desktop/ui/index.html`). Окно переходит только на свои страницы и выбранный HUB — ссылка наружу не уведёт из киоска.
-
-**Сборка у себя.** Нужны Node 24, Rust (`rustup`), на Windows — MSVC (Visual Studio Build Tools, «Разработка классических приложений на C++») с Windows SDK; на Linux — `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev`. Затем `npm ci`, `npm run dev -w @bills/desktop` (окно в режиме разработки) или `npm run build -w @bills/desktop -- --bundles msi` → `apps/desktop/src-tauri/target/release/bundle/msi/TS_<версия>_x64_ru-RU.msi`. Тесты Rust: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`. Иконки — из монограммы `apps/web/public/icons/icon-512.png`: `npm run icons -w @bills/desktop`.
 
 ## Режим «Кофейня» (ветка `claude/coffee-shop`)
 
@@ -494,13 +470,12 @@ npm run start:hub
 
 | Что | Команда | Тег | Файлы |
 |---|---|---|---|
-| ПК кассы (Windows, Linux) | `node scripts/release.mjs desktop` | `desktop-v<версия>` | `.msi`, `.deb`, `latest.json` |
 | Телефон владельца (Android) | `node scripts/release.mjs mobile` | `mobile-v<версия>` | `TS-<версия>.apk` |
 | Мини-ПК клуба (флешка) | `node scripts/release.mjs minipc` | `minipc-v<версия>` | `TS-minipc-<версия>.iso`, `.sha256` |
 
-Своя версия: `node scripts/release.mjs desktop 0.2.0`; без публикации: `--dry-run`. Пробная сборка — «Run workflow» в Actions (файлы в артефактах).
+Своя версия: `node scripts/release.mjs mobile 0.2.0`; без публикации: `--dry-run`. Пробная сборка — «Run workflow» в Actions (файлы в артефактах). Кассу выпускать не нужно: она работает в браузере и обновляется вместе с HUB (`bills update`) и сайтами.
 
-Ключи подписи — один раз, в GitHub → Settings → Secrets and variables → Actions: ПК — `npm run desktop:signing-key` ([apps/desktop/README.md](apps/desktop/README.md)), Android — `npm run android:keystore` ([docs/MOBILE_RELEASE_RU.md](docs/MOBILE_RELEASE_RU.md)). Ключи кладутся вне репозитория и в терминал не печатаются.
+Ключ подписи Android — один раз, в GitHub → Settings → Secrets and variables → Actions: `npm run android:keystore` ([docs/MOBILE_RELEASE_RU.md](docs/MOBILE_RELEASE_RU.md)). Ключ кладётся вне репозитория и в терминал не печатается.
 
 ## Публичный доступ
 

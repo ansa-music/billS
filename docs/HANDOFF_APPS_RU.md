@@ -2,6 +2,11 @@
 
 Инструкция для следующей сессии Claude. Прочитай целиком, потом README.md.
 
+> **2026-11-03: приложение для ПК отменено.** TS работает целиком в браузере, только кофейни. `apps/desktop`,
+> `.github/workflows/desktop.yml` и выпуски `desktop-v*` больше не нужны (код удалён; старые выпуски на GitHub
+> страница скачивания пропускает). Пункты про ПК ниже — история, делать их не надо. HUB на Windows без
+> мини-ПК — служба `deploy/windows`, её проверка — `.github/workflows/windows-hub.yml`.
+
 ## Правила
 - Продукт называется **TS**. Расшифровку названия нигде не пиши.
 - Общайся с пользователем по-русски, просто, как с владельцем бизнеса, а не программистом.
@@ -13,8 +18,8 @@
 ## Что уже есть
 | Часть | Где | Состояние |
 |---|---|---|
-| Страница «Скачать приложение» | `packages/domain/src/releases.ts`, `apps/web/src/pages/Apps.tsx`, `apps/cloud-web/src/Apps.tsx`; на сайте https://ts-cabinet.pages.dev/#/apps | читает GitHub Releases по меткам: `desktop-v*` — ПК, `mobile-v*` — Android, без префикса — общий. Пока пусто |
-| Приложение для ПК кассы (Tauri) | `apps/desktop`, `.github/workflows/desktop.yml` | собирается; по метке `desktop-v*` CI делает выпуск с `.msi` и `.deb` (метка `desktop-v0.1.0` уже поставлена — проверь, чем закончилась сборка). Подписи кода Windows нет (SmartScreen), ключа автообновления `TAURI_SIGNING_PRIVATE_KEY` нет |
+| Страница «Скачать приложение» | `packages/domain/src/releases.ts`, `apps/web/src/pages/Apps.tsx`, `apps/cloud-web/src/Apps.tsx`; на сайте https://ts-cabinet.pages.dev/#/apps | читает GitHub Releases по меткам: `mobile-v*` — Android, `minipc-v*` — мини-ПК, без префикса — общий; `desktop-v*` пропускает. Пока пусто |
+| ~~Приложение для ПК кассы (Tauri)~~ — отменено 2026-11-03, удалено | ~~`apps/desktop`, `.github/workflows/desktop.yml`~~ | было: собирается; по метке `desktop-v*` CI делает выпуск с `.msi` и `.deb` (метка `desktop-v0.1.0` уже поставлена — проверь, чем закончилась сборка). Подписи кода Windows нет (SmartScreen), ключа автообновления `TAURI_SIGNING_PRIVATE_KEY` нет |
 | Приложение владельца Android (Capacitor) | `apps/mobile`, `docs/MOBILE_RELEASE_RU.md` | debug-APK собирался локально; **workflow для сборки и выпуска APK нет**; push ещё на FCM (Firebase) — его нужно заменить, Firebase пользователь использовать не может |
 | HUB на мини-ПК клуба | `apps/hub`, `deploy/linux/install.sh` (флаги `--with-cloud`), `deploy/windows/*`, `docs/OPERATIONS_RU.md`, `docs/FREE_SETUP_RU.md` | ставится одной командой `curl … install.sh \| sudo bash`; проверено только синтаксически, на живой Ubuntu не запускалось. Подключение к облаку — `HUB_ID` и `CLOUD_API_KEY` из кабинета управляющего (Филиалы → новый филиал) |
 | Облако | Supabase-проект `uwlhvcvgziuqqtfibvea`, Edge Functions, кабинет https://ts-cabinet.pages.dev | работает: владелец → клиент с лицензией → филиал → сотрудники |
@@ -27,7 +32,7 @@
 - Push без Firebase: убрать FCM (`@capacitor-firebase/messaging`, `firebase`, `apps/cloud/src/push.ts` FCM-ветку) и сделать уведомления через бесплатный ntfy.sh (своя тема на клиента) или через опрос/Realtime Supabase, когда приложение открыто. Выбери и обоснуй коротко.
 - Скрипт для ключа подписи APK: `scripts/android-keystore.mjs` создаёт keystore и печатает, что вставить в какие секреты — **пользователь вставляет сам**.
 
-### 2. ПК кассы: установщик без вопросов
+### 2. ~~ПК кассы: установщик без вопросов~~ — отменено 2026-11-03, касса в браузере
 - Проверь результат выпуска `desktop-v0.1.0`; если сборка упала — почини.
 - Ключ автообновления: скрипт генерирует пару ключей Tauri, публичный кладёт в `tauri.conf.json`, закрытый — пользователь в секрет `TAURI_SIGNING_PRIVATE_KEY`.
 - При первом запуске приложение само находит HUB (`hub.local` / сеть), а если HUB в этом же компьютере не установлен — предлагает «Это главный компьютер клуба? Установить HUB сюда» (вариант для Windows без отдельного мини-ПК).
@@ -46,6 +51,6 @@
 ## Готово, когда
 - `npm test`, `npm run typecheck`, `npm run build` зелёные; новые части покрыты тестами.
 - Пробная сборка APK и ПК-установщика через `workflow_dispatch` проходит.
-- После «да» пользователя: выпуски `mobile-v0.1.0` и `desktop-v0.1.x` на GitHub, страница https://ts-cabinet.pages.dev/#/apps показывает рабочие кнопки скачивания.
+- После «да» пользователя: выпуски `mobile-v0.1.0` ~~и `desktop-v0.1.x`~~ на GitHub, страница https://ts-cabinet.pages.dev/#/apps показывает рабочие кнопки скачивания.
 - В `README.md` раздел «Как выпустить новую версию» (одна команда на каждый вид).
 - Пользователю — короткий отчёт: что можно скачать, по каким ссылкам, что он должен сделать сам (секреты подписи).

@@ -1,7 +1,8 @@
 // Cloudflare Pages Function: short download links of the cabinet site,
-// https://ts-cabinet.pages.dev/download/windows | linux | android | minipc.
+// https://ts-cabinet.pages.dev/download/android | minipc.
 // Each redirects to the latest file in GitHub Releases, so one link stays valid across versions and
-// can be sent in a chat or put on a QR code. No file yet or GitHub unreachable → the download page.
+// can be sent in a chat or put on a QR code. No file yet, GitHub unreachable or a kind there is no
+// file for (the dropped PC app's old windows and linux links) → the download page.
 import { buildReleaseCatalog, downloadAssetFor, releasesApiUrl } from '../../../../packages/domain/src/releases.ts';
 import type { GithubRelease } from '../../../../packages/domain/src/releases.ts';
 

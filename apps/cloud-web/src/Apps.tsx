@@ -7,12 +7,9 @@ import {
   MINIPC_COMMAND_STEPS,
   MINIPC_GUIDE_URL,
   MINIPC_IMAGE_STEPS,
-  PLATFORM_NAME,
+  WINDOWS_HUB_GUIDE_URL,
   assetFileText,
-  assetLinkText,
-  computerDownload,
   downloadPath,
-  computerSteps,
   detectPlatform,
   downloadCards,
   releaseVersionText,
@@ -24,11 +21,12 @@ import { useLatestRelease } from './releases.ts';
 import type { ReleaseState } from './releases.ts';
 
 /**
- * «Скачать приложение» (#/apps): the cash-desk app for Windows, the owner app
- * for Android, the USB image of the club's mini-PC (with the one-command
- * install as the alternative) and the cabinet on the iPhone home screen. The
- * visitor's device goes first. Files live in GitHub Releases; the cards, their
- * order and texts are shared with the hall screens through @bills/domain.
+ * «Скачать приложение» (#/apps): the owner app for Android, the USB image of
+ * the club's mini-PC (with the one-command install as the alternative) and the
+ * cabinet on the iPhone home screen. No card for the cash-desk computer: the
+ * cash desk runs in the browser. The visitor's phone goes first. Files live in
+ * GitHub Releases; the cards, their order and texts are shared with the hall
+ * screens through @bills/domain.
  * Open without signing in too — the owner may land here from a fresh phone.
  */
 
@@ -53,7 +51,6 @@ const PHONE_PATH =
   'M7.5 2.5h9a1.5 1.5 0 0 1 1.5 1.5v16a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 20V4a1.5 1.5 0 0 1 1.5-1.5z M11 18.5h2';
 
 const ICON_PATHS: Record<DownloadCard | 'download', string> = {
-  computer: 'M3 4.5h18v11.5H3z M8.5 20h7 M12 16v4',
   android: PHONE_PATH,
   ios: PHONE_PATH,
   minipc: 'M4.5 7.5h15a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 15V9a1.5 1.5 0 0 1 1.5-1.5z M6.5 12h4 M16.5 12h1',
@@ -234,21 +231,6 @@ function Download({
   );
 }
 
-function OtherFiles({ assets }: { assets: ReleaseAsset[] }) {
-  if (assets.length === 0) return null;
-  return (
-    <ul className="dl-others" aria-label="Другие версии">
-      {assets.map((a) => (
-        <li key={a.url}>
-          <a href={a.url} download>
-            {assetLinkText(a)}
-          </a>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function IosCard({ current, wide }: { current: boolean; wide: boolean }) {
   const standalone = isStandalone();
   const address = `${location.origin}/`;
@@ -298,48 +280,21 @@ export function AppsPage({ signedIn }: { signedIn: boolean }) {
   const state = useLatestRelease();
   const platform = devicePlatform();
   const catalog = state.status === 'ok' ? state.release : null;
-  const { order, current } = downloadCards(platform, catalog);
+  const { order, current } = downloadCards(platform);
   const onComputer = platform === 'windows' || platform === 'linux' || platform === 'mac';
   // The device's card spans the row; an odd card left over at the end spans it too.
   const rest = order.length - (current ? 1 : 0);
   const isWide = (card: DownloadCard, i: number) => card === current || (i === order.length - 1 && rest % 2 === 1);
 
-  const computer = computerDownload(catalog, platform);
   // Short links /download/<kind> are a Cloudflare Pages Function: not on the GitHub Pages copy.
   const shortLink = (kind: DownloadKind) =>
     location.hostname.endsWith('github.io') || location.hostname === 'localhost' ? null : `${location.origin}${downloadPath(kind)}`;
-  const system = computer.primary?.platform ?? 'windows';
   const apk = catalog?.android[0];
   const image = catalog?.minipc[0];
   // Known to have no image (not just still loading or unreachable): the command is the way for now.
   const noImage = !image && (state.status === 'ok' || state.status === 'none');
 
   const cards: Record<DownloadCard, (wide: boolean) => ReactNode> = {
-    computer: (wide) => (
-      <Card
-        key="computer"
-        card="computer"
-        kicker={DOWNLOAD_TEXT.computer.kicker}
-        title={PLATFORM_NAME[system]}
-        current={current === 'computer'}
-        wide={wide}
-        main={
-          <>
-            <p className="dl-lead">{DOWNLOAD_TEXT.computer.lead}</p>
-            <Download
-              state={state}
-              asset={computer.primary}
-              release={catalog?.desktopRelease ?? null}
-              label={`Скачать для ${PLATFORM_NAME[system]}`}
-              soon={DOWNLOAD_TEXT.computer.soon}
-              share={computer.primary ? shortLink(computer.primary.platform === 'linux' ? 'linux' : 'windows') : null}
-            />
-            <OtherFiles assets={computer.others} />
-          </>
-        }
-        more={<Steps steps={computerSteps(system)} />}
-      />
-    ),
     android: (wide) => (
       <Card
         key="android"
@@ -421,9 +376,14 @@ export function AppsPage({ signedIn }: { signedIn: boolean }) {
               <Steps steps={MINIPC_COMMAND_STEPS} />
             </div>
             <p className="dl-note">
-              {DOWNLOAD_TEXT.minipc.windows}{' '}
               <a className="dl-inline-link" href={MINIPC_GUIDE_URL} target="_blank" rel="noreferrer">
                 {DOWNLOAD_TEXT.minipc.guide}
+              </a>
+            </p>
+            <p className="dl-note">
+              {DOWNLOAD_TEXT.minipc.windows}{' '}
+              <a className="dl-inline-link" href={WINDOWS_HUB_GUIDE_URL} target="_blank" rel="noreferrer">
+                {DOWNLOAD_TEXT.minipc.windowsGuide}
               </a>
             </p>
           </>
@@ -442,7 +402,7 @@ export function AppsPage({ signedIn }: { signedIn: boolean }) {
             {signedIn ? '← К обзору' : '← Войти в кабинет'}
           </a>
           <h2>Скачать приложение</h2>
-          <p className="muted">Программы TS для компьютера кассы, телефона владельца и мини-ПК клуба.</p>
+          <p className="muted">Касса работает в браузере. Здесь — приложение для телефона владельца и образ для мини-ПК.</p>
         </div>
       </header>
       {state.status === 'error' && (

@@ -373,7 +373,8 @@ jobs:
             fi
           } > "$RUNNER_TEMP/release-notes.md"
 
-      # make_latest: false — «latest» stays with the PC app: its auto-update reads releases/latest (desktop.yml).
+      # make_latest: false — nothing reads releases/latest: the download pages take the list of releases and
+      # pick each kind by its tag (packages/domain/src/releases.ts), so a phone release need not be «Latest».
       - name: GitHub release
         uses: softprops/action-gh-release@v2
         with:
