@@ -1,7 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { TrialStats } from '../src/trial.ts';
-import { cleanTrialStats, TRIAL_ENDED_MESSAGE, TRIAL_EXPIRED_MESSAGE, trialStatus, trialTerms, validateTrialStats } from '../src/trial.ts';
+import {
+  cleanTrialStats,
+  TRIAL_ENDED_MESSAGE,
+  TRIAL_EXPIRED_MESSAGE,
+  trialCalendarDay,
+  trialDayEnd,
+  trialEndDate,
+  trialEndDateRange,
+  trialStartedAt,
+  trialStatus,
+  trialTerms,
+  trialTimeZone,
+  validateTrialStats,
+} from '../src/trial.ts';
+
+const DAY = 86_400_000;
 
 const STATS: TrialStats = {
   ordersTotal: 12,
@@ -76,4 +91,53 @@ test('trialTerms: a message only when the trial is over', () => {
   assert.deepEqual(trialTerms({ status: 'active', endsAt: 10 }, 10), { status: 'expired', endsAt: 10, message: TRIAL_EXPIRED_MESSAGE });
   assert.deepEqual(trialTerms({ status: 'ended', endsAt: 3 }, 5), { status: 'ended', endsAt: 3, message: TRIAL_ENDED_MESSAGE });
   assert.equal(TRIAL_ENDED_MESSAGE, 'Пробный период завершён. Свяжитесь с TS, чтобы продолжить.');
+});
+
+test('trialStartedAt: the browser start, never in the future, at most 60 days back; now when missing', () => {
+  const now = Date.UTC(2026, 10, 2, 7);
+  assert.equal(trialStartedAt(undefined, now), now);
+  assert.equal(trialStartedAt(null, now), now);
+  assert.equal(trialStartedAt(now - 2 * DAY, now), now - 2 * DAY);
+  assert.equal(trialStartedAt(now - 2 * DAY + 0.7, now), now - 2 * DAY, 'whole ms');
+  assert.equal(trialStartedAt(now + 5 * DAY, now), now, 'a clock ahead does not start the trial in the future');
+  assert.equal(trialStartedAt(now - 60 * DAY, now), now - 60 * DAY);
+  assert.equal(trialStartedAt(now - 400 * DAY, now), now - 60 * DAY);
+  assert.equal(trialStartedAt(0, now), now - 60 * DAY);
+  for (const bad of ['1730000000000', -1, Number.NaN, Number.POSITIVE_INFINITY, {}, [], true]) {
+    assert.equal(trialStartedAt(bad, now), null, String(bad));
+  }
+});
+
+test('trialTimeZone: the trial’s own valid zone, else Almaty', () => {
+  assert.equal(trialTimeZone('Europe/Berlin'), 'Europe/Berlin');
+  assert.equal(trialTimeZone(null), 'Asia/Almaty');
+  assert.equal(trialTimeZone(''), 'Asia/Almaty');
+  assert.equal(trialTimeZone('Mars/Olympus'), 'Asia/Almaty');
+});
+
+test('trialDayEnd: the last millisecond of the calendar day in the zone (DST included)', () => {
+  // Almaty is UTC+5: the 14th ends at 19:00 UTC.
+  assert.equal(trialDayEnd('2026-11-14', 'Asia/Almaty'), Date.UTC(2026, 10, 14, 19) - 1);
+  assert.equal(trialCalendarDay(trialDayEnd('2026-11-14', 'Asia/Almaty'), 'Asia/Almaty'), '2026-11-14');
+  assert.equal(trialCalendarDay(trialDayEnd('2026-11-14', 'Asia/Almaty') + 1, 'Asia/Almaty'), '2026-11-15');
+  assert.equal(trialDayEnd('2026-11-14', 'Pacific/Honolulu'), Date.UTC(2026, 10, 15, 10) - 1);
+  // Berlin leaves summer time on 25 Oct 2026: the 24th ends at 22:00 UTC, the 25th at 23:00 UTC.
+  assert.equal(trialDayEnd('2026-10-24', 'Europe/Berlin'), Date.UTC(2026, 9, 24, 22) - 1);
+  assert.equal(trialDayEnd('2026-10-25', 'Europe/Berlin'), Date.UTC(2026, 9, 25, 23) - 1);
+  assert.equal(trialDayEnd('2026-12-31', 'Asia/Almaty'), Date.UTC(2026, 11, 31, 19) - 1, 'across the year');
+});
+
+test('trialEndDate: today … today + 90 days in the trial’s zone, a real calendar date', () => {
+  // 07:00 UTC on 2 Nov: already 12:00 in Almaty, still 21:00 on 1 Nov in Honolulu.
+  const now = Date.UTC(2026, 10, 2, 7);
+  assert.deepEqual(trialEndDateRange(now, 'Asia/Almaty'), { min: '2026-11-02', max: '2027-01-31' });
+  assert.deepEqual(trialEndDateRange(now, 'Pacific/Honolulu'), { min: '2026-11-01', max: '2027-01-30' });
+  assert.equal(trialEndDate('2026-11-02', now, 'Asia/Almaty'), '2026-11-02');
+  assert.equal(trialEndDate('2027-01-31', now, 'Asia/Almaty'), '2027-01-31');
+  assert.equal(trialEndDate('2027-02-01', now, 'Asia/Almaty'), null);
+  assert.equal(trialEndDate('2026-11-01', now, 'Asia/Almaty'), null, 'yesterday in Almaty');
+  assert.equal(trialEndDate('2026-11-01', now, 'Pacific/Honolulu'), '2026-11-01', 'still today in Honolulu');
+  for (const bad of ['2026-11-31', '2026-13-01', '14.11.2026', '2026-11-5', '', null, undefined, 20261114]) {
+    assert.equal(trialEndDate(bad, now, 'Asia/Almaty'), null, String(bad));
+  }
 });

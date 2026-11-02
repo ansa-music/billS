@@ -5,17 +5,22 @@ import {
   agoText,
   bytesText,
   effectiveStatus,
+  endDateDefault,
+  endDateRange,
+  endDateText,
   isWorkingNow,
   lastDays,
   lastOrderText,
   lastSeenText,
   latinName,
+  parseEndDate,
   parseExtendDays,
   trialBackup,
   trialBackupFileName,
   trialDate,
   trialDay,
   trialDaysLeft,
+  trialEndText,
   trialTermText,
   trialTone,
 } from '../src/trials.ts';
@@ -30,6 +35,7 @@ function trial(over: Partial<TrialView> = {}): TrialView {
     id: 't1',
     venue: 'Кофе Тау',
     managerName: 'Айгерим',
+    timezone: 'Asia/Almaty',
     startedAt: NOW - 3 * DAY,
     endsAt: NOW + 11 * DAY,
     status: 'active',
@@ -80,6 +86,38 @@ test('last activity', () => {
   assert.equal(lastOrderText(null, NOW), 'заказов ещё не было');
   assert.equal(lastOrderText(NOW - MIN, NOW), 'последний заказ только что');
   assert.equal(lastOrderText(NOW - 40 * MIN, NOW), 'последний заказ 40 мин назад');
+});
+
+test('dates in the trial’s own zone; the end in words', () => {
+  // 18:30 UTC on 1 Nov is already 2 Nov in Almaty, still 1 Nov in Honolulu.
+  const at = Date.UTC(2026, 10, 1, 18, 30);
+  assert.equal(trialDate(at), '1 ноября');
+  assert.equal(trialDate(at, 'Asia/Almaty'), '1 ноября');
+  assert.equal(trialDate(Date.UTC(2026, 10, 1, 19, 30), 'Asia/Almaty'), '2 ноября');
+  assert.equal(trialDate(Date.UTC(2026, 10, 1, 19, 30), 'Pacific/Honolulu'), '1 ноября');
+  assert.equal(trialTermText(trial({ timezone: 'Pacific/Honolulu', endsAt: Date.UTC(2026, 10, 9, 5) }), NOW), 'осталось 11 дней · до 8 ноября');
+  // A date set in the cabinet runs through the whole day; a 14-day term ends at the hour it began.
+  assert.equal(trialEndText(trial({ endsAt: Date.UTC(2026, 10, 14, 19) - 1 })), '14 ноября, до конца дня');
+  assert.equal(trialEndText(trial({ endsAt: Date.UTC(2026, 10, 12, 9, 30) })), '12 ноября, 14:30');
+  assert.equal(trialEndText(trial({ timezone: 'Pacific/Honolulu', endsAt: Date.UTC(2026, 10, 15, 10) - 1 })), '14 ноября, до конца дня');
+});
+
+test('«Дата окончания»: today … today + 90 days in the trial’s zone', () => {
+  assert.deepEqual(endDateRange(NOW, 'Asia/Almaty'), { min: '2026-10-29', max: '2027-01-27' });
+  // 07:00 UTC is 21:00 of the day before in Honolulu.
+  assert.deepEqual(endDateRange(NOW, 'Pacific/Honolulu'), { min: '2026-10-28', max: '2027-01-26' });
+  assert.equal(parseEndDate(' 2026-11-14 ', NOW, 'Asia/Almaty'), '2026-11-14');
+  assert.equal(parseEndDate('2026-10-29', NOW, 'Asia/Almaty'), '2026-10-29');
+  assert.equal(parseEndDate('2026-10-28', NOW, 'Asia/Almaty'), null);
+  assert.equal(parseEndDate('2026-10-28', NOW, 'Pacific/Honolulu'), '2026-10-28');
+  assert.equal(parseEndDate('2027-01-28', NOW, 'Asia/Almaty'), null);
+  assert.equal(parseEndDate('', NOW, 'Asia/Almaty'), null);
+  // The picker opens at the trial's last day, or today when that day can no longer be chosen.
+  assert.equal(endDateDefault(trial(), NOW), '2026-11-09');
+  assert.equal(endDateDefault(trial({ endsAt: NOW - 3 * DAY }), NOW), '2026-10-29');
+  assert.equal(endDateDefault(trial({ endsAt: NOW + 200 * DAY }), NOW), '2026-10-29');
+  assert.equal(endDateText('2026-11-14'), '14 ноября');
+  assert.equal(endDateText('2027-01-01'), '1 января');
 });
 
 test('custom extension days', () => {

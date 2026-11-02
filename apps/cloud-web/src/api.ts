@@ -415,6 +415,11 @@ export async function extendTrial(id: string, days: number): Promise<TrialView> 
   return SUPABASE_MODE ? (await sb()).extendTrial(id, days) : noTrials();
 }
 
+/** The trial runs through `date` (YYYY-MM-DD, today..today+90 in its zone); active again if it was over. */
+export async function setTrialEndDate(id: string, date: string): Promise<TrialView> {
+  return SUPABASE_MODE ? (await sb()).setTrialEndDate(id, date) : noTrials();
+}
+
 export async function endTrial(id: string): Promise<TrialView> {
   return SUPABASE_MODE ? (await sb()).endTrial(id) : noTrials();
 }

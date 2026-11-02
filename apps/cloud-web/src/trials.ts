@@ -3,7 +3,7 @@
  * runs them as is) — the trial's term, last activity and the backup file in words and shapes.
  */
 import type { TrialStats, TrialStatus, TrialView } from '@bills/domain';
-import { TRIAL_EXTEND_MAX_DAYS, formatMoney } from '@bills/domain';
+import { TRIAL_DEFAULT_TIMEZONE, TRIAL_EXTEND_MAX_DAYS, formatMoney, trialCalendarDay, trialDayEnd, trialEndDate, trialEndDateRange } from '@bills/domain';
 
 export type { TrialStats, TrialStatus, TrialView } from '@bills/domain';
 
@@ -15,8 +15,8 @@ export interface TrialSnapshot {
 
 const DAY_MS = 86_400_000;
 const MINUTE_MS = 60_000;
-/** Trials are coffee shops in Kazakhstan: dates and days are Almaty's. */
-export const TRIAL_ZONE = 'Asia/Almaty';
+/** Trials are coffee shops in Kazakhstan: dates and days are Almaty's unless the trial has its own zone. */
+export const TRIAL_ZONE = TRIAL_DEFAULT_TIMEZONE;
 export const TRIAL_CURRENCY = 'KZT';
 /** «Сейчас работает» when the trial reported within this window. */
 export const WORKING_WINDOW_MS = 10 * MINUTE_MS;
@@ -45,19 +45,54 @@ export function trialMoney(minor: number): string {
   return formatMoney(minor, TRIAL_CURRENCY);
 }
 
-const dayMonth = new Intl.DateTimeFormat('ru-RU', { timeZone: TRIAL_ZONE, day: 'numeric', month: 'long' });
-const isoParts = new Intl.DateTimeFormat('en-CA', { timeZone: TRIAL_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' });
+const dayMonthFormats = new Map<string, Intl.DateTimeFormat>();
+const clockFormats = new Map<string, Intl.DateTimeFormat>();
 
-/** «12 ноября» in Almaty. */
-export function trialDate(ms: number): string {
-  return dayMonth.format(ms);
+function formatIn(cache: Map<string, Intl.DateTimeFormat>, timeZone: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  let f = cache.get(timeZone);
+  if (!f) {
+    f = new Intl.DateTimeFormat('ru-RU', { timeZone, ...options });
+    cache.set(timeZone, f);
+  }
+  return f;
+}
+
+/** «12 ноября» in the trial's zone (Almaty by default). */
+export function trialDate(ms: number, timeZone: string = TRIAL_ZONE): string {
+  return formatIn(dayMonthFormats, timeZone, { day: 'numeric', month: 'long' }).format(ms);
 }
 
 /** YYYY-MM-DD of an instant in Almaty. */
 export function trialDay(ms: number): string {
-  const parts = isoParts.formatToParts(ms);
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
-  return `${get('year')}-${get('month')}-${get('day')}`;
+  return trialCalendarDay(ms, TRIAL_ZONE);
+}
+
+/** «12 ноября, до конца дня» when the trial runs through the whole day (a date set in the cabinet), else «12 ноября, 14:30». */
+export function trialEndText(t: Pick<TrialView, 'endsAt' | 'timezone'>): string {
+  const date = trialDate(t.endsAt, t.timezone);
+  if (trialDayEnd(trialCalendarDay(t.endsAt, t.timezone), t.timezone) === t.endsAt) return `${date}, до конца дня`;
+  return `${date}, ${formatIn(clockFormats, t.timezone, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(t.endsAt)}`;
+}
+
+/** The «Дата окончания» picker: today … today + 90 days in the trial's zone (YYYY-MM-DD, for min/max). */
+export function endDateRange(now: number, timeZone: string): { min: string; max: string } {
+  return trialEndDateRange(now, timeZone);
+}
+
+/** What the picker starts at: the trial's current last day when it can be chosen, else today. */
+export function endDateDefault(t: Pick<TrialView, 'endsAt' | 'timezone'>, now: number): string {
+  return trialEndDate(trialCalendarDay(t.endsAt, t.timezone), now, t.timezone) ?? trialCalendarDay(now, t.timezone);
+}
+
+/** The picker's value → the day to send, or null when it is empty or outside the range. */
+export function parseEndDate(text: string, now: number, timeZone: string): string | null {
+  return trialEndDate(text.trim(), now, timeZone);
+}
+
+/** «14 ноября» of a picked YYYY-MM-DD, for messages (the day as written, no zone involved). */
+export function endDateText(day: string): string {
+  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+  return trialDate(Date.UTC(y, m - 1, d, 12), 'UTC');
 }
 
 /** The status as the screen should treat it: an «active» trial past its end is already over. */
@@ -85,12 +120,12 @@ export function trialTone(t: Pick<TrialView, 'status' | 'endsAt'>, now: number):
 }
 
 /** «осталось 5 дней · до 12 ноября» / «последний день · до 12 ноября» / «завершена досрочно» / «истекла 12 ноября». */
-export function trialTermText(t: Pick<TrialView, 'status' | 'endsAt'>, now: number): string {
+export function trialTermText(t: Pick<TrialView, 'status' | 'endsAt'> & Partial<Pick<TrialView, 'timezone'>>, now: number): string {
   const status = effectiveStatus(t, now);
   if (status === 'ended') return 'завершена досрочно';
-  if (status === 'expired') return `истекла ${trialDate(t.endsAt)}`;
+  if (status === 'expired') return `истекла ${trialDate(t.endsAt, t.timezone)}`;
   const left = trialDaysLeft(t, now);
-  const until = `до ${trialDate(t.endsAt)}`;
+  const until = `до ${trialDate(t.endsAt, t.timezone)}`;
   if (left <= 1) return `последний день · ${until}`;
   return `${plural(left, 'остался', 'осталось', 'осталось')} ${daysText(left)} · ${until}`;
 }

@@ -1,13 +1,14 @@
 /**
  * The coffee shop's browser trial in the cloud (Supabase only: migration 20261029000000_trials.sql).
  * The rules and types are packages/domain/src/trial.ts; here — storage, the public calls of the Edge
- * Function `trial` (start, report, terms) and the platform's calls of `platform` (list, extend, end,
- * snapshot). Runtime-neutral (node:crypto only). Times are timestamptz in the table, ms in the API.
+ * Function `trial` (start, report, terms) and the platform's calls of `platform` (list, extend, end date,
+ * end, snapshot). Runtime-neutral (node:crypto only). Times are timestamptz in the table, ms in the API.
  */
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { PlatformMe, TrialStartResponse, TrialStats, TrialTerms, TrialView } from '@bills/domain';
 import {
   cleanTrialStats,
+  isValidTimeZone,
   TRIAL_DEFAULT_DAYS,
   TRIAL_EXTEND_MAX_DAYS,
   TRIAL_NAME_MAX,
@@ -15,8 +16,12 @@ import {
   TRIAL_SNAPSHOT_MAX_BYTES,
   TRIAL_TIMEZONE_MAX,
   TRIAL_VENUE_MAX,
+  trialDayEnd,
+  trialEndDate,
+  trialStartedAt,
   trialStatus,
   trialTerms,
+  trialTimeZone,
   validateTrialStats,
 } from '@bills/domain';
 import type { SqlDriver } from './db/driver.ts';
@@ -43,6 +48,7 @@ interface TrialRow {
   id: string;
   venue: string;
   manager_name: string;
+  timezone: string | null;
   status: string;
   started_at: number | string;
   ends_at: number | string;
@@ -52,7 +58,7 @@ interface TrialRow {
   snapshot_bytes: number | string | null;
 }
 
-const VIEW_COLUMNS = `id::text AS id, venue, manager_name, status, ${ms('started_at')} AS started_at, ${ms('ends_at')} AS ends_at,
+const VIEW_COLUMNS = `id::text AS id, venue, manager_name, timezone, status, ${ms('started_at')} AS started_at, ${ms('ends_at')} AS ends_at,
   ${ms('last_seen_at')} AS last_seen_at, stats, ${ms('snapshot_at')} AS snapshot_at, snapshot_bytes`;
 
 const num = (v: number | string | null): number | null => (v === null ? null : Number(v));
@@ -63,6 +69,7 @@ function viewOf(r: TrialRow, now: number): TrialView {
     id: r.id,
     venue: r.venue,
     managerName: r.manager_name,
+    timezone: trialTimeZone(r.timezone),
     startedAt: Number(r.started_at),
     endsAt,
     status: trialStatus({ status: r.status, endsAt }, now),
@@ -102,24 +109,33 @@ const optionalText = (v: unknown, max: number, field: string): string => {
 // ---------------------------------------------------------------------------
 // The public side: the trial itself
 
-/** POST /trial/start: a new trial for TRIAL_DEFAULT_DAYS; the token is returned once and kept as sha256. */
+/**
+ * POST /trial/start: a trial of TRIAL_DEFAULT_DAYS counted from when it began in the browser
+ * (`startedAt`, clamped to the last TRIAL_BACKDATE_MAX_DAYS; now for a page that sends none), so
+ * registering late or again adds no days — one whose end has passed is simply expired.
+ * The token is returned once and kept as sha256.
+ */
 export async function startTrial(db: SqlDriver, now: number, raw: unknown, ip: string): Promise<TrialStartResponse> {
   if (!isObject(raw)) throw new CloudError(400, 'BAD_REQUEST', 'Нужно название заведения');
   const venue = typeof raw.venue === 'string' ? raw.venue.trim() : '';
   if (!venue || venue.length > TRIAL_VENUE_MAX) throw invalid('VENUE_INVALID', `Название заведения: от 1 до ${TRIAL_VENUE_MAX} символов`);
   const managerName = optionalText(raw.managerName, TRIAL_NAME_MAX, 'managerName');
-  const timezone = optionalText(raw.timezone, TRIAL_TIMEZONE_MAX, 'timezone') || null;
+  // An unknown zone is not worth refusing the start over: the trial's days are then Almaty's.
+  const zone = optionalText(raw.timezone, TRIAL_TIMEZONE_MAX, 'timezone');
+  const timezone = zone && isValidTimeZone(zone) ? zone : null;
+  const startedAt = trialStartedAt(raw.startedAt, now);
+  if (startedAt === null) throw invalid('STARTED_AT_INVALID', 'startedAt: время начала пробного периода в мс');
   await countAttempt(db, now, `start:ip:${ip}`, TRIAL_RATE.startsPerIpHour, 'Слишком много пробных версий с этого адреса. Попробуйте через час');
 
   const id = randomUUID();
   const token = randomBytes(32).toString('base64url');
-  const endsAt = now + TRIAL_DEFAULT_DAYS * DAY_MS;
+  const endsAt = startedAt + TRIAL_DEFAULT_DAYS * DAY_MS;
   await db.run(
     `INSERT INTO trials (id, venue, manager_name, timezone, token_hash, status, started_at, ends_at, last_seen_at, created_ip)
      VALUES (?::uuid, ?, ?, ?, ?, 'active', ?::timestamptz, ?::timestamptz, ?::timestamptz, ?)`,
-    [id, venue, managerName, timezone, sha256(token), iso(now), iso(endsAt), iso(now), ip],
+    [id, venue, managerName, timezone, sha256(token), iso(startedAt), iso(endsAt), iso(now), ip],
   );
-  return { id, token, startedAt: now, endsAt, status: 'active' };
+  return { id, token, startedAt, ...trialTerms({ status: 'active', endsAt }, now) };
 }
 
 /** The trial `id` whose token is `token`: 404 for an unknown id, 401 for a missing or wrong token. */
@@ -195,6 +211,27 @@ export async function extendTrial(db: SqlDriver, now: number, me: PlatformMe, id
   return db.transaction(async (tx) => {
     const row = await trialRow(tx, id);
     const endsAt = Math.max(Number(row.ends_at), now) + days * DAY_MS;
+    await tx.run(`UPDATE trials SET status = 'active', ends_at = ?::timestamptz WHERE id = ?::uuid`, [iso(endsAt), row.id]);
+    return viewOf(await trialRow(tx, row.id), now);
+  });
+}
+
+/**
+ * { date: YYYY-MM-DD }: the trial runs through that calendar day of its own zone (endsAt = the day's
+ * last millisecond there). Today … today + TRIAL_EXTEND_MAX_DAYS, so it may shorten as well as extend;
+ * the end is always ahead, so an ended or expired trial is active again.
+ */
+export async function setTrialEndDate(db: SqlDriver, now: number, me: PlatformMe, id: string, raw: unknown): Promise<TrialView> {
+  requirePlatformAction(me, 'clients.edit');
+  const date = isObject(raw) ? raw.date : undefined;
+  return db.transaction(async (tx) => {
+    const row = await trialRow(tx, id);
+    const zone = trialTimeZone(row.timezone);
+    const day = trialEndDate(date, now, zone);
+    if (day === null) {
+      throw invalid('DATE_INVALID', `Дата окончания: с сегодняшнего дня и не дальше чем на ${TRIAL_EXTEND_MAX_DAYS} дней вперёд`);
+    }
+    const endsAt = trialDayEnd(day, zone);
     await tx.run(`UPDATE trials SET status = 'active', ends_at = ?::timestamptz WHERE id = ?::uuid`, [iso(endsAt), row.id]);
     return viewOf(await trialRow(tx, row.id), now);
   });

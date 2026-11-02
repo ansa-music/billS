@@ -1,7 +1,7 @@
-/** «Пробные версии» of the platform cabinet: browser trials of coffee shops — watch, extend, end, download. */
+/** «Пробные версии» of the platform cabinet: browser trials of coffee shops — watch, extend, set the end date, end, download. */
 import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { CloudRequestError, endTrial, extendTrial, fetchTrialSnapshot, listTrials } from './api.ts';
+import { CloudRequestError, endTrial, extendTrial, fetchTrialSnapshot, listTrials, setTrialEndDate } from './api.ts';
 import { CopyButton } from './cabinet-ui.tsx';
 import { formatDayLabel } from './format.ts';
 import { usePoll } from './hooks.ts';
@@ -16,15 +16,20 @@ import {
   bytesText,
   daysText,
   effectiveStatus,
+  endDateDefault,
+  endDateRange,
+  endDateText,
   isWorkingNow,
   lastDays,
   lastOrderText,
   lastSeenText,
   ordersText,
+  parseEndDate,
   parseExtendDays,
   trialBackup,
   trialBackupFileName,
   trialDate,
+  trialEndText,
   trialMoney,
   trialTermText,
   trialTone,
@@ -63,7 +68,7 @@ function TrialCard({ trial, now, selected, onOpen }: { trial: TrialView; now: nu
           <TrialChip trial={trial} now={now} />
         </span>
         <span className="muted trial-line">
-          {trial.managerName || 'управляющий не указан'} · начал(а) {trialDate(trial.startedAt)}
+          {trial.managerName || 'управляющий не указан'} · начал(а) {trialDate(trial.startedAt, trial.timezone)}
         </span>
         <span className="trial-line">{trialTermText(trial, now)}</span>
         <span className="trial-line">
@@ -157,9 +162,13 @@ function TrialDetail({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [custom, setCustom] = useState('');
+  const [endDate, setEndDate] = useState(() => endDateDefault(trial, now));
   const [confirmEnd, setConfirmEnd] = useState(false);
   const s = trial.stats;
   const status = effectiveStatus(trial, now);
+  const endRange = endDateRange(now, trial.timezone);
+  // After «Продлить» (or a poll that brings another end) the picker shows the new last day.
+  useEffect(() => setEndDate(endDateDefault(trial, Date.now())), [trial.endsAt, trial.timezone]);
 
   async function act(fn: () => Promise<string | null>) {
     if (busy) return;
@@ -193,6 +202,21 @@ function TrialDetail({
     }
     setCustom('');
     extend(days);
+  }
+
+  function saveEndDate(e: FormEvent) {
+    e.preventDefault();
+    const date = parseEndDate(endDate, Date.now(), trial.timezone);
+    if (date === null) {
+      setDone(null);
+      setError(`Выберите дату с ${endDateText(endRange.min)} по ${endDateText(endRange.max)}`);
+      return;
+    }
+    void act(async () => {
+      const next = await setTrialEndDate(trial.id, date);
+      onChanged(next);
+      return `Пробный период до ${endDateText(date)} включительно.`;
+    });
   }
 
   function end() {
@@ -241,7 +265,11 @@ function TrialDetail({
         </div>
         <div>
           <dt>Начало</dt>
-          <dd>{trialDate(trial.startedAt)}</dd>
+          <dd>{trialDate(trial.startedAt, trial.timezone)}</dd>
+        </div>
+        <div>
+          <dt>Окончание</dt>
+          <dd>{status === 'ended' ? `завершена ${trialDate(trial.endsAt, trial.timezone)}` : trialEndText(trial)}</dd>
         </div>
         <div>
           <dt>Последняя связь</dt>
@@ -352,6 +380,16 @@ function TrialDetail({
               </button>
             </form>
           </div>
+          <form className="row wrap" onSubmit={saveEndDate} noValidate>
+            <label className="day-pick">
+              <span className="muted">Дата окончания</span>
+              <input type="date" min={endRange.min} max={endRange.max} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            </label>
+            <button type="submit" className="btn" disabled={busy || endDate === ''}>
+              Установить дату
+            </button>
+            <span className="hint">Касса работает до конца этого дня по времени кофейни.</span>
+          </form>
           <div className="row wrap">
             <button type="button" className="btn" disabled={busy} onClick={download}>
               Скачать копию данных

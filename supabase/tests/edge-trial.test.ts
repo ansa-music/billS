@@ -82,6 +82,7 @@ test('trial: start → report → terms; the token is stored only as sha256', as
       id: s.id,
       venue: 'Кофейня «Зерно»',
       managerName: 'Айгерим',
+      timezone: 'Asia/Almaty',
       startedAt: MONDAY_NOON,
       endsAt: MONDAY_NOON + 14 * DAY,
       status: 'active',
@@ -170,6 +171,7 @@ test('trial: expired is computed; the platform owner extends and ends; a non-pla
     for (const [method, path, body] of [
       ['GET', '/platform/trials', undefined],
       ['POST', `/platform/trials/${s.id}/extend`, { days: 7 }],
+      ['POST', `/platform/trials/${s.id}/end-date`, { date: '2026-11-01' }],
       ['POST', `/platform/trials/${s.id}/end`, undefined],
       ['GET', `/platform/trials/${s.id}/snapshot`, undefined],
     ] as const) {
@@ -177,8 +179,12 @@ test('trial: expired is computed; the platform owner extends and ends; a non-pla
       assert.equal(r.status, 401, `${method} ${path} ${JSON.stringify(headers)}`);
     }
   }
-  const [still] = await e.s.db.all<{ status: string }>('SELECT status FROM trials WHERE id = ?::uuid', [s.id]);
+  const [still] = await e.s.db.all<{ status: string; ends_at: number }>(
+    'SELECT status, (extract(epoch FROM ends_at) * 1000)::bigint AS ends_at FROM trials WHERE id = ?::uuid',
+    [s.id],
+  );
   assert.equal(still!.status, 'active');
+  assert.equal(Number(still!.ends_at), MONDAY_NOON + 14 * DAY, 'nothing changed by the refused calls');
 
   e.clock.now = MONDAY_NOON + 14 * DAY;
   const expired = await e.call(handleTrial, 'GET', `/trial/terms?id=${s.id}`, { headers: s.auth });
@@ -274,4 +280,157 @@ test('trial: the snapshot goes up with a report and comes back to the platform b
   assert.equal(ok.status, 200, JSON.stringify(ok.body));
   const [stored] = await e.s.db.all<{ n: number }>('SELECT snapshot_bytes AS n FROM trials WHERE id = ?::uuid', [s.id]);
   assert.equal(stored!.n, TRIAL_SNAPSHOT_MAX_BYTES);
+});
+
+async function rowOf(e: EdgeTest, id: string): Promise<{ startedAt: number; endsAt: number; timezone: string | null }> {
+  const [r] = await e.s.db.all<{ started_at: number; ends_at: number; timezone: string | null }>(
+    `SELECT (extract(epoch FROM started_at) * 1000)::bigint AS started_at, (extract(epoch FROM ends_at) * 1000)::bigint AS ends_at, timezone
+     FROM trials WHERE id = ?::uuid`,
+    [id],
+  );
+  return { startedAt: Number(r!.started_at), endsAt: Number(r!.ends_at), timezone: r!.timezone };
+}
+
+const trialCount = async (e: EdgeTest): Promise<number> => Number((await e.s.db.all<{ n: number }>('SELECT COUNT(*) AS n FROM trials'))[0]!.n);
+
+test('trial: the 14 days count from the browser’s startedAt (clamped to the last 60 days, never ahead), not from the registration', async (t) => {
+  const e = await edgeTest(t);
+  const venue = 'Кофейня «Зерно»';
+
+  // Began in the browser two days ago, registers only now (offline at first, or opened after an update): 12 days left.
+  const late = await start(e, { venue, timezone: 'Asia/Almaty', startedAt: MONDAY_NOON - 2 * DAY }, '198.51.100.1');
+  assert.deepEqual(late.body, { id: late.id, token: late.token, startedAt: MONDAY_NOON - 2 * DAY, endsAt: MONDAY_NOON + 12 * DAY, status: 'active' });
+  assert.deepEqual(await rowOf(e, late.id), { startedAt: MONDAY_NOON - 2 * DAY, endsAt: MONDAY_NOON + 12 * DAY, timezone: 'Asia/Almaty' });
+  // Registering again (the answer was lost, the link not saved) makes a second row with the same term: no extra days.
+  e.clock.now += 3 * HOUR;
+  const again = await start(e, { venue, startedAt: MONDAY_NOON - 2 * DAY }, '198.51.100.1');
+  assert.notEqual(again.id, late.id);
+  assert.equal(again.body.endsAt, MONDAY_NOON + 12 * DAY);
+  e.clock.now = MONDAY_NOON;
+
+  // A clock ahead cannot start the trial in the future.
+  const ahead = await start(e, { venue, startedAt: MONDAY_NOON + 3 * DAY }, '198.51.100.2');
+  assert.equal(ahead.body.startedAt, MONDAY_NOON);
+  assert.equal(ahead.body.endsAt, MONDAY_NOON + 14 * DAY);
+
+  // An old page sends no startedAt (or null): counted from now.
+  const old = await start(e, { venue, startedAt: null }, '198.51.100.2');
+  assert.equal(old.body.startedAt, MONDAY_NOON);
+  assert.equal(old.body.endsAt, MONDAY_NOON + 14 * DAY);
+
+  // Began 14 days ago or earlier: expired right away — the honest result. Older than 60 days is clamped.
+  const done = await start(e, { venue, startedAt: MONDAY_NOON - 14 * DAY }, '198.51.100.3');
+  assert.deepEqual(done.body, {
+    id: done.id,
+    token: done.token,
+    startedAt: MONDAY_NOON - 14 * DAY,
+    endsAt: MONDAY_NOON,
+    status: 'expired',
+    message: TRIAL_EXPIRED_MESSAGE,
+  });
+  const ancient = await start(e, { venue, startedAt: MONDAY_NOON - 400 * DAY }, '198.51.100.3');
+  assert.equal(ancient.body.startedAt, MONDAY_NOON - 60 * DAY);
+  assert.equal(ancient.body.endsAt, MONDAY_NOON - 46 * DAY);
+  assert.equal(ancient.body.status, 'expired');
+  const terms = await e.call(handleTrial, 'GET', `/trial/terms?id=${ancient.id}`, { headers: ancient.auth });
+  assert.deepEqual(terms.body, { status: 'expired', endsAt: MONDAY_NOON - 46 * DAY, message: TRIAL_EXPIRED_MESSAGE });
+
+  // Not a time: 422 before anything is stored or counted against the address.
+  const before = await trialCount(e);
+  for (const startedAt of ['вчера', '1760000000000', -5, {}, [], true]) {
+    const r = await e.call(handleTrial, 'POST', '/trial/start', { headers: { 'x-forwarded-for': '198.51.100.9' }, body: { venue, startedAt } });
+    assert.equal(r.status, 422, JSON.stringify(startedAt));
+    assert.equal(r.body.error.code, 'STARTED_AT_INVALID');
+  }
+  assert.equal(await trialCount(e), before);
+  for (let i = 0; i < 10; i++) await start(e, { venue: `К${i}`, startedAt: MONDAY_NOON }, '198.51.100.9');
+
+  // The zone is kept only when it is a real one; the cabinet then counts the days in Almaty.
+  const mars = await start(e, { venue: 'Марс', timezone: 'Mars/Olympus' }, '198.51.100.4');
+  assert.equal((await rowOf(e, mars.id)).timezone, null);
+  const owner = await platformToken(e, DEMO_PLATFORM[0].key);
+  const list = await e.call<{ trials: TrialView[] }>(handlePlatform, 'GET', '/platform/trials', { headers: owner });
+  assert.equal(list.body.trials.find((v) => v.id === mars.id)!.timezone, 'Asia/Almaty');
+  assert.equal(list.body.trials.find((v) => v.id === late.id)!.startedAt, MONDAY_NOON - 2 * DAY);
+});
+
+test('trial: the platform sets the end date — through that day in the trial’s zone, today…today+90, shortens and re-activates', async (t) => {
+  // MONDAY_NOON = 12 Oct 2026 07:00 UTC: 12:00 on the 12th in Almaty (UTC+5), 21:00 on the 11th in Honolulu (UTC−10).
+  const e = await edgeTest(t);
+  const almaty = await start(e, { venue: 'Алматы', timezone: 'Asia/Almaty' });
+  const hono = await start(e, { venue: 'Гонолулу', timezone: 'Pacific/Honolulu' });
+  const nozone = await start(e, { venue: 'Без зоны' });
+  const owner = await platformToken(e, DEMO_PLATFORM[0].key);
+  const setDate = (id: string, body: unknown, headers = owner) => e.call(handlePlatform, 'POST', `/platform/platform/trials/${id}/end-date`, { headers, body });
+  const almatyEnd = (y: number, m: number, d: number) => Date.UTC(y, m - 1, d, 19) - 1;
+
+  // Outside today…today+90 in the trial's zone, not a date, no date: 422, nothing changes.
+  for (const body of [{ date: '2026-10-11' }, { date: '2027-01-11' }, { date: '2026-02-30' }, { date: '12.10.2026' }, { date: 20261020 }, {}, { days: 7 }]) {
+    const r = await setDate(almaty.id, body);
+    assert.equal(r.status, 422, JSON.stringify(body));
+    assert.equal(r.body.error.code, 'DATE_INVALID');
+  }
+  assert.equal((await rowOf(e, almaty.id)).endsAt, MONDAY_NOON + 14 * DAY);
+  assert.equal((await setDate('00000000-0000-4000-8000-000000000000', { date: '2026-10-20' })).status, 404);
+  assert.equal((await setDate('not-a-uuid', { date: '2026-10-20' })).status, 404);
+
+  // The far end of the range, then shorter than the 14 days: the trial runs to the end of that Almaty day.
+  const far = await setDate(almaty.id, { date: '2027-01-10' });
+  assert.equal(far.status, 200, JSON.stringify(far.body));
+  assert.equal(far.body.endsAt, almatyEnd(2027, 1, 10));
+  const short = await setDate(almaty.id, { date: '2026-10-20' });
+  assert.equal(short.body.status, 'active');
+  assert.equal(short.body.endsAt, almatyEnd(2026, 10, 20));
+  assert.equal(short.body.timezone, 'Asia/Almaty');
+  assert.equal(short.body.startedAt, MONDAY_NOON, 'the start stays');
+  assert.ok(e.log.some((l) => l.includes('назначил дату окончания') && l.includes(almaty.id)));
+  // The running trial gets the new end with its next report (and from /terms).
+  e.clock.now += HOUR;
+  const rep = await e.call(handleTrial, 'POST', '/trial/report', { headers: almaty.auth, body: { id: almaty.id, stats: STATS } });
+  assert.deepEqual(rep.body, { status: 'active', endsAt: almatyEnd(2026, 10, 20) });
+  // Today is allowed: the last hours of the day.
+  const today = await setDate(almaty.id, { date: '2026-10-12' });
+  assert.equal(today.body.endsAt, almatyEnd(2026, 10, 12));
+  assert.equal(today.body.status, 'active');
+
+  // «Today» and «end of day» are the trial's own: the 11th is still today in Honolulu, already yesterday in Almaty.
+  const h = await setDate(hono.id, { date: '2026-10-11' });
+  assert.equal(h.status, 200, JSON.stringify(h.body));
+  assert.equal(h.body.endsAt, Date.UTC(2026, 9, 12, 10) - 1);
+  assert.equal(h.body.timezone, 'Pacific/Honolulu');
+  assert.equal((await setDate(hono.id, { date: '2027-01-09' })).status, 200);
+  assert.equal((await setDate(hono.id, { date: '2027-01-10' })).status, 422, 'today+91 in Honolulu');
+  // No zone from the browser: Almaty's days.
+  const nz = await setDate(nozone.id, { date: '2026-10-12' });
+  assert.equal(nz.body.endsAt, almatyEnd(2026, 10, 12));
+  assert.equal(nz.body.timezone, 'Asia/Almaty');
+
+  // An ended trial is active again with a date.
+  const ended = await e.call<TrialView>(handlePlatform, 'POST', `/platform/trials/${almaty.id}/end`, { headers: owner });
+  assert.equal(ended.body.status, 'ended');
+  const back = await setDate(almaty.id, { date: '2026-10-30' });
+  assert.equal(back.body.status, 'active');
+  assert.equal(back.body.endsAt, almatyEnd(2026, 10, 30));
+  assert.deepEqual((await e.call(handleTrial, 'GET', `/trial/terms?id=${almaty.id}`, { headers: almaty.auth })).body, {
+    status: 'active',
+    endsAt: almatyEnd(2026, 10, 30),
+  });
+
+  // An expired one too. At 19:00 UTC it is already the 13th in Almaty: the 12th is in the past now.
+  e.clock.now = Date.UTC(2026, 9, 12, 19);
+  assert.equal((await e.call(handleTrial, 'GET', `/trial/terms?id=${nozone.id}`, { headers: nozone.auth })).body.status, 'expired');
+  assert.equal((await setDate(nozone.id, { date: '2026-10-12' })).status, 422);
+  const revived = await setDate(nozone.id, { date: '2026-10-13' });
+  assert.equal(revived.body.status, 'active');
+  assert.equal(revived.body.endsAt, almatyEnd(2026, 10, 13));
+  assert.deepEqual((await e.call(handleTrial, 'GET', `/trial/terms?id=${nozone.id}`, { headers: nozone.auth })).body, {
+    status: 'active',
+    endsAt: almatyEnd(2026, 10, 13),
+  });
+
+  // The support team has the same right as for extend / end.
+  const tech = await platformToken(e, DEMO_PLATFORM[1].key);
+  const byTech = await setDate(hono.id, { date: '2026-11-01' }, tech);
+  assert.equal(byTech.status, 200, JSON.stringify(byTech.body));
+  assert.equal(byTech.body.endsAt, Date.UTC(2026, 10, 2, 10) - 1);
 });

@@ -12,7 +12,7 @@ import { clientIp } from './signup.ts';
  * The trial runs on any origin (pages.dev previews, a custom domain), so CORS is `*` on every
  * answer, errors and the preflight included; the token, not the origin, is the guard.
  *
- *   POST /trial/start   TrialStartRequest → 201 TrialStartResponse (422 VENUE_INVALID, 429 RATE_LIMITED)
+ *   POST /trial/start   TrialStartRequest → 201 TrialStartResponse (14 days from the browser's startedAt; 422 VENUE_INVALID / STARTED_AT_INVALID, 429 RATE_LIMITED)
  *   POST /trial/report  TrialReportRequest (Bearer) → TrialTerms
  *                       (401 UNAUTHORIZED, 404 TRIAL_NOT_FOUND, 422 STATS_INVALID / SNAPSHOT_INVALID,
  *                        413 SNAPSHOT_TOO_LARGE, 429 RATE_LIMITED past 120 reports an hour)

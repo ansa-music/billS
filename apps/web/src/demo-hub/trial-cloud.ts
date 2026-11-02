@@ -5,7 +5,8 @@
  * (end date, status), which boot.ts turns into the license of the in-page HUB.
  *
  * Contract (supabase/functions/trial): base `${VITE_SUPABASE_URL}/functions/v1/trial`
- *   POST /start  {venue, managerName, timezone}            → {id, token, startedAt, endsAt, status}
+ *   POST /start  {venue, managerName, timezone, startedAt}  → {id, token, startedAt, endsAt, status}
+ *                (the cloud counts the 14 days from this browser's startedAt, not from the call)
  *   POST /report Bearer token, {id, stats, snapshot?}       → {status, endsAt, message?}
  *   GET  /terms?id=  Bearer token                          → {status, endsAt, message?}
  * Without VITE_SUPABASE_URL everything here is off. Nothing waits on the network: a failed
@@ -206,7 +207,8 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
   const tick = async (): Promise<TrialTerms | null> => {
     try {
       if (!info.cloudId || !info.cloudToken) {
-        const started = await cloudStart({ venue: info.venue, managerName: info.managerName, timezone: deps.timezone });
+        // startedAt: a trial that registers late (offline at first, opened after an update) keeps its own term.
+        const started = await cloudStart({ venue: info.venue, managerName: info.managerName, timezone: deps.timezone, startedAt: info.startedAt });
         deps.persist({ cloudId: started.id, cloudToken: started.token });
         take(started);
       }

@@ -3,9 +3,11 @@
  * (apps/web, VITE_TRIAL=1) and keeps the data in the person's browser; it registers itself with
  * the public Edge Function `trial` (POST /trial/start), then reports what happens (POST /trial/report:
  * counters, optionally a SQLite snapshot) and asks for its terms (GET /trial/terms). The platform
- * owner sees every trial in the cabinet and extends or ends it early (`platform` function,
- * /platform/trials…). Pure types and rules shared by the cloud and both web apps.
+ * owner sees every trial in the cabinet and extends it, sets its end date or ends it early (`platform`
+ * function, /platform/trials…). Pure types and rules shared by the cloud and both web apps.
  */
+import { isBookingDay, localInstant, shiftDay } from './booking.ts';
+import { isValidTimeZone } from './time.ts';
 
 export interface TrialStats {
   ordersTotal: number;
@@ -33,14 +35,24 @@ export interface TrialStartRequest {
   venue: string;
   managerName?: string;
   timezone?: string;
+  /**
+   * When the trial began in the browser (ms). The cloud counts TRIAL_DEFAULT_DAYS from it, not from
+   * the registration, so a late or repeated registration adds no days (see trialStartedAt).
+   */
+  startedAt?: number;
 }
 
-export interface TrialStartResponse {
+/** The start's answer: the trial's id and token plus its terms (already 'expired' for an old start). */
+export interface TrialStartResponse extends TrialTerms {
   id: string;
   token: string;
   startedAt: number;
-  endsAt: number;
-  status: TrialStatus;
+}
+
+/** POST /platform/trials/:id/end-date: the trial runs through this calendar day of its own time zone. */
+export interface TrialEndDateRequest {
+  /** YYYY-MM-DD, from today to today + TRIAL_EXTEND_MAX_DAYS in the trial's zone. */
+  date: string;
 }
 
 export interface TrialReportRequest {
@@ -54,6 +66,8 @@ export interface TrialView {
   id: string;
   venue: string;
   managerName: string;
+  /** The IANA zone its days are counted in (the browser's, else TRIAL_DEFAULT_TIMEZONE). */
+  timezone: string;
   startedAt: number;
   endsAt: number;
   status: TrialStatus;
@@ -64,8 +78,12 @@ export interface TrialView {
 }
 
 export const TRIAL_DEFAULT_DAYS = 14;
-/** The platform extends a trial by 1..90 days at a time. */
+/** The platform extends a trial by 1..90 days at a time, or sets its end up to 90 days ahead. */
 export const TRIAL_EXTEND_MAX_DAYS = 90;
+/** A start may say the trial began at most this many days ago (older is clamped). */
+export const TRIAL_BACKDATE_MAX_DAYS = 60;
+/** The zone of a trial whose browser did not name a valid one: the coffee shops are in Kazakhstan. */
+export const TRIAL_DEFAULT_TIMEZONE = 'Asia/Almaty';
 export const TRIAL_VENUE_MAX = 80;
 export const TRIAL_NAME_MAX = 80;
 export const TRIAL_TIMEZONE_MAX = 64;
@@ -92,6 +110,56 @@ export function trialTerms(row: { status: TrialStatus | string; endsAt: number }
   if (status === 'ended') return { status, endsAt: row.endsAt, message: TRIAL_ENDED_MESSAGE };
   if (status === 'expired') return { status, endsAt: row.endsAt, message: TRIAL_EXPIRED_MESSAGE };
   return { status, endsAt: row.endsAt };
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * When a trial began, as the cloud records it: the browser's `startedAt` clamped to
+ * [now − TRIAL_BACKDATE_MAX_DAYS, now] (never in the future); `now` when the client sent none
+ * (an old page). null when it is not a time in ms.
+ */
+export function trialStartedAt(startedAt: unknown, now: number): number | null {
+  if (startedAt === undefined || startedAt === null) return now;
+  if (typeof startedAt !== 'number' || !Number.isFinite(startedAt) || startedAt < 0) return null;
+  return Math.min(now, Math.max(now - TRIAL_BACKDATE_MAX_DAYS * DAY_MS, Math.floor(startedAt)));
+}
+
+/** The zone a trial's days are counted in: its own when it is a valid IANA zone, else Almaty. */
+export function trialTimeZone(timezone: string | null | undefined): string {
+  return timezone && isValidTimeZone(timezone) ? timezone : TRIAL_DEFAULT_TIMEZONE;
+}
+
+const calendarFormatters = new Map<string, Intl.DateTimeFormat>();
+
+/** YYYY-MM-DD: the calendar day of an instant in the zone. */
+export function trialCalendarDay(at: number, timeZone: string): string {
+  let f = calendarFormatters.get(timeZone);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
+    calendarFormatters.set(timeZone, f);
+  }
+  const parts = f.formatToParts(new Date(at));
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+/** The last millisecond of calendar day `day` in the zone: a trial set to end that day runs through all of it. */
+export function trialDayEnd(day: string, timeZone: string): number {
+  return localInstant(shiftDay(day, 1), 0, timeZone) - 1;
+}
+
+/** The days an end date may be set to: today … today + TRIAL_EXTEND_MAX_DAYS, in the trial's zone. */
+export function trialEndDateRange(now: number, timeZone: string): { min: string; max: string } {
+  const today = trialCalendarDay(now, timeZone);
+  return { min: today, max: shiftDay(today, TRIAL_EXTEND_MAX_DAYS) };
+}
+
+/** `date` as a valid end day for a trial in `timeZone` (YYYY-MM-DD within trialEndDateRange), else null. */
+export function trialEndDate(date: unknown, now: number, timeZone: string): string | null {
+  if (!isBookingDay(date)) return null;
+  const { min, max } = trialEndDateRange(now, timeZone);
+  return date >= min && date <= max ? date : null;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);

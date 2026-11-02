@@ -44,6 +44,7 @@ import type {
   TelegramLinkResponse,
   TelegramStatusView,
   TestPushResponse,
+  TrialEndDateRequest,
   UpdateTariffsRequest,
   UpdateTariffsResponse,
 } from '@bills/domain';
@@ -649,6 +650,11 @@ export async function listTrials(): Promise<TrialView[]> {
 
 export function extendTrial(id: string, days: number): Promise<TrialView> {
   return platformEdge<TrialView>('POST', `/platform/trials/${enc(id)}/extend`, { days });
+}
+
+export function setTrialEndDate(id: string, date: string): Promise<TrialView> {
+  const body: TrialEndDateRequest = { date };
+  return platformEdge<TrialView>('POST', `/platform/trials/${enc(id)}/end-date`, body);
 }
 
 export function endTrial(id: string): Promise<TrialView> {

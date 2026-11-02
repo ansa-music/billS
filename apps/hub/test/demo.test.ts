@@ -96,6 +96,10 @@ test('browser trial: an explicit end from the cloud wins over startedAt + days; 
   assert.equal(hub.license.status().daysLeft, 11);
   assert.equal(await installDemoLicense(hub.license, MONDAY_NOON, { startedAt, endsAt: MONDAY_NOON + 20 * DAY, companyName: 'Кофейня' }), true);
   assert.equal(hub.license.status().daysLeft, 20);
+  // An earlier end set in the cabinet replaces the later one (shortening works like extending).
+  assert.equal(await installDemoLicense(hub.license, MONDAY_NOON, { startedAt, endsAt: MONDAY_NOON + 2 * DAY, companyName: 'Кофейня' }), true);
+  assert.equal(hub.license.status().daysLeft, 2);
+  assert.equal(hub.license.status().readOnly, false);
   // Ended by TS: valid until now — a moment later the counter is read-only.
   assert.equal(await installDemoLicense(hub.license, MONDAY_NOON, { startedAt, endsAt: MONDAY_NOON, companyName: 'Кофейня' }), true);
   h.clock.advance(1000);
