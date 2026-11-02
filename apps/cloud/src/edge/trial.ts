@@ -1,5 +1,5 @@
 import { TRIAL_SNAPSHOT_MAX_BYTES } from '@bills/domain';
-import { reportTrial, startTrial, trialTermsOf } from '../trial.ts';
+import { createTransferCode, reportTrial, startTrial, transferTrial, trialPublicView, trialTermsOf, trialViewLink } from '../trial.ts';
 import type { EdgeContext } from './context.ts';
 import type { EdgeRequest } from './http.ts';
 import { bearerToken, errorResponse, json, notFound, readJson, routeOf } from './http.ts';
@@ -17,6 +17,12 @@ import { clientIp } from './signup.ts';
  *                       (401 UNAUTHORIZED, 404 TRIAL_NOT_FOUND, 422 STATS_INVALID / SNAPSHOT_INVALID,
  *                        413 SNAPSHOT_TOO_LARGE, 429 RATE_LIMITED past 120 reports an hour)
  *   GET  /trial/terms?id=<id> (Bearer) → TrialTerms
+ *        (a token retired by a transfer: 409 TRIAL_MOVED on report and terms)
+ *   POST /trial/transfer-code {id} (Bearer) → TrialTransferCode (409 NO_SNAPSHOT, 429 past 20 an hour)
+ *   POST /trial/transfer {code} → TrialTransferResponse: the latest copy and a new token
+ *                       (404 TRANSFER_CODE_INVALID, 409 NO_SNAPSHOT, 429 past 10 attempts an hour per IP)
+ *   POST /trial/view-link {id, off?} (Bearer) → TrialViewLink (the phone page's own token, or null)
+ *   GET  /trial/view (Bearer: the view token) → TrialPublicView (404 VIEW_NOT_FOUND)
  */
 export const TRIAL_CORS: Readonly<Record<string, string>> = {
   'Access-Control-Allow-Origin': '*',
@@ -48,6 +54,20 @@ export async function handleTrial(req: EdgeRequest, ctx: EdgeContext): Promise<R
     }
     if (m === 'GET' && clean === '/trial/terms') {
       return json(200, await trialTermsOf(ctx.db, ctx.now(), bearerToken(req), query.get('id')), headers);
+    }
+    if (m === 'POST' && clean === '/trial/transfer-code') {
+      return json(200, await createTransferCode(ctx.db, ctx.now(), bearerToken(req), await readJson(req)), headers);
+    }
+    if (m === 'POST' && clean === '/trial/transfer') {
+      const res = await transferTrial(ctx.db, ctx.now(), await readJson(req), clientIp(req));
+      ctx.log(`trial: пробная версия ${res.id} перенесена на другое устройство`);
+      return json(200, res, headers);
+    }
+    if (m === 'POST' && clean === '/trial/view-link') {
+      return json(200, await trialViewLink(ctx.db, ctx.now(), bearerToken(req), await readJson(req)), headers);
+    }
+    if (m === 'GET' && clean === '/trial/view') {
+      return json(200, await trialPublicView(ctx.db, ctx.now(), bearerToken(req), clientIp(req)), headers);
     }
     return notFound(headers);
   } catch (e) {

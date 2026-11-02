@@ -201,3 +201,43 @@
   .trial-badge-dot { animation: none; }
   .trial-badge { transition: none; }
 }
+
+/* «Постоянная версия»: the paid badge is a quiet line, no pulse. */
+.trial-badge[data-plan='paid']:not([data-over]) { background: transparent; border-color: transparent; color: var(--muted); }
+.trial-badge[data-plan='paid']:not([data-over]) .trial-badge-dot { animation: none; box-shadow: none; background: var(--muted); }
+
+/* The cloud panel (TrialCloud.tsx): copy, transfer, phone link. */
+.trial-cloud { display: grid; gap: 12px; }
+.trial-cloud-copy { margin: 0; }
+.trial-cloud-block {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.trial-cloud-block h3 { margin: 0; font-size: var(--fs-md, 1rem); }
+.trial-cloud-block p { margin: 0; }
+.trial-transfer, .trial-phone { display: grid; gap: 10px; justify-items: start; width: 100%; }
+.trial-transfer-code {
+  font-size: clamp(1.75rem, 8vw, 2.5rem);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.trial-warn { color: var(--warn, var(--danger)); font-weight: 600; }
+.trial-copy-line { display: flex; gap: 8px; width: 100%; }
+.trial-copy-line input { flex: 1; min-width: 0; min-height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-xs); }
+.trial-settings { max-width: 640px; }
+
+/* «Открыть по коду переноса» on the welcome screen. */
+.trial-code-input {
+  font-size: 1.75rem !important;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: center;
+}

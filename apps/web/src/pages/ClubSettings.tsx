@@ -16,6 +16,8 @@ import { TablesEditor } from './settings/TablesEditor.tsx';
 import { TariffsEditor } from './settings/TariffEditor.tsx';
 import { TlsCard } from '../sections/TlsCard.tsx';
 import { GuestQrSection } from '../guest/GuestQrSection.tsx';
+import { TRIAL } from '../demo-hub/trial-store.ts';
+import { TrialCloudPanel } from '../trial/TrialCloud.tsx';
 import './settings.css';
 
 const TABS = [
@@ -28,6 +30,8 @@ const TABS = [
   { id: 'guard', title: 'Сторож' },
   { id: 'devices', title: 'Установка на планшеты' },
   { id: 'license', title: 'Лицензия' },
+  // Browser coffee shop (VITE_TRIAL=1): the cloud copy, transfer to another device, the phone link.
+  { id: 'browser', title: 'Облако и перенос' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
 
@@ -45,6 +49,7 @@ export function ClubSettingsPage() {
   const tabs = TABS.filter(
     (t) =>
       (t.id !== 'license' || roleCan('license.view')) &&
+      (t.id !== 'browser' || (TRIAL && roleCan('license.view'))) &&
       (t.id !== 'guard' || roleCan('club.edit')) &&
       (t.id !== 'devices' || can('equipment.view')) &&
       !(cafe && BILLIARDS_ONLY.includes(t.id)),
@@ -55,7 +60,7 @@ export function ClubSettingsPage() {
   const asked = query.get('tab');
   const tab: TabId = isTab(asked) && tabs.some((t) => t.id === asked) ? asked : 'club';
   /** Tabs that need GET /api/club. */
-  const standalone = tab !== 'license' && tab !== 'devices';
+  const standalone = tab !== 'license' && tab !== 'devices' && tab !== 'browser';
   const { toast, show, clear } = useToast();
   const { isBusy, run } = useCommands(show);
   const [club, setClub] = useState<ClubAdminView | null>(null);
@@ -117,6 +122,7 @@ export function ClubSettingsPage() {
         return <GuardSection {...props} canEdit={can('club.edit')} />;
       case 'license':
       case 'devices':
+      case 'browser':
         return null; // rendered below: they do not need GET /api/club
     }
   })();
@@ -136,7 +142,7 @@ export function ClubSettingsPage() {
           </button>
         ))}
       </nav>
-      {license?.readOnly && tab !== 'license' && tab !== 'devices' && (
+      {license?.readOnly && tab !== 'license' && tab !== 'devices' && tab !== 'browser' && (
         <p className="blocked-note">Только чтение: {license.message ?? 'лицензия не активна'} Настройки сейчас не сохраняются.</p>
       )}
       {tab === 'license' && (
@@ -148,6 +154,14 @@ export function ClubSettingsPage() {
         />
       )}
       {tab === 'devices' && <TlsCard />}
+      {tab === 'browser' && (
+        <section className="panel section trial-settings">
+          <header className="panel-head">
+            <h2>Облако и перенос</h2>
+          </header>
+          <TrialCloudPanel />
+        </section>
+      )}
       {standalone && !club && !loadError && <Loading online={online} />}
       {standalone && !club && loadError && <p className="empty">Не удалось загрузить настройки: {loadError}</p>}
       {club && !online && <p className="settings-offline">Нет связи с кассой — изменения пока нельзя сохранить.</p>}

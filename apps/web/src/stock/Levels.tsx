@@ -14,6 +14,9 @@ import { Icon } from '../icons.tsx';
 import { parseMajor, toMajorText } from '../pages/bar/money.tsx';
 import { formatDateTime } from '../ui.tsx';
 import { useHub, useLive } from '../useHub.tsx';
+import { BuyListModal } from './BuyList.tsx';
+import { SampleStart } from './SampleFill.tsx';
+import type { SupplyDraft } from './stock.ts';
 import { byName, daysLabel, matches, packOf, packPrice, parseQty, qtyLabel, qtyText } from './stock.ts';
 
 type Run = <T>(key: string, path: string, body?: object) => Promise<T | undefined>;
@@ -21,7 +24,20 @@ type Run = <T>(key: string, path: string, body?: object) => Promise<T | undefine
 const REASONS = ['Пролили', 'Испортилось', 'Для персонала', 'Проба', 'Брак'];
 
 /** «Остатки»: every ingredient with its level, the warning below the minimum, «Списать». */
-export function LevelsTab({ ingredients, run, busy, notify }: { ingredients: IngredientView[]; run: Run; busy: boolean; notify: (m: string) => void }) {
+export function LevelsTab({
+  ingredients,
+  run,
+  busy,
+  notify,
+  onStartSupply,
+}: {
+  ingredients: IngredientView[];
+  run: Run;
+  busy: boolean;
+  notify: (m: string) => void;
+  /** «Создать поставку из списка»; absent for someone who does not receive deliveries. */
+  onStartSupply?: ((draft: SupplyDraft) => void) | undefined;
+}) {
   const { state, canNow } = useHub();
   const currency = state.club.currency;
   const [query, setQuery] = useState('');
@@ -29,6 +45,7 @@ export function LevelsTab({ ingredients, run, busy, notify }: { ingredients: Ing
   const [editing, setEditing] = useState<IngredientView | 'new' | null>(null);
   const [writingOff, setWritingOff] = useState<IngredientView | null>(null);
   const [history, setHistory] = useState<IngredientView | null>(null);
+  const [buying, setBuying] = useState(false);
   const canEdit = canNow('stock.edit');
   const canWriteOff = canNow('stock.writeoff');
 
@@ -59,6 +76,11 @@ export function LevelsTab({ ingredients, run, busy, notify }: { ingredients: Ing
         <button type="button" className="chip" aria-pressed={archived} onClick={() => setArchived((a) => !a)}>
           Архив
         </button>
+        {active.length > 0 && (
+          <button type="button" className="btn stock-buy-btn" onClick={() => setBuying(true)}>
+            Докупить на неделю
+          </button>
+        )}
         {canEdit && (
           <button type="button" className="btn btn-primary stock-add" onClick={() => setEditing('new')}>
             <Icon name="plus" size={18} /> Добавить сырьё
@@ -66,7 +88,9 @@ export function LevelsTab({ ingredients, run, busy, notify }: { ingredients: Ing
         )}
       </div>
 
-      {shown.length === 0 ? (
+      {active.length === 0 && !archived && !query && canEdit ? (
+        <SampleStart run={run} busy={busy} notify={notify} />
+      ) : shown.length === 0 ? (
         <EmptyState icon="orders" title={query ? 'Ничего не нашлось' : archived ? 'Архив пуст' : 'Сырья пока нет'}>
           {!query && !archived && 'Добавьте кофе, молоко, стаканы — всё, из чего готовите.'}
         </EmptyState>
@@ -150,6 +174,19 @@ export function LevelsTab({ ingredients, run, busy, notify }: { ingredients: Ing
         />
       )}
       {history && <HistoryModal ingredient={history} onClose={() => setHistory(null)} />}
+      {buying && (
+        <BuyListModal
+          onClose={() => setBuying(false)}
+          onStartSupply={
+            onStartSupply &&
+            ((draft) => {
+              setBuying(false);
+              onStartSupply(draft);
+              notify('Список перенесён в поставку: укажите поставщика и суммы по накладной');
+            })
+          }
+        />
+      )}
     </div>
   );
 }

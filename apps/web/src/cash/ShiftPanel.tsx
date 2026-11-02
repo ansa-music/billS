@@ -34,6 +34,7 @@ import { printReceipt } from './print/Receipt.tsx';
 import { printShiftReport } from './print/ShiftReportForm.tsx';
 import { RefundDialog } from './RefundDialog.tsx';
 import { ReportDialog } from './ReportDialog.tsx';
+import { businessOf } from '../cafe/cafe.ts';
 
 type ShiftDialog =
   | { kind: 'cash'; movement: CashMovementKind }
@@ -48,6 +49,7 @@ export function ShiftPanel(props: DeskProps) {
   const { shift, club, serverNow } = desk.state;
   // The shift's money (expected cash, X report) is stats.view: a cashier counts the drawer blind.
   const seesMoney = useHub().can('stats.view');
+  const cafe = businessOf(desk.state.settings) === 'cafe';
   const [dialog, setDialog] = useState<ShiftDialog | null>(null);
   const close = () => setDialog(null);
   const xPrint = useAction();
@@ -55,7 +57,7 @@ export function ShiftPanel(props: DeskProps) {
   // Straight to the printer, without opening the report.
   const printX = (shiftId: string) =>
     void xPrint.run(async () => {
-      printShiftReport(await getJson<ShiftReport>(`/api/shifts/${shiftId}/report`), club);
+      printShiftReport(await getJson<ShiftReport>(`/api/shifts/${shiftId}/report`), club, cafe);
     });
 
   return (
@@ -146,7 +148,7 @@ export function ShiftPanel(props: DeskProps) {
           }}
         />
       )}
-      {dialog?.kind === 'z-report' && <ReportDialog kind="Z" report={dialog.report} club={club} onClose={close} />}
+      {dialog?.kind === 'z-report' && <ReportDialog kind="Z" report={dialog.report} club={club} cafe={cafe} onClose={close} />}
     </>
   );
 }
@@ -252,7 +254,9 @@ function CashMovementDialog({
 
 function XReportDialog({ desk, shiftId, onClose }: { desk: Desk; shiftId: string; onClose: () => void }) {
   const { data, error } = useLoad<ShiftReport>(`/api/shifts/${shiftId}/report`);
-  return <ReportDialog kind="X" report={data} error={error} club={desk.state.club} onClose={onClose} />;
+  return (
+    <ReportDialog kind="X" report={data} error={error} club={desk.state.club} cafe={businessOf(desk.state.settings) === 'cafe'} onClose={onClose} />
+  );
 }
 
 function CloseShiftDialog({
@@ -299,7 +303,11 @@ function CloseShiftDialog({
         <>
           <FormError error={action.error?.message} />
           {action.error?.code === 'UNPAID_CHECKS' && (
-            <p className="hint">Примите оплату или отмените игры в панели «Ожидают оплаты».</p>
+            <p className="hint">
+              {businessOf(desk.state.settings) === 'cafe'
+                ? 'Примите оплату неоплаченных заказов или отмените их в «Чеках за день».'
+                : 'Примите оплату или отмените игры в панели «Ожидают оплаты».'}
+            </p>
           )}
           <div className="modal-actions">
             <button type="submit" form={formId} className="btn btn-danger" disabled={action.pending}>
@@ -334,7 +342,11 @@ function CloseShiftDialog({
           <textarea rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
         </label>
         {unpaidLeft && action.error?.code !== 'UNPAID_CHECKS' && (
-          <p className="hint hint-warn">Есть неоплаченные игры, счета или заказы бара — смену закрыть не получится.</p>
+          <p className="hint hint-warn">
+            {businessOf(desk.state.settings) === 'cafe'
+              ? 'Есть неоплаченные заказы — смену закрыть не получится.'
+              : 'Есть неоплаченные игры, счета или заказы бара — смену закрыть не получится.'}
+          </p>
         )}
       </form>
     </Modal>

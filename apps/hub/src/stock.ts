@@ -7,6 +7,8 @@ import type {
   IngredientUnit,
   IngredientView,
   ProductOptionGroup,
+  PurchaseListView,
+  StockAlertsView,
   Recipe,
   RecipeOptionLine,
   RecipesView,
@@ -26,12 +28,14 @@ import {
   costOf,
   daysLeftOf,
   fromMilli,
+  ingredientPurchaseList,
   INGREDIENT_NAME_MAX,
   isIngredientUnit,
   isQuantity,
   recipeCost,
   recipeUsage,
   STOCK_NOTE_MAX,
+  stockAlerts,
   STOCK_USAGE_DAYS,
   SUPPLIER_MAX,
   SUPPLY_MAX_LINES,
@@ -292,20 +296,8 @@ export class StockService {
   /** Every ingredient, archived ones included, by name; with «хватит на N дней» from the last two weeks of sales. */
   ingredients(): IngredientsView {
     const db = this.#db;
-    const now = this.#clock.now();
     const rows = all<IngredientRow>(db, 'SELECT * FROM ingredients');
-    const since = now - STOCK_USAGE_DAYS * DAY;
-    const used = new Map(
-      all<{ ingredient_id: string; used: number }>(
-        db,
-        `SELECT ingredient_id, -SUM(quantity) AS used FROM stock_movements
-         WHERE kind IN ('sale', 'return') AND at >= ? GROUP BY ingredient_id`,
-        since,
-      ).map((r) => [r.ingredient_id, r.used]),
-    );
-    const first = one<{ at: number | null }>(db, "SELECT MIN(at) AS at FROM stock_movements WHERE kind = 'sale'")?.at ?? null;
-    // A coffee shop that started selling 3 days ago divides by 3, not by 14.
-    const days = first === null ? 1 : Math.min(STOCK_USAGE_DAYS, Math.max(1, Math.ceil((now - first) / DAY)));
+    const { used, days } = this.#usage();
     const usedIn = new Map(
       all<{ id: string; n: number }>(
         db,
@@ -323,6 +315,58 @@ export class StockService {
       })
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
     return { ingredients };
+  }
+
+  /**
+   * «Докупить на неделю»: for every active ingredient ⌈use per day × 7 + minimum − stock⌉ at the
+   * pace of the last two weeks of sales (fewer days for a new coffee shop), with the approximate
+   * cost at the average price. Only what needs buying.
+   */
+  purchaseList(): PurchaseListView {
+    const { used, days } = this.#usage();
+    const rows = all<IngredientRow>(this.#db, 'SELECT * FROM ingredients WHERE is_archived = 0');
+    return ingredientPurchaseList(
+      rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        unit: r.unit,
+        quantity: fromMilli(r.quantity),
+        minLevel: r.min_level === null ? null : fromMilli(r.min_level),
+        costPerUnit: r.cost_per_unit,
+        used: fromMilli(used.get(r.id) ?? 0),
+      })),
+      days,
+    );
+  }
+
+  /**
+   * What runs out, for everyone at the counter (POS hints, the barista's strip): names and
+   * levels only — no prices. Cheap: two small queries.
+   */
+  alerts(): StockAlertsView {
+    const db = this.#db;
+    const rows = all<IngredientRow>(db, 'SELECT * FROM ingredients WHERE is_archived = 0');
+    const recipes = new Map<string, Recipe>();
+    const byProduct = new Map<string, RecipeRow[]>();
+    for (const r of all<RecipeRow>(
+      db,
+      `SELECT ri.* FROM recipe_items ri JOIN products p ON p.id = ri.product_id
+       WHERE p.is_active = 1 ORDER BY ri.product_id, ri.sort_order, ri.id`,
+    )) {
+      byProduct.set(r.product_id, [...(byProduct.get(r.product_id) ?? []), r]);
+    }
+    for (const [productId, list] of byProduct) recipes.set(productId, toRecipe(list));
+    return stockAlerts(
+      rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        unit: r.unit,
+        quantity: fromMilli(r.quantity),
+        minLevel: r.min_level === null ? null : fromMilli(r.min_level),
+        isArchived: false,
+      })),
+      recipes,
+    );
   }
 
   createIngredient(input: CreateIngredientRequest & { actor: string }): IngredientView {
@@ -762,6 +806,28 @@ export class StockService {
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────
+
+  /**
+   * Use by sales (sales minus their cancellations) per ingredient over the last
+   * STOCK_USAGE_DAYS days, thousandths, and the days to divide by: a coffee shop that
+   * started selling 3 days ago divides by 3, not by 14.
+   */
+  #usage(): { used: Map<string, number>; days: number } {
+    const db = this.#db;
+    const now = this.#clock.now();
+    const since = now - STOCK_USAGE_DAYS * DAY;
+    const used = new Map(
+      all<{ ingredient_id: string; used: number }>(
+        db,
+        `SELECT ingredient_id, -SUM(quantity) AS used FROM stock_movements
+         WHERE kind IN ('sale', 'return') AND at >= ? GROUP BY ingredient_id`,
+        since,
+      ).map((r) => [r.ingredient_id, r.used]),
+    );
+    const first = one<{ at: number | null }>(db, "SELECT MIN(at) AS at FROM stock_movements WHERE kind = 'sale'")?.at ?? null;
+    const days = first === null ? 1 : Math.min(STOCK_USAGE_DAYS, Math.max(1, Math.ceil((now - first) / DAY)));
+    return { used, days };
+  }
 
   #changed(): void {
     afterCommit(this.#db, () => this.#events.changed({ kind: 'stock' }));

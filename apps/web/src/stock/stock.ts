@@ -9,6 +9,9 @@ import { useHub, useLive } from '../useHub.tsx';
  * per litre or per piece — while the HUB keeps a cost per gram, millilitre or piece.
  */
 
+/** Lines «Докупить на неделю» hands to the delivery form: what to buy and roughly for how much. */
+export type SupplyDraft = Array<{ ingredientId: string; quantity: number; approx: Minor | null }>;
+
 export function useIngredients() {
   const { version } = useHub();
   return useLive(() => fetchJson<IngredientsView>('/api/stock/ingredients'), [], version);

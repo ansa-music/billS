@@ -1,4 +1,5 @@
-import type { OwnerSummary, RevenuePoint, TableStat } from '@bills/domain';
+import type { LossInput, OwnerSummary, PaymentMethod, ProfitReport, ReportRange, RevenuePoint, SalesReport, TableStat } from '@bills/domain';
+import { buildProfitReport, buildSalesReport, fromMilli, REPORT_MAX_DAYS } from '@bills/domain';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
 import { all, one } from './db.ts';
@@ -233,6 +234,142 @@ export class ReportService {
       liveGames: live?.n ?? 0,
       unpaidGames: unpaid?.n ?? 0,
       unpaidAmount: (unpaid?.amount ?? 0) + (unpaid?.orders ?? 0),
+    };
+  }
+
+  /**
+   * «Себестоимость и прибыль» for whole local days `from`…`to` (default: today): revenue of the
+   * orders (as «Выручка» counts it), cost of goods sold from the stock movements of those orders
+   * (sales minus cancellations), gross profit per product, and losses — write-offs and
+   * inventory differences — made in the period.
+   */
+  profit(fromParam?: string, toParam?: string): ProfitReport {
+    const { db } = this.deps;
+    const { club, range, period } = this.#range(fromParam, toParam);
+    const products = this.#soldProducts(club.id, period);
+    const costs = all<{ product_id: string | null; cost: number | null; unknown: number }>(
+      db,
+      `SELECT m.product_id, -SUM(m.cost) AS cost, SUM(CASE WHEN m.cost IS NULL THEN 1 ELSE 0 END) AS unknown
+       FROM stock_movements m JOIN bar_orders o ON o.id = m.order_id
+       WHERE m.kind IN ('sale', 'return') AND o.club_id = ? AND ${ORDER_IS_REVENUE}
+         AND o.created_at >= ? AND o.created_at < ?
+       GROUP BY m.product_id`,
+      club.id,
+      period.start,
+      period.end,
+    );
+    const losses = all<{ kind: LossInput['kind']; ingredient_id: string; name: string; unit: LossInput['unit']; quantity: number; cost: number | null }>(
+      db,
+      `SELECT m.kind, m.ingredient_id, i.name, i.unit, m.quantity, m.cost
+       FROM stock_movements m JOIN ingredients i ON i.id = m.ingredient_id
+       WHERE m.kind IN ('writeoff', 'inventory') AND m.at >= ? AND m.at < ?
+       ORDER BY m.id`,
+      period.start,
+      period.end,
+    );
+    return buildProfitReport({
+      range,
+      generatedAt: this.deps.clock.now(),
+      timezone: club.timezone,
+      currency: club.currency,
+      products,
+      costs: costs
+        .filter((c) => c.product_id !== null)
+        .map((c) => ({ productId: c.product_id!, cost: c.cost ?? 0, incomplete: c.unknown > 0 })),
+      losses: losses.map((l) => ({
+        kind: l.kind,
+        ingredientId: l.ingredient_id,
+        name: l.name,
+        unit: l.unit,
+        quantity: fromMilli(l.quantity),
+        cost: l.cost,
+      })),
+    });
+  }
+
+  /**
+   * «Что продаётся» for whole local days `from`…`to` (default: today): top products by units
+   * and by revenue, orders by hour of the day, checks paid and the average check, money by
+   * payment method (refunds subtracted).
+   */
+  sales(fromParam?: string, toParam?: string): SalesReport {
+    const { db } = this.deps;
+    const { club, range, period } = this.#range(fromParam, toParam);
+    const orders = all<{ created_at: number; total: number }>(
+      db,
+      `SELECT o.created_at, o.total FROM bar_orders o
+       WHERE o.club_id = ? AND ${ORDER_IS_REVENUE} AND o.created_at >= ? AND o.created_at < ?`,
+      club.id,
+      period.start,
+      period.end,
+    );
+    const paidChecks = `SELECT id FROM checks WHERE club_id = ? AND status = 'PAID' AND closed_at >= ? AND closed_at < ?`;
+    const checks = one<{ n: number }>(db, `SELECT COUNT(*) AS n FROM (${paidChecks})`, club.id, period.start, period.end);
+    const paid = one<{ amount: number | null }>(
+      db,
+      `SELECT SUM(CASE WHEN kind = 'PAYMENT' THEN amount ELSE -amount END) AS amount FROM payments
+       WHERE check_id IN (${paidChecks})`,
+      club.id,
+      period.start,
+      period.end,
+    );
+    const byMethod: Partial<Record<PaymentMethod, number>> = {};
+    for (const r of all<{ method: PaymentMethod; amount: number | null }>(
+      db,
+      `SELECT method, SUM(CASE WHEN kind = 'PAYMENT' THEN amount ELSE -amount END) AS amount FROM payments
+       WHERE club_id = ? AND at >= ? AND at < ? GROUP BY method`,
+      club.id,
+      period.start,
+      period.end,
+    )) {
+      byMethod[r.method] = r.amount ?? 0;
+    }
+    return buildSalesReport({
+      range,
+      generatedAt: this.deps.clock.now(),
+      timezone: club.timezone,
+      currency: club.currency,
+      items: this.#soldProducts(club.id, period),
+      orders: orders.map((o) => ({ at: o.created_at, total: o.total })),
+      checks: { count: checks?.n ?? 0, paid: paid?.amount ?? 0 },
+      byMethod,
+    });
+  }
+
+  /** Products sold in the period's orders: units, revenue, and units sold without a тех. карта. */
+  #soldProducts(club: string, p: Period) {
+    return all<{ product_id: string; name: string; qty: number; revenue: number; no_recipe: number }>(
+      this.deps.db,
+      `SELECT i.product_id, COALESCE(MAX(pr.name), MIN(i.title)) AS name, SUM(i.qty) AS qty, SUM(i.amount) AS revenue,
+              SUM(CASE WHEN EXISTS (SELECT 1 FROM stock_movements m
+                                    WHERE m.order_id = i.order_id AND m.product_id = i.product_id AND m.kind = 'sale')
+                       THEN 0 ELSE i.qty END) AS no_recipe
+       FROM bar_order_items i
+       JOIN bar_orders o ON o.id = i.order_id
+       LEFT JOIN products pr ON pr.id = i.product_id
+       WHERE o.club_id = ? AND ${ORDER_IS_REVENUE} AND o.created_at >= ? AND o.created_at < ?
+       GROUP BY i.product_id`,
+      club,
+      p.start,
+      p.end,
+    ).map((r) => ({ productId: r.product_id, name: r.name, qty: r.qty, revenue: r.revenue, qtyWithoutRecipe: r.no_recipe }));
+  }
+
+  /** The club and a period of whole local days; `to` defaults to `from`, `from` to today. */
+  #range(fromParam?: string, toParam?: string): { club: ClubRow; range: ReportRange; period: Period } {
+    const { db, clock } = this.deps;
+    const club = one<ClubRow>(db, 'SELECT id, timezone, currency FROM clubs ORDER BY created_at LIMIT 1');
+    if (!club) throw new HubError(503, 'CLUB_NOT_CONFIGURED', 'Клуб не настроен');
+    const today = localDateOf(clock.now(), club.timezone);
+    const from = fromParam || toParam || today;
+    const to = toParam || from;
+    if (!parseLocalDate(from) || !parseLocalDate(to)) throw new HubError(400, 'BAD_DATE', 'Дата должна быть в формате ГГГГ-ММ-ДД');
+    if (from > to) throw new HubError(400, 'BAD_RANGE', 'Начало периода позже конца');
+    if (addDays(from, REPORT_MAX_DAYS) <= to) throw new HubError(400, 'RANGE_TOO_LONG', `Период — не длиннее ${REPORT_MAX_DAYS} дней`);
+    return {
+      club,
+      range: { from, to },
+      period: { start: localMidnightUtc(from, club.timezone), end: localMidnightUtc(addDays(to, 1), club.timezone) },
     };
   }
 

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { Action } from '@bills/domain';
 import { useCommands, useHub } from '../useHub.tsx';
 import { navigate, useLocation } from '../router.tsx';
@@ -5,6 +6,7 @@ import { Loading, Page, Toast, useToast } from '../ui.tsx';
 import { InventoryTab } from './Inventory.tsx';
 import { LevelsTab } from './Levels.tsx';
 import { RecipesTab } from './Recipes.tsx';
+import type { SupplyDraft } from './stock.ts';
 import { useIngredients } from './stock.ts';
 import { SuppliesTab } from './Supplies.tsx';
 import './stock.css';
@@ -32,6 +34,12 @@ export function StockPage() {
   const wanted = query.get('tab') as Tab | null;
   const tab = tabs.find((t) => t.id === wanted)?.id ?? tabs[0]?.id ?? 'supplies';
   const props = { ingredients: ingredients.data?.ingredients ?? [], run, busy: busy.size > 0 || !hub.online, notify: show };
+  // «Создать поставку из списка» on «Докупить на неделю»: the delivery form opens filled in.
+  const [supplyDraft, setSupplyDraft] = useState<SupplyDraft | null>(null);
+  const startSupply = (draft: SupplyDraft) => {
+    setSupplyDraft(draft);
+    navigate('/stock', { tab: 'supplies' });
+  };
 
   return (
     <Page title="Склад">
@@ -53,9 +61,9 @@ export function StockPage() {
       {!ingredients.data ? (
         ingredients.error ? <p className="form-error">{ingredients.error}</p> : <Loading online={hub.online} />
       ) : tab === 'levels' ? (
-        <LevelsTab {...props} />
+        <LevelsTab {...props} onStartSupply={hub.can('stock.supply') ? startSupply : undefined} />
       ) : tab === 'supplies' ? (
-        <SuppliesTab {...props} />
+        <SuppliesTab {...props} draft={supplyDraft} onDraftUsed={() => setSupplyDraft(null)} />
       ) : tab === 'recipes' ? (
         <RecipesTab {...props} />
       ) : (

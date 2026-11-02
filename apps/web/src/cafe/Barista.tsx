@@ -18,6 +18,7 @@ import {
 } from './cafe.ts';
 import type { CancelTarget } from './CounterCancelDialog.tsx';
 import { CounterCancelDialog } from './CounterCancelDialog.tsx';
+import { StockStrip } from './StockStrip.tsx';
 import { StopListDialog } from './StopList.tsx';
 import './cafe.css';
 
@@ -145,6 +146,7 @@ export function BaristaPage() {
           </button>
         </div>
       </div>
+      <StockStrip />
       {blocked && <p className="blocked-note">{blocked}</p>}
       {data && error && <p className="hint hint-warn">Нет связи с кассой, показан последний список: {error}</p>}
 

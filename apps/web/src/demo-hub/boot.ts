@@ -26,7 +26,8 @@ import { provideSqlJs } from './shims/sqlite.ts';
 import { clearSnapshot, loadSnapshot, nextResetAt, resetDemo, saveSnapshot } from './storage.ts';
 import { setupTrialClub, trialKey } from '@ts-hub/trial.ts';
 import type { TrialInfo, TrialRecord } from './trial-store.ts';
-import { loadTrial, saveTrial, setCurrentTrial, TRIAL_DAYS, updateCurrentTrial } from './trial-store.ts';
+import { loadTrial, saveTrial, setCurrentTrial, setTrialActions, TRIAL_DAYS, updateCurrentTrial } from './trial-store.ts';
+import { collectSummary } from './trial-summary.ts';
 import type { TrialTerms } from './trial-cloud.ts';
 import { startTrialCloud } from './trial-cloud.ts';
 
@@ -211,6 +212,7 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
     info,
     timezone,
     onChange: (listener) => hub.events.on('changed', listener),
+    summary: () => collectSummary(hub.reports, db),
     persist: (patch) => {
       updateCurrentTrial(patch);
       saver.saveNow();
@@ -219,7 +221,16 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
       void installTrialLicense(hub, info, Date.now()).catch((err: unknown) => console.warn('[trial] could not apply the new terms', err));
     },
   });
-  if (link) (window as unknown as { __tsTrialReportNow?: () => Promise<unknown> }).__tsTrialReportNow = link.reportNow;
+  if (link) {
+    (window as unknown as { __tsTrialReportNow?: () => Promise<unknown> }).__tsTrialReportNow = link.reportNow;
+    setTrialActions({
+      transferCode: () => link.transferCode(),
+      viewLink: (off) => link.viewLink(off),
+      backupNow: async () => {
+        await link.reportNow({ snapshot: 'force' });
+      },
+    });
+  }
   return info;
 }
 

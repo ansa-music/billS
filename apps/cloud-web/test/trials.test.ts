@@ -4,7 +4,12 @@ import type { TrialView } from '../src/trials.ts';
 import {
   agoText,
   bytesText,
+  dayEndMs,
   effectiveStatus,
+  filterTrials,
+  paidLastDay,
+  paidRequest,
+  parseUntilDay,
   isWorkingNow,
   lastDays,
   lastOrderText,
@@ -37,6 +42,10 @@ function trial(over: Partial<TrialView> = {}): TrialView {
     stats: null,
     snapshotAt: null,
     snapshotBytes: null,
+    plan: 'trial',
+    paidUntil: null,
+    summaryAt: null,
+    viewLink: false,
     ...over,
   };
 }
@@ -131,4 +140,42 @@ test('backup file name is Latin', () => {
   assert.equal(latinName('Қазақ Coffee №1'), 'kazak-coffee-1');
   assert.equal(latinName('☕'), 'kofeynya');
   assert.equal(trialBackupFileName('Кофе Тау', NOW), 'TS-kofe-tau-2026-10-29.ts-backup.json');
+});
+
+test('«Сделать постоянной»: a date means «paid through that day» in Almaty; «без срока»; limits', () => {
+  // 12 December 2026 ends at 13 Dec 00:00 Almaty = 12 Dec 19:00 UTC.
+  assert.equal(dayEndMs('2026-12-12'), Date.UTC(2026, 11, 12, 19, 0));
+  assert.equal(dayEndMs('2026-02-30'), null);
+  assert.equal(dayEndMs('12.12.2026'), null);
+  assert.equal(paidLastDay(Date.UTC(2026, 11, 12, 19, 0)), '2026-12-12');
+  assert.equal(trialDate(Date.UTC(2026, 11, 12, 19, 0) - 1), '12 декабря');
+  assert.deepEqual(paidRequest(true, '', NOW), { plan: 'paid', paidUntil: null });
+  assert.deepEqual(paidRequest(false, '2026-12-12', NOW), { plan: 'paid', paidUntil: Date.UTC(2026, 11, 12, 19, 0) });
+  assert.ok('error' in paidRequest(false, '', NOW));
+  assert.ok('error' in paidRequest(false, '2026-10-01', NOW), 'in the past');
+  assert.ok('error' in paidRequest(false, '2040-01-01', NOW), 'too far');
+  assert.deepEqual(parseUntilDay('2026-11-05', NOW, 90), { until: Date.UTC(2026, 10, 5, 19, 0) });
+  assert.ok('error' in parseUntilDay('2027-06-01', NOW, 90));
+});
+
+test('plan in words and tones: «оплачено до», «без срока», «оплата закончилась»; filters', () => {
+  const until = Date.UTC(2026, 11, 12, 19, 0);
+  const paid = trial({ plan: 'paid', paidUntil: until, endsAt: until });
+  assert.equal(trialTermText(paid, NOW), 'оплачено до 12 декабря');
+  assert.equal(trialTone(paid, NOW), 'ok');
+  assert.equal(trialTone(paid, until - 3 * DAY), 'warn', 'a week before the end');
+  assert.equal(trialTermText(paid, until + DAY), 'оплата закончилась 12 декабря');
+  assert.equal(trialTone(paid, until + DAY), 'danger');
+  const forever = trial({ plan: 'paid', paidUntil: null, endsAt: Date.UTC(2100, 0, 1) });
+  assert.equal(trialTermText(forever, NOW), 'без срока');
+  assert.equal(trialTone(forever, NOW), 'ok');
+  assert.equal(trialTermText(trial({ plan: 'paid', status: 'ended', endsAt: NOW - DAY }), NOW), 'доступ закрыт досрочно');
+
+  const list = [trial({ id: 'a' }), paid, forever, trial({ id: 'old', status: 'ended', endsAt: NOW - DAY, lastSeenAt: NOW - 3 * DAY })];
+  const ids = (f: Parameters<typeof filterTrials>[1]) => filterTrials(list, f, NOW).map((t) => t.id + (t.plan === 'paid' ? (t.paidUntil ? ':p' : ':f') : ''));
+  assert.equal(filterTrials(list, 'all', NOW).length, 4);
+  assert.deepEqual(ids('trial'), ['a', 'old']);
+  assert.deepEqual(ids('paid'), ['t1:p', 't1:f']);
+  assert.deepEqual(ids('over'), ['old']);
+  assert.equal(filterTrials(list, 'live', NOW).length, 3);
 });

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { IngredientView, SuppliesView, SupplyView } from '@bills/domain';
 import { formatMoney } from '@bills/domain';
 import { fetchJson } from '../api.ts';
@@ -8,7 +8,8 @@ import { Icon } from '../icons.tsx';
 import { parseMajor } from '../pages/bar/money.tsx';
 import { formatDateTime } from '../ui.tsx';
 import { useHub, useLive } from '../useHub.tsx';
-import { byName, matches, packOf, parseQty, qtyLabel } from './stock.ts';
+import type { SupplyDraft } from './stock.ts';
+import { byName, matches, packOf, parseQty, qtyLabel, qtyText } from './stock.ts';
 
 type Run = <T>(key: string, path: string, body?: object) => Promise<T | undefined>;
 
@@ -17,12 +18,29 @@ interface Line {
   ingredientId: string;
   quantity: string;
   amount: string;
+  /** Approximate sum from «Докупить на неделю», shown as the placeholder. */
+  approx?: number | null;
 }
 
 let nextKey = 1;
 
 /** «Поставки»: receive a delivery (supplier, lines with quantity and sum, total) and the deliveries so far. */
-export function SuppliesTab({ ingredients, run, busy, notify }: { ingredients: IngredientView[]; run: Run; busy: boolean; notify: (m: string) => void }) {
+export function SuppliesTab({
+  ingredients,
+  run,
+  busy,
+  notify,
+  draft,
+  onDraftUsed,
+}: {
+  ingredients: IngredientView[];
+  run: Run;
+  busy: boolean;
+  notify: (m: string) => void;
+  /** Lines from «Докупить на неделю» to start the form with. */
+  draft?: SupplyDraft | null;
+  onDraftUsed?: () => void;
+}) {
   const { state, version } = useHub();
   const currency = state.club.currency;
   const tz = state.club.timezone;
@@ -32,6 +50,13 @@ export function SuppliesTab({ ingredients, run, busy, notify }: { ingredients: I
   const [lines, setLines] = useState<Line[]>([]);
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!draft || draft.length === 0) return;
+    setLines(draft.map((d) => ({ key: nextKey++, ingredientId: d.ingredientId, quantity: qtyText(d.quantity), amount: '', approx: d.approx })));
+    setError(null);
+    onDraftUsed?.();
+  }, [draft, onDraftUsed]);
 
   const active = useMemo(() => byName(ingredients.filter((i) => !i.isArchived)), [ingredients]);
   const byId = useMemo(() => new Map(ingredients.map((i) => [i.id, i])), [ingredients]);
@@ -136,7 +161,12 @@ export function SuppliesTab({ ingredients, run, busy, notify }: { ingredients: I
                     </label>
                     <label className="field">
                       <span>Сумма по накладной</span>
-                      <input inputMode="decimal" value={l.amount} onChange={(e) => patch(l.key, { amount: e.target.value })} placeholder="0" />
+                      <input
+                        inputMode="decimal"
+                        value={l.amount}
+                        onChange={(e) => patch(l.key, { amount: e.target.value })}
+                        placeholder={l.approx != null ? `≈ ${formatMoney(l.approx, currency)}` : '0'}
+                      />
                     </label>
                   </div>
                   {perPack !== null && (

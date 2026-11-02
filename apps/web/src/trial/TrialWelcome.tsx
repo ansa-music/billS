@@ -3,9 +3,110 @@ import type { FormEvent } from 'react';
 import { BrandMark } from '../BrandMark.tsx';
 import { Field } from '../ui.tsx';
 import type { NewTrial } from '../demo-hub/boot.ts';
+import { formatTransferCode, normalizeTransferCode } from '@bills/domain';
 import { restoreBackup, TRIAL_DAYS } from '../demo-hub/trial-store.ts';
+import { openByTransferCode, TRIAL_CLOUD_URL } from '../demo-hub/trial-cloud.ts';
 import '../onboarding/onboarding.css';
 import './trial.css';
+
+/** `#transfer=7K3MQ9TX` (the QR of «Код переноса»): the code to fill in, or null. */
+export function transferCodeFromHash(hash: string): string | null {
+  const m = /[#&]transfer=([A-Za-z0-9-]+)/.exec(hash);
+  return m ? normalizeTransferCode(m[1]!) : null;
+}
+
+/**
+ * «Уже работаете в TS?»: the code from the old device → the cloud gives the latest copy, the
+ * coffee shop opens here with all its data, and the old device stops taking orders.
+ */
+export function TrialTransfer({ initial, onBack }: { initial: string; onBack: () => void }) {
+  const [code, setCode] = useState(initial ? formatTransferCode(initial) : '');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const norm = normalizeTransferCode(code);
+    if (!norm) {
+      setError('Код — 8 знаков, например 7K3M-Q9TX');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    openByTransferCode(norm)
+      .then((r) => setDone(r.venue))
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Не получилось открыть по коду'))
+      .finally(() => setBusy(false));
+  };
+
+  if (done !== null) {
+    return (
+      <section className="page onboarding trial-welcome">
+        <header className="onboarding-head">
+          <BrandMark className="onboarding-mark" />
+          <div>
+            <h1 className="page-title">«{done}» открыта на этом устройстве</h1>
+            <p className="page-lead">Все данные на месте. Войдите своим кодом, как раньше. На старом устройстве касса теперь только для просмотра.</p>
+          </div>
+        </header>
+        <div className="onboarding-actions">
+          <button
+            type="button"
+            className="btn btn-primary btn-large"
+            onClick={() => {
+              history.replaceState(null, '', window.location.pathname + window.location.search);
+              window.location.reload();
+            }}
+          >
+            Перейти ко входу
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="page onboarding trial-welcome">
+      <header className="onboarding-head">
+        <BrandMark className="onboarding-mark" />
+        <div>
+          <h1 className="page-title">Открыть по коду переноса</h1>
+          <p className="page-lead">На старом устройстве: внизу меню «Пробная» (или «Настройки» → «Облако и перенос») → «Получить код переноса».</p>
+        </div>
+      </header>
+      <form className="onboarding-card trial-form" onSubmit={submit} autoComplete="off" noValidate>
+        <Field label="Код переноса" error={error}>
+          <input
+            className="trial-code-input"
+            value={code}
+            maxLength={12}
+            placeholder="7K3M-Q9TX"
+            autoFocus
+            autoCapitalize="characters"
+            spellCheck={false}
+            aria-invalid={error ? true : undefined}
+            onChange={(e) => {
+              setCode(e.target.value.toUpperCase());
+              setError(null);
+            }}
+          />
+        </Field>
+        <div className="onboarding-actions">
+          <button type="submit" className="btn btn-primary btn-large" disabled={busy}>
+            {busy ? 'Открываем…' : 'Открыть кофейню'}
+          </button>
+        </div>
+        <p className="onboarding-note">Код действует 24 часа. После переноса касса работает здесь, а на старом устройстве данные можно только смотреть.</p>
+      </form>
+      <p className="onboarding-foot">
+        <button type="button" className="onboarding-link" onClick={onBack}>
+          Назад
+        </button>
+      </p>
+    </section>
+  );
+}
 
 /**
  * First visit of the browser trial: two fields and one button. The coffee shop is created in
@@ -18,6 +119,9 @@ export function TrialWelcome({ onStart, onRestored }: { onStart: (t: NewTrial) =
   const [withMenu, setWithMenu] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null);
+  const fromQr = transferCodeFromHash(window.location.hash);
+  const [transfer, setTransfer] = useState<string | null>(TRIAL_CLOUD_URL && fromQr ? fromQr : null);
+  if (transfer !== null) return <TrialTransfer initial={transfer} onBack={() => setTransfer(null)} />;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -72,6 +176,14 @@ export function TrialWelcome({ onStart, onRestored }: { onStart: (t: NewTrial) =
         </p>
       </form>
 
+      {TRIAL_CLOUD_URL && (
+        <p className="onboarding-foot">
+          Уже работаете в TS?{' '}
+          <button type="button" className="onboarding-link" onClick={() => setTransfer('')}>
+            Открыть по коду переноса
+          </button>
+        </p>
+      )}
       <p className="onboarding-foot">
         Уже пробовали на другом устройстве?{' '}
         <button type="button" className="onboarding-link" onClick={() => file.current?.click()}>

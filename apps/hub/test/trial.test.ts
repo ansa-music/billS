@@ -54,6 +54,8 @@ test('trial: the coffee shop named on the welcome screen, its manager signs in w
   // A manager is not on «Кто на смене?» (that list is for staff): the login screen opens on the keypad.
   const roster = (await app.inject({ method: 'GET', url: '/api/auth/roster' })).json() as RosterResponse;
   assert.deepEqual(roster.people, []);
+  // A coffee shop: the login screen says «Бариста», not «Бармен / бариста».
+  assert.equal(roster.business, 'cafe');
 
   const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { key, device: 'Касса' } });
   assert.equal(login.statusCode, 200, login.body);

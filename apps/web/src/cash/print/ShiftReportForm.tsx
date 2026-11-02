@@ -7,8 +7,9 @@ import { printForm } from './printForm.tsx';
 type Club = HubState['club'];
 type Totals = ShiftReport['sales'];
 
-export function printShiftReport(report: ShiftReport, club: Club): void {
-  printForm(<ShiftReportForm report={report} club={club} />);
+/** `cafe`: a coffee shop — orders and checks, never games or time. */
+export function printShiftReport(report: ShiftReport, club: Club, cafe = false): void {
+  printForm(<ShiftReportForm report={report} club={club} cafe={cafe} />);
 }
 
 function MethodTotals({ title, totals, money }: { title: string; totals: Totals; money: (a: Minor) => string }) {
@@ -24,7 +25,7 @@ function MethodTotals({ title, totals, money }: { title: string; totals: Totals;
 }
 
 /** X (interim) or Z (at close) report on the receipt printer. */
-export function ShiftReportForm({ report, club }: { report: ShiftReport; club: Club }) {
+export function ShiftReportForm({ report, club, cafe = false }: { report: ShiftReport; club: Club; cafe?: boolean }) {
   const money = (a: Minor) => formatMoney(a, club.currency);
   const tz = club.timezone;
   const z = report.kind === 'Z';
@@ -57,9 +58,15 @@ export function ShiftReportForm({ report, club }: { report: ShiftReport; club: C
         <>
           <Sep />
           <p className="pf-h">Выручка</p>
-          <p>по счетам, оплаченным в смену</p>
-          <Row label="Время" value={money(report.revenue.time)} />
-          <Row label="Бар" value={money(report.revenue.bar)} />
+          <p>{cafe ? 'по заказам, оплаченным в смену' : 'по счетам, оплаченным в смену'}</p>
+          {cafe ? (
+            <Row label="Заказы" value={money(report.revenue.time + report.revenue.bar)} />
+          ) : (
+            <>
+              <Row label="Время" value={money(report.revenue.time)} />
+              <Row label="Бар" value={money(report.revenue.bar)} />
+            </>
+          )}
           <Row label="Итого" value={money(report.revenue.time + report.revenue.bar)} strong />
         </>
       )}
@@ -81,17 +88,17 @@ export function ShiftReportForm({ report, club }: { report: ShiftReport; club: C
       {report.note && <Info label="Примечание">{report.note}</Info>}
 
       <Sep />
-      <Row label="Счетов оплачено" value={report.checksPaid} />
+      <Row label={cafe ? 'Чеков оплачено' : 'Счетов оплачено'} value={report.checksPaid} />
       <Row label="Операций оплаты" value={report.paymentsCount} />
       <Row label="Возвратов" value={report.refundsCount} />
       <Row label="Скидки" value={money(report.discounts)} />
-      {report.cancelledGames > 0 && <Row label="Отменённых игр" value={report.cancelledGames} />}
+      {!cafe && report.cancelledGames > 0 && <Row label="Отменённых игр" value={report.cancelledGames} />}
 
       {/* «Отменённые»: absent only from a HUB older than this screen. */}
       {report.cancelled && (
         <>
           <Sep />
-          <p className="pf-h">Отменённые</p>
+          <p className="pf-h">{cafe ? 'Отменённые заказы' : 'Отменённые'}</p>
           <Row label="Количество" value={report.cancelled.count} />
           <Row label="На сумму" value={money(report.cancelled.total)} strong />
           {report.cancelled.items.map((e) => (

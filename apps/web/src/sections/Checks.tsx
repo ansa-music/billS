@@ -168,7 +168,7 @@ export function ChecksSection() {
   const owing = state.unpaid.length + state.checks.length + unbilled.length > 0;
   const owingDetail = [
     state.unpaid.length ? `${state.unpaid.length} ${plural(state.unpaid.length, ['игра', 'игры', 'игр'])}` : '',
-    state.checks.length ? `счетов: ${state.checks.length}` : '',
+    state.checks.length ? `${businessOf(state.settings) === 'cafe' ? 'чеков' : 'счетов'}: ${state.checks.length}` : '',
     unbilled.length ? `заказов без счёта: ${unbilled.length}` : '',
   ]
     .filter(Boolean)
@@ -201,7 +201,9 @@ export function ChecksSection() {
           value={report ? formatMoney(report.net.total, currency) : '—'}
           detail={
             report
-              ? `счетов: ${report.checksPaid}${report.revenue ? ` · бар ${formatMoney(report.revenue.bar, currency)}` : ''}`
+              ? cafe
+                ? `чеков: ${report.checksPaid}`
+                : `счетов: ${report.checksPaid}${report.revenue ? ` · бар ${formatMoney(report.revenue.bar, currency)}` : ''}`
               : state.shift
                 ? 'считаем…'
                 : 'смена закрыта'

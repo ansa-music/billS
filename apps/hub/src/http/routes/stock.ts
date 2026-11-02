@@ -9,6 +9,7 @@ import type {
 } from '@bills/domain';
 import { RECIPE_MAX_LINES, RECIPE_MAX_OPTION_LINES, SUPPLY_MAX_LINES } from '@bills/domain';
 import type { Hub } from '../../hub.ts';
+import { previewSampleStock, seedSampleStock } from '../../stock-sample.ts';
 import { guard, runCommand } from '../command.ts';
 
 const id = { type: 'string', minLength: 1, maxLength: 100 } as const;
@@ -206,6 +207,39 @@ export function registerStockRoutes(app: FastifyInstance, hub: Hub): void {
     },
     async (req, reply) =>
       runCommand(req, reply, hub, (actor) => ({ status: 201, body: hub.stock.writeOff({ ...req.body, actor }) }), 'stock.writeoff'),
+  );
+
+  // «Докупить на неделю»: quantities and approximate cost — senior staff, like the levels.
+  app.get('/api/stock/purchase', { preHandler: guard('stock.view') }, async () => hub.stock.purchaseList());
+
+  // What runs out, for the POS hint and the barista's strip: names and levels, no prices.
+  app.get('/api/stock/alerts', { preHandler: guard('catalog.view') }, async () => hub.stock.alerts());
+
+  // «Заполнить примером»: what it would add, and adding it (all fitting products or the listed ones).
+  app.get('/api/stock/sample', { preHandler: guard('stock.edit') }, async () => previewSampleStock(hub));
+
+  app.post<{ Body: { productIds?: string[] } }>(
+    '/api/stock/sample',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { productIds: { type: 'array', maxItems: 500, items: id } },
+        },
+      },
+    },
+    async (req, reply) =>
+      runCommand(
+        req,
+        reply,
+        hub,
+        (actor) => ({
+          status: 200,
+          body: seedSampleStock(hub, actor, req.body?.productIds ? { productIds: req.body.productIds } : {}),
+        }),
+        'stock.edit',
+      ),
   );
 
   app.get<{ Querystring: Range }>('/api/stock/movements', { preHandler: guard('stock.view') }, async (req) =>

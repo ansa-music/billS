@@ -3466,3 +3466,20 @@ input[aria-invalid='true'] {
   color: var(--accent);
   font-weight: 600;
 }
+
+/* «Пробные версии»: plan badge, filters, «Сделать постоянной». */
+.trial-chips { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.trial-plan {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: transparent;
+}
+.trial-plan[data-plan='paid'] { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 45%, var(--border)); background: color-mix(in oklab, var(--accent) 10%, transparent); }
+.trial-filters { margin-bottom: 12px; }
+.trial-paid-form .field { display: grid; gap: 4px; }
+.trial-paid-form .check { display: inline-flex; gap: 6px; align-items: center; }

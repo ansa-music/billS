@@ -137,11 +137,19 @@ export async function waitUntilConnected(signal: AbortSignal, timeoutMs = 90_000
  * GET /api/auth/roster: people to pick on «Кто на смене?» — empty when switched off or nobody has
  * a six-digit key yet, also on an older HUB without the route (404); null when the HUB is unreachable.
  */
+let lastBusiness: 'cafe' | 'billiards' | undefined;
+
+/** The venue type the last roster named (for role words: «Бариста» in a coffee shop). */
+export function rosterBusiness(): 'cafe' | 'billiards' | undefined {
+  return lastBusiness;
+}
+
 export async function fetchRoster(): Promise<RosterPerson[] | null> {
   try {
     const res = await fetch(hubUrl('/api/auth/roster'), { cache: 'no-store' });
     if (!res.ok) return res.status === 404 ? [] : null;
     const body = (await res.json()) as Partial<RosterResponse>;
+    lastBusiness = body.business;
     return Array.isArray(body.people) ? body.people : [];
   } catch {
     return null;

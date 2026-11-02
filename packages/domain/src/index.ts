@@ -29,3 +29,5 @@ export * from './booking.ts';
 export * from './trial.ts';
 export * from './archive.ts';
 export * from './stock.ts';
+export * from './stock-sample.ts';
+export * from './stock-reports.ts';

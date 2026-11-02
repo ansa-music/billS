@@ -207,7 +207,8 @@ jobs:
           npm run build -w @bills/cloud-web
           VITE_DEMO_LOCAL=1 npm run build -w @bills/web
           # Two-week browser trial for a coffee shop: the same in-page HUB, the person's own data.
-          VITE_DEMO_LOCAL=1 VITE_TRIAL=1 npm run build -w @bills/web -- --outDir dist-trial
+          # VITE_CABINET_URL: where «Смотреть выручку с телефона» links point (#/v/<token> in the cabinet).
+          VITE_CABINET_URL="$TS_CABINET_URL" VITE_DEMO_LOCAL=1 VITE_TRIAL=1 npm run build -w @bills/web -- --outDir dist-trial
 
       - name: Deploy cabinet
         id: cabinet

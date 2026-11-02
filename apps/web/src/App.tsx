@@ -316,7 +316,7 @@ export function App() {
             {content}
           </main>
         </div>
-        <BottomNav routes={visible} active={path} badges={badges} staff={staff} onLogout={signOut} />
+        <BottomNav routes={visible} active={path} badges={badges} staff={staff} onLogout={signOut} business={business} />
         {toast && <Toast message={toast} onClose={closeToast} />}
       </div>
     </HubContext.Provider>

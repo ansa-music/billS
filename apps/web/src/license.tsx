@@ -1,6 +1,6 @@
 import type { Action, LicenseState, LicenseStatus, RoleSet } from '@bills/domain';
 import { ACTION_MODULE, MODULE_LABEL, decide, licenseGateOf } from '@bills/domain';
-import { currentTrial, TRIAL } from './demo-hub/trial-store.ts';
+import { currentTrial, TRIAL, trialOverMessage } from './demo-hub/trial-store.ts';
 
 /**
  * The license of this branch as screens see it: the banner in the shell and
@@ -40,7 +40,8 @@ export function blockedReason(roles: RoleSet, action: Action, license: LicenseSt
     case 'forbidden':
       return 'Недостаточно прав для этого действия.';
     case 'read_only':
-      return `Только чтение: ${license?.message ?? READ_ONLY_TEXT}`;
+      // The browser coffee shop says why in its own words (trial over, paid period over, moved to another device).
+      return `Только чтение: ${TRIAL ? trialOverMessage(currentTrial()) : (license?.message ?? READ_ONLY_TEXT)}`;
     case 'module_off': {
       const mod = ACTION_MODULE[action];
       return mod ? `Модуль «${MODULE_LABEL[mod]}» не входит в лицензию клуба.` : 'Модуль не входит в лицензию клуба.';
@@ -64,7 +65,7 @@ export function LicenseBanner({ license }: { license: LicenseStatus | null | und
       <p className="license-banner-text">
         <strong>{danger ? 'Только чтение.' : 'Лицензия.'}</strong>{' '}
         {TRIAL && license.readOnly
-          ? (currentTrial()?.message ?? 'Пробный период завершён: данные можно смотреть и скачать, новые заказы недоступны.')
+          ? trialOverMessage(currentTrial())
           : (license.message ?? (danger ? READ_ONLY_TEXT : 'Лицензия скоро закончится. Продлите доступ.'))}
       </p>
     </div>

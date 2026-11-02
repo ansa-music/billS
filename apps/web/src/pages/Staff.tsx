@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { CreateStaffRequest, IssueKeyResponse, Role, StaffListResponse, StaffView, UpdateStaffRequest } from '@bills/domain';
-import { ROLES, ROLE_LABEL, canAssignRoles, isPlatformRole, normalizeRoles, rolesLabel } from '@bills/domain';
+import { ROLES, canAssignRoles, isPlatformRole, normalizeRoles, roleLabel, rolesLabel } from '@bills/domain';
 import { fetchJson } from '../api.ts';
 import { useAuth } from '../auth.ts';
 import { Confirm, Empty, Field, Loading, Modal, Page, Section, Toast, useToast } from '../ui.tsx';
 import { useCommands, useHub, useServerNow } from '../useHub.tsx';
+import { businessOf } from '../cafe/cafe.ts';
 import { IssuedKey, KeysModal } from './staff/KeysModal.tsx';
 import { CABINET_URL } from './settings/LicenseSection.tsx';
 import { LoginAttempts } from './staff/LoginAttempts.tsx';
@@ -27,6 +28,8 @@ const isLead = (r: Role) => r === 'manager' || isPlatformRole(r);
  */
 export function StaffPage() {
   const { state, canNow, blockedReason, license } = useHub();
+  // In a coffee shop the bartender is «Бариста».
+  const business = businessOf(state.settings);
   const { staff: me, roles: myRoles, can } = useAuth();
   const { toast, show, clear } = useToast();
   const { run, isBusy } = useCommands(show);
@@ -156,7 +159,7 @@ export function StaffPage() {
                       {s.name}
                       {self && <span className="muted"> (вы)</span>}
                     </span>
-                    <span className="staff-role">{rolesLabel(s.roles)}</span>
+                    <span className="staff-role">{rolesLabel(s.roles, business)}</span>
                     {s.origin === 'cloud' && (
                       <span className="staff-cloud">
                         изменяется в{' '}
@@ -325,6 +328,7 @@ function StaffForm({
     tableIds: staff?.tableIds ?? [],
   }));
   const [error, setError] = useState<string | null>(null);
+  const business = businessOf(useHub().state.settings);
 
   // The person's current roles stay visible, even one the editor could not give anew.
   const roleOptions = ROLES.filter((r) => roles.includes(r) || form.roles.includes(r));
@@ -375,7 +379,7 @@ function StaffForm({
         </Field>
         <Field
           label="Роли"
-          hint={form.roles.length > 0 ? `Права складываются: ${rolesLabel(form.roles)}` : 'Отметьте хотя бы одну роль'}
+          hint={form.roles.length > 0 ? `Права складываются: ${rolesLabel(form.roles, business)}` : 'Отметьте хотя бы одну роль'}
         >
           <div className="role-picker" role="group" aria-label="Роли">
             {roleOptions.map((r) => {
@@ -383,7 +387,7 @@ function StaffForm({
               return (
                 <label key={r} className="role-option" data-disabled={allowed ? undefined : ''}>
                   <input type="checkbox" checked={form.roles.includes(r)} disabled={!allowed} onChange={() => toggleRole(r)} />
-                  <span>{ROLE_LABEL[r]}</span>
+                  <span>{roleLabel(r, business)}</span>
                 </label>
               );
             })}

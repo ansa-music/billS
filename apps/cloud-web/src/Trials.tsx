@@ -1,18 +1,30 @@
-/** «Пробные версии» of the platform cabinet: browser trials of coffee shops — watch, extend, end, download. */
+/**
+ * «Пробные версии» of the platform cabinet: browser coffee shops — watch, extend, end, download, and
+ * «Сделать постоянной» (paid until a date or without an end) with «Продлить до…». Filters by plan and state.
+ */
 import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { CloudRequestError, endTrial, extendTrial, fetchTrialSnapshot, listTrials } from './api.ts';
+import { CloudRequestError, endTrial, extendTrial, extendTrialUntil, fetchTrialSnapshot, listTrials, setTrialPlan } from './api.ts';
 import { CopyButton } from './cabinet-ui.tsx';
 import { formatDayLabel } from './format.ts';
 import { usePoll } from './hooks.ts';
 import { describeCabinetError } from './license-form.ts';
 import { Section, loadingText } from './shared.tsx';
-import type { TrialStats, TrialView } from './trials.ts';
+import type { TrialFilter, TrialSnapshot, TrialStats, TrialView } from './trials.ts';
 import {
   DEFAULT_TRIAL_URL,
+  PAID_MAX,
+  TRIAL_FILTERS,
+  TRIAL_PLAN_LABEL,
+  filterTrials,
+  paidLastDay,
+  paidRequest,
+  parseUntilDay,
+  trialDay,
   EXTEND_MAX_DAYS,
   EXTEND_MIN_DAYS,
   TRIAL_STATUS_LABEL,
+  agoText,
   bytesText,
   daysText,
   effectiveStatus,
@@ -44,6 +56,15 @@ function TrialChip({ trial, now }: { trial: TrialView; now: number }) {
   );
 }
 
+function PlanBadge({ trial }: { trial: TrialView }) {
+  const plan = trial.plan === 'paid' ? 'paid' : 'trial';
+  return (
+    <span className="trial-plan" data-plan={plan}>
+      {TRIAL_PLAN_LABEL[plan]}
+    </span>
+  );
+}
+
 function LastSeen({ trial, now }: { trial: TrialView; now: number }) {
   return (
     <span className="trial-seen" data-live={isWorkingNow(trial.lastSeenAt, now) || undefined}>
@@ -60,7 +81,10 @@ function TrialCard({ trial, now, selected, onOpen }: { trial: TrialView; now: nu
       <button type="button" className="trial-card" aria-current={selected || undefined} onClick={onOpen}>
         <span className="trial-card-head">
           <strong className="trial-venue">{trial.venue || 'Без названия'}</strong>
-          <TrialChip trial={trial} now={now} />
+          <span className="trial-chips">
+            <PlanBadge trial={trial} />
+            <TrialChip trial={trial} now={now} />
+          </span>
         </span>
         <span className="muted trial-line">
           {trial.managerName || 'управляющий не указан'} · начал(а) {trialDate(trial.startedAt)}
@@ -140,6 +164,22 @@ function downloadText(fileName: string, text: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
+/** The cabinet's copy file needs the plain SQLite: a gzip copy is unpacked in the browser. */
+async function plainSnapshot(snap: TrialSnapshot): Promise<TrialSnapshot> {
+  if (snap.encoding !== 'gzip') return snap;
+  const bin = atob(snap.snapshot);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const out = new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+  let s = '';
+  for (let i = 0; i < out.length; i += 0x8000) s += String.fromCharCode(...out.subarray(i, i + 0x8000));
+  return { snapshot: btoa(s), snapshotAt: snap.snapshotAt, encoding: 'raw' };
+}
+
+function todayPlus(days: number, now: number): string {
+  return trialDay(now + days * 86_400_000);
+}
+
 function TrialDetail({
   trial,
   now,
@@ -158,8 +198,13 @@ function TrialDetail({
   const [done, setDone] = useState<string | null>(null);
   const [custom, setCustom] = useState('');
   const [confirmEnd, setConfirmEnd] = useState(false);
+  const [makePaid, setMakePaid] = useState(false);
+  const [paidDay, setPaidDay] = useState(() => todayPlus(30, now));
+  const [forever, setForever] = useState(false);
+  const [untilDay, setUntilDay] = useState('');
   const s = trial.stats;
   const status = effectiveStatus(trial, now);
+  const paid = trial.plan === 'paid';
 
   async function act(fn: () => Promise<string | null>) {
     if (busy) return;
@@ -195,18 +240,59 @@ function TrialDetail({
     extend(days);
   }
 
+  function extendUntil(e: FormEvent) {
+    e.preventDefault();
+    const r = parseUntilDay(untilDay, now, paid ? PAID_MAX : EXTEND_MAX_DAYS);
+    if ('error' in r) {
+      setDone(null);
+      setError(r.error);
+      return;
+    }
+    void act(async () => {
+      const next = await extendTrialUntil(trial.id, r.until);
+      onChanged(next);
+      setUntilDay('');
+      return paid ? `Оплачено до ${trialDate(r.until - 1)}.` : `Продлено до ${trialDate(next.endsAt)}.`;
+    });
+  }
+
+  function submitPaid(e: FormEvent) {
+    e.preventDefault();
+    const req = paidRequest(forever, paidDay, now);
+    if ('error' in req) {
+      setDone(null);
+      setError(req.error);
+      return;
+    }
+    void act(async () => {
+      const next = await setTrialPlan(trial.id, req);
+      onChanged(next);
+      setMakePaid(false);
+      return next.paidUntil ? `Постоянная версия: оплачено до ${trialDate(next.paidUntil - 1)}.` : 'Постоянная версия без срока.';
+    });
+  }
+
+  function backToTrial() {
+    if (!window.confirm(`Вернуть «${trial.venue}» в пробную версию на 14 дней?`)) return;
+    void act(async () => {
+      const next = await setTrialPlan(trial.id, { plan: 'trial', days: 14 });
+      onChanged(next);
+      return `Снова пробная: до ${trialDate(next.endsAt)}.`;
+    });
+  }
+
   function end() {
     void act(async () => {
       onChanged(await endTrial(trial.id));
       setConfirmEnd(false);
-      return 'Пробный период завершён.';
+      return paid ? 'Доступ закрыт.' : 'Пробный период завершён.';
     });
   }
 
   function download() {
     void act(async () => {
       try {
-        const snap = await fetchTrialSnapshot(trial.id);
+        const snap = await plainSnapshot(await fetchTrialSnapshot(trial.id));
         downloadText(trialBackupFileName(trial.venue, snap.snapshotAt), JSON.stringify(trialBackup(trial, snap)));
         return null;
       } catch (err) {
@@ -229,7 +315,13 @@ function TrialDetail({
     >
       <dl className="facts">
         <div>
-          <dt>Пробный период</dt>
+          <dt>Версия</dt>
+          <dd className="lic-line">
+            <PlanBadge trial={trial} />
+          </dd>
+        </div>
+        <div>
+          <dt>{paid ? 'Доступ' : 'Пробный период'}</dt>
           <dd className="lic-line">
             <TrialChip trial={trial} now={now} />
             <span className="muted">{trialTermText(trial, now)}</span>
@@ -259,9 +351,13 @@ function TrialDetail({
           <dt>Копия данных</dt>
           <dd>
             {trial.snapshotAt
-              ? `${trialDate(trial.snapshotAt)}${trial.snapshotBytes ? ` · ${bytesText(trial.snapshotBytes)}` : ''}`
+              ? `${trialDate(trial.snapshotAt)} (${agoText(now - trial.snapshotAt)} назад)${trial.snapshotBytes ? ` · ${bytesText(trial.snapshotBytes)}` : ''}`
               : 'пока нет'}
           </dd>
+        </div>
+        <div>
+          <dt>Телефон владельца</dt>
+          <dd>{trial.viewLink ? 'ссылка включена' : 'ссылки нет'}</dd>
         </div>
       </dl>
 
@@ -308,11 +404,35 @@ function TrialDetail({
         </p>
       )}
 
+      {editable && makePaid && (
+        <form className="sub-panel trial-paid-form" onSubmit={submitPaid} noValidate>
+          <h3>{paid ? 'Срок постоянной версии' : 'Сделать постоянной'}</h3>
+          <p className="hint">Кофейня продолжит работать в браузере. Касса узнает об этом сама в течение нескольких минут.</p>
+          <div className="row wrap">
+            <label className="field">
+              <span>Оплачено до (включительно)</span>
+              <input type="date" value={paidDay} disabled={forever} min={todayPlus(0, now)} onChange={(e) => setPaidDay(e.target.value)} />
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={forever} onChange={(e) => setForever(e.target.checked)} /> без срока
+            </label>
+          </div>
+          <div className="row wrap">
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {busy ? 'Сохраняем…' : paid ? 'Сохранить' : 'Сделать постоянной'}
+            </button>
+            <button type="button" className="btn" disabled={busy} onClick={() => setMakePaid(false)}>
+              Отмена
+            </button>
+          </div>
+        </form>
+      )}
+
       {editable && confirmEnd && (
         <div className="sub-panel">
-          <h3>Завершить пробный период досрочно?</h3>
+          <h3>{paid ? 'Закрыть доступ?' : 'Завершить пробный период досрочно?'}</h3>
           <p className="hint">
-            Пробная версия «{trial.venue}» закончится сейчас. Данные клиента останутся — их можно скачать кнопкой «Скачать копию данных».
+            {paid ? `Касса «${trial.venue}» перейдёт в режим «только чтение».` : `Пробная версия «${trial.venue}» закончится сейчас.`} Данные клиента останутся — их можно скачать кнопкой «Скачать копию данных».
           </p>
           <div className="row wrap">
             <button type="button" className="btn btn-danger" disabled={busy} onClick={end}>
@@ -325,10 +445,42 @@ function TrialDetail({
         </div>
       )}
 
-      {editable && !confirmEnd && (
+      {editable && !confirmEnd && !makePaid && (
         <div className="trial-actions">
           <div className="row wrap">
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => extend(7)}>
+            {paid ? (
+              <>
+                <button type="button" className="btn btn-primary" disabled={busy} onClick={() => {
+                  setForever(!trial.paidUntil);
+                  if (trial.paidUntil) setPaidDay(paidLastDay(trial.paidUntil));
+                  setMakePaid(true);
+                }}>
+                  Изменить срок
+                </button>
+                <button type="button" className="btn" disabled={busy} onClick={backToTrial}>
+                  Вернуть в пробную
+                </button>
+              </>
+            ) : (
+              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => setMakePaid(true)}>
+                Сделать постоянной
+              </button>
+            )}
+          </div>
+          {(!paid || trial.paidUntil) && (
+            <form className="trial-custom" onSubmit={extendUntil} noValidate>
+              <label className="field trial-custom-field">
+                <span>Продлить до…</span>
+                <input type="date" value={untilDay} min={todayPlus(1, now)} onChange={(e) => setUntilDay(e.target.value)} />
+              </label>
+              <button type="submit" className="btn" disabled={busy || untilDay === ''}>
+                Продлить до даты
+              </button>
+            </form>
+          )}
+          {!paid && (
+          <div className="row wrap">
+            <button type="button" className="btn" disabled={busy} onClick={() => extend(7)}>
               Продлить на 7 дней
             </button>
             <button type="button" className="btn" disabled={busy} onClick={() => extend(14)}>
@@ -352,13 +504,14 @@ function TrialDetail({
               </button>
             </form>
           </div>
+          )}
           <div className="row wrap">
             <button type="button" className="btn" disabled={busy} onClick={download}>
               Скачать копию данных
             </button>
             {status === 'active' && (
               <button type="button" className="btn btn-danger" disabled={busy} onClick={() => setConfirmEnd(true)}>
-                Завершить досрочно
+                {paid ? 'Закрыть доступ' : 'Завершить досрочно'}
               </button>
             )}
           </div>
@@ -400,6 +553,7 @@ export function TrialsSection({ editable }: { editable: boolean }) {
   const { data, error, reload } = usePoll(load, 60_000);
   const [selected, setSelected] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Record<string, TrialView>>({});
+  const [filter, setFilter] = useState<TrialFilter>('all');
   // An action shows the cloud's answer at once; the next poll brings the same and drops it.
   useEffect(() => setOverrides({}), [data]);
   const now = Date.now();
@@ -407,6 +561,7 @@ export function TrialsSection({ editable }: { editable: boolean }) {
   const trials = (data ?? []).map((t) => overrides[t.id] ?? t);
   const current = trials.find((t) => t.id === selected) ?? null;
   const working = trials.filter((t) => isWorkingNow(t.lastSeenAt, now)).length;
+  const shown = filterTrials(trials, filter, now);
 
   return (
     <>
@@ -436,8 +591,17 @@ export function TrialsSection({ editable }: { editable: boolean }) {
           trials.length === 0 ? (
             <TrialsEmpty />
           ) : (
+            <>
+            <div className="seg seg-wrap trial-filters" role="tablist" aria-label="Какие показать">
+              {TRIAL_FILTERS.map((f) => (
+                <button key={f.id} type="button" role="tab" aria-selected={filter === f.id} onClick={() => setFilter(f.id)}>
+                  {f.label} <span className="muted">{filterTrials(trials, f.id, now).length}</span>
+                </button>
+              ))}
+            </div>
+            {shown.length === 0 && <p className="empty">Таких пока нет.</p>}
             <ul className="trial-list">
-              {trials.map((t) => (
+              {shown.map((t) => (
                 <TrialCard
                   key={t.id}
                   trial={t}
@@ -450,6 +614,7 @@ export function TrialsSection({ editable }: { editable: boolean }) {
                 />
               ))}
             </ul>
+            </>
           )
         ) : (
           <p className="empty">{loadingText(error, 'пробные версии')}</p>

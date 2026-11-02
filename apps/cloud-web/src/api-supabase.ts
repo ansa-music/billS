@@ -52,7 +52,7 @@ import type { RegisterDeviceBody } from './api-core.ts';
 import { supabaseAnonKey, supabaseUrl } from './config.ts';
 import { forgetLocalDevices, localDeviceIds } from './localDevices.ts';
 import { nativeBridge } from './platform.ts';
-import type { TrialSnapshot, TrialView } from './trials.ts';
+import type { TrialPlanRequest, TrialSnapshot, TrialView } from './trials.ts';
 import {
   OFFLINE_MESSAGE,
   edgeErrorOf,
@@ -653,6 +653,14 @@ export function extendTrial(id: string, days: number): Promise<TrialView> {
 
 export function endTrial(id: string): Promise<TrialView> {
   return platformEdge<TrialView>('POST', `/platform/trials/${enc(id)}/end`, {});
+}
+
+export function extendTrialUntil(id: string, until: number): Promise<TrialView> {
+  return platformEdge<TrialView>('POST', `/platform/trials/${enc(id)}/extend`, { until });
+}
+
+export function setTrialPlan(id: string, body: TrialPlanRequest): Promise<TrialView> {
+  return platformEdge<TrialView>('POST', `/platform/trials/${enc(id)}/plan`, body);
 }
 
 /** The last SQLite copy the trial sent (base64); 404 when it has sent none yet. */

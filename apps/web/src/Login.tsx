@@ -7,7 +7,7 @@ import { readDevice, useAuth, writeDevice } from './auth.ts';
 import { BrandMark } from './BrandMark.tsx';
 import { DemoKeys, useDemo } from './demo.tsx';
 import { navigate, useLocation } from './router.tsx';
-import { fetchRoster } from './onboarding/setup.ts';
+import { fetchRoster, rosterBusiness } from './onboarding/setup.ts';
 import { Field, Page } from './ui.tsx';
 import './onboarding/onboarding.css';
 
@@ -238,7 +238,7 @@ export function LoginPage({ next }: { next: string }) {
                   {nameInitials(p.name)}
                 </span>
                 <span className="roster-name">{p.name}</span>
-                <span className="roster-role">{rolesLabel(p.roles)}</span>
+                <span className="roster-role">{rolesLabel(p.roles, rosterBusiness())}</span>
               </button>
             </li>
           ))}
@@ -327,7 +327,7 @@ export function LoginPage({ next }: { next: string }) {
             <span className="roster-avatar roster-avatar-big" aria-hidden="true">
               {nameInitials(person.name)}
             </span>
-            <span className="roster-role">{rolesLabel(person.roles)}</span>
+            <span className="roster-role">{rolesLabel(person.roles, rosterBusiness())}</span>
           </div>
         ) : null}
         <p className="login-ask">

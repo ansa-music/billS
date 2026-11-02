@@ -1,7 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { TrialStats } from '../src/trial.ts';
-import { cleanTrialStats, TRIAL_ENDED_MESSAGE, TRIAL_EXPIRED_MESSAGE, trialStatus, trialTerms, validateTrialStats } from '../src/trial.ts';
+import type { TrialStats, TrialSummary } from '../src/trial.ts';
+import {
+  cleanTrialStats,
+  cleanTrialSummary,
+  formatTransferCode,
+  normalizeTransferCode,
+  PAID_ENDED_MESSAGE,
+  TRIAL_ENDED_MESSAGE,
+  TRIAL_EXPIRED_MESSAGE,
+  trialStatus,
+  trialTerms,
+  validateTrialStats,
+  validateTrialSummary,
+} from '../src/trial.ts';
 
 const STATS: TrialStats = {
   ordersTotal: 12,
@@ -72,8 +84,59 @@ test('trialStatus: active until endsAt, then expired; ended stays ended', () => 
 });
 
 test('trialTerms: a message only when the trial is over', () => {
-  assert.deepEqual(trialTerms({ status: 'active', endsAt: 10 }, 5), { status: 'active', endsAt: 10 });
-  assert.deepEqual(trialTerms({ status: 'active', endsAt: 10 }, 10), { status: 'expired', endsAt: 10, message: TRIAL_EXPIRED_MESSAGE });
-  assert.deepEqual(trialTerms({ status: 'ended', endsAt: 3 }, 5), { status: 'ended', endsAt: 3, message: TRIAL_ENDED_MESSAGE });
+  const plain = { plan: 'trial', paidUntil: null, snapshotAt: null } as const;
+  assert.deepEqual(trialTerms({ status: 'active', endsAt: 10 }, 5), { status: 'active', endsAt: 10, ...plain });
+  assert.deepEqual(trialTerms({ status: 'active', endsAt: 10 }, 10), { status: 'expired', endsAt: 10, message: TRIAL_EXPIRED_MESSAGE, ...plain });
+  assert.deepEqual(trialTerms({ status: 'ended', endsAt: 3 }, 5), { status: 'ended', endsAt: 3, message: TRIAL_ENDED_MESSAGE, ...plain });
   assert.equal(TRIAL_ENDED_MESSAGE, 'Пробный период завершён. Свяжитесь с TS, чтобы продолжить.');
+});
+
+test('trialTerms: a paid plan carries paidUntil and the paid words when it is over', () => {
+  assert.deepEqual(trialTerms({ status: 'active', endsAt: 100, plan: 'paid', paidUntil: 100, snapshotAt: 7 }, 50), {
+    status: 'active',
+    endsAt: 100,
+    plan: 'paid',
+    paidUntil: 100,
+    snapshotAt: 7,
+  });
+  assert.equal(trialTerms({ status: 'active', endsAt: 100, plan: 'paid', paidUntil: 100 }, 100).message, PAID_ENDED_MESSAGE);
+  assert.equal(trialTerms({ status: 'ended', endsAt: 100, plan: 'paid', paidUntil: null }, 50).message, PAID_ENDED_MESSAGE);
+  // A trial row never shows a paid date.
+  assert.equal(trialTerms({ status: 'active', endsAt: 100, plan: 'trial', paidUntil: 90 }, 50).paidUntil, null);
+});
+
+test('transfer codes: typed loosely, shown grouped; letters that look alike are not in the alphabet', () => {
+  assert.equal(normalizeTransferCode('7k3m-q9tx'), '7K3MQ9TX');
+  assert.equal(normalizeTransferCode(' 7K3M Q9TX '), '7K3MQ9TX');
+  assert.equal(normalizeTransferCode('7K3M—Q9TX'), '7K3MQ9TX');
+  assert.equal(normalizeTransferCode('7K3MQ9T'), null);
+  assert.equal(normalizeTransferCode('7K3MQ9T0'), null, 'zero is not used');
+  assert.equal(normalizeTransferCode('IIIIOOOO'), null);
+  assert.equal(formatTransferCode('7K3MQ9TX'), '7K3M-Q9TX');
+});
+
+const SUMMARY: TrialSummary = {
+  at: 1,
+  currency: 'KZT',
+  timezone: 'Asia/Almaty',
+  date: '2026-10-29',
+  revenueToday: 100,
+  revenue7: 700,
+  revenue30: 3000,
+  checksToday: 2,
+  avgCheckToday: 50,
+  topToday: [{ name: 'Латте', qty: 2, revenue: 100 }],
+  methodsToday: { cash: 0, card: 100, qr: 0 },
+  shiftOpen: false,
+  lastActivityAt: null,
+  days: [{ day: '2026-10-29', revenue: 100 }],
+};
+
+test('validateTrialSummary / cleanTrialSummary', () => {
+  assert.deepEqual(validateTrialSummary(SUMMARY), []);
+  assert.deepEqual(validateTrialSummary(null), ['summary: нужен объект']);
+  const bad = validateTrialSummary({ ...SUMMARY, checksToday: -1, date: 'x', topToday: 'no', methodsToday: { cash: 1 } });
+  assert.equal(bad.length, 4, bad.join('; '));
+  assert.ok(validateTrialSummary({ ...SUMMARY, topToday: new Array(6).fill(SUMMARY.topToday[0]) }).length > 0);
+  assert.deepEqual(cleanTrialSummary({ ...SUMMARY, extra: 1, topToday: [{ name: 'Латте', qty: 2, revenue: 100, x: 1 }] } as unknown as TrialSummary), SUMMARY);
 });

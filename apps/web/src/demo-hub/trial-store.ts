@@ -6,7 +6,8 @@
  * without pulling in the HUB.
  */
 
-import type { TrialStatus } from '@bills/domain';
+import type { TrialPlan, TrialStatus, TrialTransferCode } from '@bills/domain';
+import { PAID_ENDED_MESSAGE } from '@bills/domain';
 
 const DB_NAME = 'ts-trial';
 const STORE = 'trial';
@@ -38,6 +39,19 @@ export interface TrialInfo {
   /** When the last backup copy went to the cloud, and a fingerprint of it (sent only when changed). */
   snapshotAt?: number;
   snapshotHash?: string;
+  /** «Постоянная версия»: 'paid' once TS made it permanent (absent = 'trial'); paidUntil null = without an end. */
+  plan?: TrialPlan;
+  paidUntil?: number | null;
+  /** When the cloud got the last copy, as the cloud says (shown as «Копия в облаке: 5 минут назад»). */
+  cloudSnapshotAt?: number | null;
+  /** The copy is bigger than the cloud takes even compressed: only «Скачать копию» keeps it. */
+  snapshotTooBig?: boolean;
+  /** «Смотреть выручку с телефона»: the phone page's token (the manager sees the link in the details). */
+  viewToken?: string;
+  /** A transfer code was issued: until then the cash register asks the cloud often whether it moved. */
+  transferExpiresAt?: number;
+  /** The coffee shop was opened on another device: this one is read-only for good. */
+  moved?: boolean;
   /**
    * Opened from a copy that has no link to the cloud (the cabinet's «Скачать копию данных», an old
    * copy): someone viewing the data, not the trial itself — it never calls /start or /report.
@@ -119,11 +133,44 @@ export function trialVersion(): number {
   return version;
 }
 
-type TrialTermsInfo = Pick<TrialInfo, 'startedAt' | 'endsAt' | 'status'>;
+type TrialTermsInfo = Pick<TrialInfo, 'startedAt' | 'endsAt' | 'status'> & { moved?: boolean | undefined };
 
-/** The trial is over: the cloud said so, or its end has passed. */
+/** The trial is over: the cloud said so, it moved to another device, or its end has passed. */
 export function trialOver(info: TrialTermsInfo, now = Date.now()): boolean {
-  return info.status === 'ended' || info.status === 'expired' || trialEndsAt(info) <= now;
+  return info.moved === true || info.status === 'ended' || info.status === 'expired' || trialEndsAt(info) <= now;
+}
+
+/** Why the cash register is read-only, in the words of the plan. */
+export function trialOverMessage(info: Pick<TrialInfo, 'message' | 'plan'> | null): string {
+  if (info?.message) return info.message;
+  return info?.plan === 'paid' ? PAID_ENDED_MESSAGE : 'Пробный период завершён: данные можно смотреть и скачать, новые заказы недоступны.';
+}
+
+/** «Оплачено до 12 декабря»: the last paid day (paidUntil is the start of the next one). */
+export function paidUntilText(paidUntil: number): string {
+  return new Date(paidUntil - 1).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+}
+
+/** The badge of a permanent version shows up only this close to the end of the paid period. */
+export const PAID_NOTICE_MS = 7 * DAY_MS;
+
+/** What the details panel can ask of the running cloud link (set by boot.ts; absent without a cloud). */
+export interface TrialActions {
+  /** Sends a fresh copy, then asks the cloud for a transfer code. */
+  transferCode(): Promise<TrialTransferCode>;
+  /** A new phone link (the old one stops working), or off. Returns the token or null. */
+  viewLink(off?: boolean): Promise<string | null>;
+  /** Sends the copy now (when something changed since the last one). */
+  backupNow(): Promise<void>;
+}
+let actions: TrialActions | null = null;
+export function setTrialActions(a: TrialActions | null): void {
+  actions = a;
+  version++;
+  for (const l of listeners) l();
+}
+export function trialActions(): TrialActions | null {
+  return actions;
 }
 
 /** Whole days left, rounded up; 0 once the trial is over. */
@@ -151,6 +198,7 @@ export async function downloadBackup(): Promise<void> {
     ...(rec.endsAt !== undefined ? { endsAt: rec.endsAt } : {}),
     ...(rec.status ? { status: rec.status } : {}),
     ...(rec.message ? { message: rec.message } : {}),
+    ...(rec.plan ? { plan: rec.plan, paidUntil: rec.paidUntil ?? null } : {}),
     // The link to the TS cloud moves with the copy, so the trial stays the same trial there.
     ...(rec.cloudId && rec.cloudToken ? { cloudId: rec.cloudId, cloudToken: rec.cloudToken } : {}),
     db: toBase64(rec.db),
@@ -189,6 +237,7 @@ export async function restoreBackup(file: File): Promise<void> {
     ...(typeof data.endsAt === 'number' && Number.isFinite(data.endsAt) ? { endsAt: data.endsAt } : {}),
     ...(isStatus(data.status) ? { status: data.status } : {}),
     ...(typeof data.message === 'string' ? { message: data.message } : {}),
+    ...(data.plan === 'paid' ? { plan: 'paid' as const, paidUntil: typeof data.paidUntil === 'number' ? data.paidUntil : null } : {}),
   });
 }
 
@@ -214,7 +263,7 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(s);
 }
 
-function fromBase64(text: string): Uint8Array {
+export function fromBase64(text: string): Uint8Array {
   const s = atob(text);
   const out = new Uint8Array(s.length);
   for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);

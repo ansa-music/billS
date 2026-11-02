@@ -650,6 +650,8 @@ export interface RosterPerson {
 
 export interface RosterResponse {
   people: RosterPerson[];
+  /** The venue: a coffee shop names roles its own way («Бариста»). Absent from older HUBs. */
+  business?: 'cafe' | 'billiards';
 }
 
 /** GET /api/auth/me */

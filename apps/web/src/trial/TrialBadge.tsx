@@ -1,11 +1,42 @@
 import { useEffect, useReducer, useState, useSyncExternalStore } from 'react';
 import { Modal } from '../ui.tsx';
-import { currentTrial, daysLeft, downloadBackup, subscribeTrial, TRIAL, trialEndsAt, trialOver, trialVersion } from '../demo-hub/trial-store.ts';
+import type { TrialInfo } from '../demo-hub/trial-store.ts';
+import {
+  currentTrial,
+  daysLeft,
+  downloadBackup,
+  PAID_NOTICE_MS,
+  paidUntilText,
+  subscribeTrial,
+  TRIAL,
+  trialEndsAt,
+  trialOver,
+  trialOverMessage,
+  trialVersion,
+} from '../demo-hub/trial-store.ts';
+import { TrialCloudPanel } from './TrialCloud.tsx';
+
+/** What the menu line says, or null when a permanent version has nothing to say. */
+export function badgeLabel(info: Pick<TrialInfo, 'startedAt' | 'endsAt' | 'status' | 'plan' | 'paidUntil' | 'moved'>, now = Date.now()): { text: string; short: string; over: boolean } | null {
+  const over = trialOver(info, now);
+  if (info.moved) return { text: 'Открыта на другом устройстве', short: 'Перенесена', over: true };
+  if (info.plan === 'paid') {
+    if (over) return { text: 'Оплата закончилась', short: 'Оплата', over: true };
+    const until = info.paidUntil ?? null;
+    if (until !== null && until - now <= PAID_NOTICE_MS) return { text: `Оплачено до ${paidUntilText(until)}`, short: paidUntilText(until), over: false };
+    return null;
+  }
+  if (over) return { text: 'Пробная завершена', short: 'Пробная', over: true };
+  const left = daysLeft(info, now);
+  return { text: `Пробная · ${left} дн.`, short: `${left} дн.`, over: false };
+}
 
 /**
  * Browser trial (VITE_TRIAL=1): a quiet line at the bottom of the menu — «Пробная · 12 дн.» —
  * instead of a strip over every page. A click opens the details: the end date, «Скачать копию»,
- * the manager's code and how to extend. Renders nothing in other builds.
+ * the cloud copy, transfer and phone link, the manager's code. A permanent version («paid») shows
+ * nothing here except «Оплачено до 12 декабря» in its last 7 days (its details are in «Настройки»).
+ * Renders nothing in other builds.
  */
 export function TrialBadge({ place = 'sidebar' }: { place?: 'sidebar' | 'sheet' }) {
   useSyncExternalStore(subscribeTrial, trialVersion);
@@ -18,9 +49,10 @@ export function TrialBadge({ place = 'sidebar' }: { place?: 'sidebar' | 'sheet' 
   const [open, setOpen] = useState(false);
   const info = TRIAL ? currentTrial() : null;
   if (!info) return null;
-  const over = trialOver(info);
+  const label = badgeLabel(info);
+  if (!label) return null;
+  const over = label.over;
   const left = daysLeft(info);
-  const label = over ? 'Пробная завершена' : `Пробная · ${left} дн.`;
   return (
     <>
       <button
@@ -28,14 +60,15 @@ export function TrialBadge({ place = 'sidebar' }: { place?: 'sidebar' | 'sheet' 
         className="trial-badge"
         data-place={place}
         data-over={over || undefined}
-        title={over ? (info.message ?? 'Пробный период завершён') : `Пробная версия: осталось ${left} ${daysWord(left)}`}
+        data-plan={info.plan ?? 'trial'}
+        title={over ? trialOverMessage(info) : info.plan === 'paid' ? label.text : `Пробная версия: осталось ${left} ${daysWord(left)}`}
         aria-haspopup="dialog"
         onClick={() => setOpen(true)}
       >
         <span className="trial-badge-dot" aria-hidden="true" />
-        <span className="trial-badge-text">{label}</span>
+        <span className="trial-badge-text">{label.text}</span>
         <span className="trial-badge-short" aria-hidden="true">
-          {over ? 'Пробная' : `${left} дн.`}
+          {label.short}
         </span>
       </button>
       {open && <TrialDetails onClose={() => setOpen(false)} />}
@@ -43,20 +76,31 @@ export function TrialBadge({ place = 'sidebar' }: { place?: 'sidebar' | 'sheet' 
   );
 }
 
-function TrialDetails({ onClose }: { onClose: () => void }) {
+export function TrialDetails({ onClose }: { onClose: () => void }) {
   const info = currentTrial();
   const [busy, setBusy] = useState(false);
   const [showKey, setShowKey] = useState(false);
   if (!info) return null;
   const over = trialOver(info);
   const left = daysLeft(info);
+  const paid = info.plan === 'paid';
   const until = new Date(trialEndsAt(info)).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
   return (
-    <Modal open title="Пробная версия" onClose={onClose}>
+    <Modal open title={paid ? 'TS в браузере' : 'Пробная версия'} onClose={onClose}>
       <div className="trial-details">
         {over ? (
           <p className="trial-details-state" data-over="">
-            {info.message ?? 'Пробный период завершён: данные можно смотреть и скачать, новые заказы недоступны.'}
+            {trialOverMessage(info)}
+          </p>
+        ) : paid ? (
+          <p className="trial-details-state">
+            {info.paidUntil ? (
+              <>
+                Оплачено до <strong>{paidUntilText(info.paidUntil)}</strong>.
+              </>
+            ) : (
+              'Постоянная версия: работает без ограничения срока.'
+            )}
           </p>
         ) : (
           <p className="trial-details-state">
@@ -66,8 +110,9 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
         <p className="muted">
           {info.localOnly
             ? 'Это копия данных для просмотра: она хранится только в этом браузере и не связана с TS.'
-            : 'Данные хранятся в этом браузере. Раз в несколько дней скачивайте копию.'}
+            : 'Данные хранятся в этом браузере, а копия — в облаке TS. Файл копии можно скачать и себе.'}
         </p>
+        <TrialCloudPanel />
         <div className="trial-details-actions">
           <button
             type="button"
@@ -96,7 +141,7 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
             </button>
           )}
         </div>
-        <p className="trial-details-foot">Продлить или подключить полную версию — напишите TS.</p>
+        <p className="trial-details-foot">{paid ? 'Оплата и вопросы — напишите TS.' : 'Продлить или подключить полную версию — напишите TS.'}</p>
       </div>
     </Modal>
   );

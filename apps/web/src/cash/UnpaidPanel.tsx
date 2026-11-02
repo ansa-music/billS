@@ -3,6 +3,7 @@ import type { CheckView, CreateCheckRequest, Minor, SessionView } from '@bills/d
 import { formatMoney } from '@bills/domain';
 import type { CancelTarget } from '../cafe/CounterCancelDialog.tsx';
 import { CounterCancelDialog } from '../cafe/CounterCancelDialog.tsx';
+import { businessOf } from '../cafe/cafe.ts';
 import { formatClock, formatMinutes } from '../format.ts';
 import { useHub } from '../useHub.tsx';
 import { CancelDialog } from './CancelDialog.tsx';
@@ -62,7 +63,7 @@ export function UnpaidPanel(props: DeskProps) {
       </header>
 
       {state.checks.length === 0 && loose.length === 0 && unbilled.length === 0 ? (
-        <p className="empty">Неоплаченных игр и заказов нет</p>
+        <p className="empty">{businessOf(props.state.settings) === 'cafe' ? 'Неоплаченных заказов нет' : 'Неоплаченных игр и заказов нет'}</p>
       ) : (
         <>
           {!canPay && <p className="hint hint-warn">Откройте смену, чтобы принимать оплату</p>}

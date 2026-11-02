@@ -265,3 +265,18 @@
     max-width: 150px;
   }
 }
+
+/* «Прибыль» on the owner's «Выручка» */
+
+.owner-profit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  align-items: baseline;
+}
+
+.owner-profit-main {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}

@@ -59,6 +59,8 @@ declare module '@ts-hub/hub.ts' {
       on(event: 'changed', listener: (e: ChangeEvent) => void): unknown;
       off(event: 'changed', listener: (e: ChangeEvent) => void): unknown;
     };
+    /** The owner summary (apps/hub/src/reports.ts), read-only: «Смотреть с телефона» is built on it. */
+    readonly reports: { summary(date?: string): import('@bills/domain').OwnerSummary };
     readonly auth: {
       issueFixedKeys(keys: ReadonlyArray<{ roles: readonly string[]; name: string; key: string }>): unknown[];
     };
@@ -80,4 +82,10 @@ declare module '@ts-hub/http/app.ts' {
       demo?: { resetAt: () => number };
     },
   ): import('./mini-fastify.ts').MiniFastify;
+}
+
+declare module '@ts-hub/reports.ts' {
+  export function addDays(date: string, days: number): string;
+  export function localDateOf(epochMs: number, timeZone: string): string;
+  export function localMidnightUtc(date: string, timeZone: string): number;
 }

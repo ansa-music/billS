@@ -16,12 +16,15 @@ export function ReportDialog({
   report,
   error,
   club,
+  cafe = false,
   onClose,
 }: {
   kind: 'X' | 'Z';
   report: ShiftReport | null;
   error?: string | null;
   club: HubState['club'];
+  /** A coffee shop: the report speaks of orders and checks, never of games or time. */
+  cafe?: boolean;
   onClose: () => void;
 }) {
   const title = (report?.kind ?? kind) === 'Z' ? 'Z-отчёт' : 'X-отчёт';
@@ -39,7 +42,7 @@ export function ReportDialog({
             type="button"
             className="btn btn-primary"
             disabled={!report}
-            onClick={() => report && printShiftReport(report, club)}
+            onClick={() => report && printShiftReport(report, club, cafe)}
           >
             Печать
           </button>
@@ -47,7 +50,7 @@ export function ReportDialog({
       }
     >
       {report ? (
-        <ReportBody report={report} club={club} />
+        <ReportBody report={report} club={club} cafe={cafe} />
       ) : error ? (
         <FormError error={error} />
       ) : (
@@ -57,7 +60,7 @@ export function ReportDialog({
   );
 }
 
-function ReportBody({ report, club }: { report: ShiftReport; club: HubState['club'] }) {
+function ReportBody({ report, club, cafe }: { report: ShiftReport; club: HubState['club']; cafe: boolean }) {
   const money = (a: Minor) => formatMoney(a, club.currency);
   const tz = club.timezone;
   const diff = report.difference != null ? describeDifference(report.difference, club.currency, formatMoney(0, club.currency)) : null;
@@ -124,20 +127,33 @@ function ReportBody({ report, club }: { report: ShiftReport; club: HubState['clu
               Выручка
             </h3>
             <dl className="kv">
-              <div>
-                <dt>Время</dt>
-                <dd>{money(report.revenue.time)}</dd>
-              </div>
-              <div>
-                <dt>Бар</dt>
-                <dd>{money(report.revenue.bar)}</dd>
-              </div>
+              {cafe ? (
+                <div>
+                  <dt>Заказы</dt>
+                  <dd>{money(report.revenue.time + report.revenue.bar)}</dd>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <dt>Время</dt>
+                    <dd>{money(report.revenue.time)}</dd>
+                  </div>
+                  <div>
+                    <dt>Бар</dt>
+                    <dd>{money(report.revenue.bar)}</dd>
+                  </div>
+                </>
+              )}
               <div className="kv-strong">
                 <dt>Итого</dt>
                 <dd>{money(report.revenue.time + report.revenue.bar)}</dd>
               </div>
             </dl>
-            <p className="hint">По счетам, оплаченным в смену; скидка распределена между временем и баром.</p>
+            <p className="hint">
+              {cafe
+                ? 'По заказам, оплаченным в смену, со скидками.'
+                : 'По счетам, оплаченным в смену; скидка распределена между временем и баром.'}
+            </p>
           </section>
         )}
       </div>
@@ -183,7 +199,7 @@ function ReportBody({ report, club }: { report: ShiftReport; club: HubState['clu
 
       <dl className="kv">
         <div>
-          <dt>Счетов оплачено</dt>
+          <dt>{cafe ? 'Чеков оплачено' : 'Счетов оплачено'}</dt>
           <dd>{report.checksPaid}</dd>
         </div>
         <div>
@@ -198,7 +214,7 @@ function ReportBody({ report, club }: { report: ShiftReport; club: HubState['clu
           <dt>Скидки</dt>
           <dd>{money(report.discounts)}</dd>
         </div>
-        {report.cancelledGames > 0 && (
+        {!cafe && report.cancelledGames > 0 && (
           <div>
             <dt>Отменённых игр</dt>
             <dd>{report.cancelledGames}</dd>
@@ -210,7 +226,7 @@ function ReportBody({ report, club }: { report: ShiftReport; club: HubState['clu
       {report.cancelled && (
         <section aria-labelledby="report-cancelled-title">
           <h3 className="cash-sub" id="report-cancelled-title">
-            Отменённые: {report.cancelled.count}
+            {cafe ? 'Отменённые заказы' : 'Отменённые'}: {report.cancelled.count}
             {report.cancelled.count > 0 && <> на {money(report.cancelled.total)}</>}
           </h3>
           {report.cancelled.items.length === 0 ? (

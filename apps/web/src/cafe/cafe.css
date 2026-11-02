@@ -3292,3 +3292,352 @@ input.pos-guest {
   opacity: 0.6;
   cursor: wait;
 }
+
+/* «Отчёты»: tabs, period, «Что продаётся», «Себестоимость и прибыль» */
+
+.report-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-1);
+  padding: var(--space-1);
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.report-tab-btn {
+  position: relative;
+  min-height: var(--control-lg);
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-base);
+  font-weight: 650;
+  line-height: 1.2;
+  cursor: pointer;
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+
+.report-tab-short {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .report-tab-long {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .report-tab-short {
+    display: inline;
+  }
+
+  .report-period-presets {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    width: 100%;
+  }
+
+  .report-period-presets .chip {
+    justify-content: center;
+    padding-inline: 4px;
+  }
+}
+
+.report-tab-btn[aria-current='page'] {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+@media (hover: hover) {
+  .report-tab-btn:not([aria-current='page']):hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+}
+
+.report-period {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: end;
+  margin-bottom: var(--space-4);
+}
+
+.report-period-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.report-period-presets .chip {
+  min-height: var(--control-lg);
+  padding-inline: var(--space-4);
+}
+
+.report-period-presets .chip[aria-checked='true'] {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+.report-period-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.report-period-dates .field {
+  min-width: 150px;
+  flex: 1 1 150px;
+}
+
+.report-period-dates input {
+  min-height: var(--control-lg);
+}
+
+.report-section {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.report-section .two-col {
+  margin: 0;
+}
+
+/* One column of values for the whole list, so the bars line up. */
+.report-section .cafe-top li {
+  grid-template-columns: minmax(0, 9rem) minmax(48px, 1fr) minmax(5.5rem, auto);
+}
+
+.report-section .cafe-top-qty {
+  white-space: nowrap;
+  text-align: right;
+  min-width: 5.5rem;
+}
+
+.report-section .report-top-wide .cafe-top-qty {
+  min-width: 9.5rem;
+}
+
+@media (max-width: 640px) {
+  .report-section .cafe-top li {
+    grid-template-columns: minmax(0, 7rem) minmax(32px, 1fr) auto;
+  }
+
+  .report-section .cafe-top-qty {
+    min-width: 0;
+  }
+}
+
+.report-warn {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid color-mix(in oklab, var(--warn) 55%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--warn) 10%, var(--surface));
+}
+
+.report-warn p {
+  margin: 0;
+}
+
+.report-warn p + p {
+  margin-top: var(--space-2);
+}
+
+/* Orders by hour: plain vertical bars. */
+
+.report-hours {
+  margin: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.report-hours-bars {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  height: 180px;
+}
+
+.report-hour {
+  flex: 1 1 0;
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  justify-items: center;
+  gap: 2px;
+}
+
+.report-hour-n {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-height: 1em;
+}
+
+.report-hour-bar {
+  align-self: end;
+  width: 100%;
+  max-width: 36px;
+  min-height: 0;
+  border-radius: 4px 4px 0 0;
+  background: color-mix(in oklab, var(--accent) 55%, var(--surface));
+}
+
+.report-hour-bar[data-peak] {
+  background: var(--accent);
+}
+
+.report-hour-label {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Profit per product: a table on wide screens, cards on a phone. */
+
+.profit-table {
+  display: grid;
+  gap: 0;
+}
+
+.profit-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2.2fr) repeat(5, minmax(0, 1fr));
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
+.profit-row > span:not(.profit-name) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.profit-head {
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.profit-name {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--space-2);
+  align-items: center;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.profit-name .tag {
+  font-weight: 500;
+}
+
+.profit-row [data-negative] {
+  color: var(--danger);
+}
+
+.profit-losses {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.profit-losses li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: var(--fs-sm);
+}
+
+.profit-losses li > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .profit-head {
+    display: none;
+  }
+
+  .profit-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px var(--space-3);
+    padding: var(--space-3) 0;
+  }
+
+  .profit-row .profit-name {
+    grid-column: 1 / -1;
+    margin-bottom: 2px;
+  }
+
+  .profit-row > span:not(.profit-name) {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-2);
+    text-align: left;
+  }
+
+  .profit-row > span[data-label]::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: var(--fs-sm);
+  }
+}
+
+/* Low stock: a hint on the POS tile, a strip on «Бариста». */
+
+.pos-tile-hint {
+  display: inline-block;
+  align-self: start;
+  max-width: 100%;
+  margin-top: 2px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--warn);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stock-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  border: 1px solid color-mix(in oklab, var(--warn) 55%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--warn) 12%, var(--surface));
+}
+
+.stock-strip-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.stock-strip .btn {
+  flex: 0 0 auto;
+  min-height: var(--control-lg);
+  min-width: var(--control-lg);
+}

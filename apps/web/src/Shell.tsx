@@ -127,12 +127,15 @@ function BottomNavImpl({
   badges,
   staff,
   onLogout,
+  business,
 }: {
   routes: RouteDef[];
   active: string;
   badges: NavBadges;
   staff?: AuthStaff | undefined;
   onLogout?: (() => void) | undefined;
+  /** A coffee shop names roles its own way («Бариста»). */
+  business?: 'cafe' | 'billiards' | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const fits = routes.length <= PHONE_TABS + 1;
@@ -181,7 +184,7 @@ function BottomNavImpl({
                 <span className="avatar">{initials(staff.name)}</span>
                 <span className="more-who-text">
                   <strong>{staff.name}</strong>
-                  <span className="muted">{rolesLabel(staff.roles)}</span>
+                  <span className="muted">{rolesLabel(staff.roles, business)}</span>
                 </span>
                 {onLogout && (
                   <button
@@ -370,7 +373,7 @@ export function Topbar(props: {
               </span>
               <span className="actor-text">
                 <span className="actor-name">{staff.name}</span>
-                <span className="actor-role">{rolesLabel(staff.roles)}</span>
+                <span className="actor-role">{rolesLabel(staff.roles, state.settings?.business?.type)}</span>
               </span>
               <Icon name="chevron-down" size={16} className="actor-chevron" />
             </span>
@@ -382,7 +385,7 @@ export function Topbar(props: {
                 <span className="avatar">{initials(staff.name)}</span>
                 <span className="actor-who-text">
                   <strong>{staff.name}</strong>
-                  <span className="muted">{rolesLabel(staff.roles)}</span>
+                  <span className="muted">{rolesLabel(staff.roles, state.settings?.business?.type)}</span>
                 </span>
               </div>
               <p className="hint">Имя попадает в журнал действий. Другой сотрудник входит своим ключом.</p>

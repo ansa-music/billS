@@ -18,6 +18,7 @@ import { EmptyState, SectionCard } from '../components.tsx';
 import { Icon } from '../icons.tsx';
 import { sortCatalog, useCatalog } from '../pages/bar/useCatalog.tsx';
 import { useHub, useLive } from '../useHub.tsx';
+import { sampleMessage, useSamplePreview } from './SampleFill.tsx';
 import { byName, matches, parseQty, qtyText } from './stock.ts';
 
 type Run = <T>(key: string, path: string, body?: object) => Promise<T | undefined>;
@@ -50,6 +51,17 @@ export function RecipesTab({ ingredients, run, busy, notify }: { ingredients: In
   const products = (sorted?.products ?? []).filter((p) => p.isActive && matches(p.name, query));
   const categories = (sorted?.categories ?? []).filter((c) => c.isActive);
   const product = sorted?.products.find((p) => p.id === productId) ?? null;
+  // «Заполнить примером»: drinks without a card the sample recognises by name.
+  const preview = useSamplePreview();
+  const samples = useMemo(() => new Map((preview?.products ?? []).map((p) => [p.productId, p])), [preview]);
+  const [reload, setReload] = useState(0);
+  const fillSample = async (productIds: string[]) => {
+    const r = await run<{ ingredients: number; recipes: number }>('stock:sample', '/api/stock/sample', { productIds });
+    if (r) {
+      notify(sampleMessage(r));
+      setReload((n) => n + 1);
+    }
+  };
 
   return (
     <div className="stock-tab stock-recipes" data-open={product ? '' : undefined}>
@@ -58,6 +70,16 @@ export function RecipesTab({ ingredients, run, busy, notify }: { ingredients: In
           <Icon name="search" size={18} />
           <input type="search" placeholder="Найти товар" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Найти товар" />
         </label>
+        {canNow('stock.edit') && samples.size > 0 && (
+          <div className="stock-sample-banner">
+            <span>
+              Есть пример тех. карт для: <strong>{[...samples.values()].map((p) => p.name).join(', ')}</strong>
+            </span>
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void fillSample([...samples.keys()])}>
+              Заполнить примером
+            </button>
+          </div>
+        )}
         {!sorted ? (
           <p className="muted">Загрузка…</p>
         ) : products.length === 0 ? (
@@ -100,8 +122,10 @@ export function RecipesTab({ ingredients, run, busy, notify }: { ingredients: In
 
       {product ? (
         <RecipeEditor
-          key={product.id}
+          key={`${product.id}:${reload}`}
           product={product}
+          sample={canNow('stock.edit') ? (samples.get(product.id)?.sample ?? null) : null}
+          onFillSample={() => void fillSample([product.id])}
           ingredients={ingredients}
           canEdit={canNow('stock.edit')}
           busy={busy}
@@ -125,6 +149,8 @@ export function RecipesTab({ ingredients, run, busy, notify }: { ingredients: In
 
 function RecipeEditor({
   product,
+  sample,
+  onFillSample,
   ingredients,
   canEdit,
   busy,
@@ -132,6 +158,9 @@ function RecipeEditor({
   onSave,
 }: {
   product: ProductView;
+  /** The sample drink that fits this product when it has no card yet («Латте»). */
+  sample: string | null;
+  onFillSample: () => void;
   ingredients: IngredientView[];
   canEdit: boolean;
   busy: boolean;
@@ -242,6 +271,16 @@ function RecipeEditor({
         </span>
       }
     >
+      {sample && items.length === 0 && options.length === 0 && (
+        <div className="stock-sample-banner">
+          <span>
+            Тех. карты нет. Можно взять пример «{sample}» — граммовка под размеры и добавки этого товара.
+          </span>
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={onFillSample}>
+            Заполнить примером
+          </button>
+        </div>
+      )}
       <div className="stock-cost">
         <div>
           <span className="muted">Себестоимость порции</span>

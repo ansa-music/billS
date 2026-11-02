@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { IssueKeyRequest, KeyListResponse, LoginAttemptsResponse, LoginRequest, MeResponse, RosterResponse } from '@bills/domain';
 import type { Hub } from '../hub.ts';
+import { one } from '../db.ts';
 import { actorOf, assertCan, emptyBody, guard, runCommand } from './command.ts';
 
 export interface AuthHookOptions {
@@ -104,7 +105,14 @@ export function registerAuth(app: FastifyInstance, hub: Hub, options: AuthHookOp
 
   app.get('/api/auth/roster', async (_req, reply): Promise<RosterResponse> => {
     reply.header('cache-control', 'no-store');
-    return { people: hub.auth.roster() };
+    const club = one<{ settings: string | null }>(hub.db, 'SELECT settings FROM clubs ORDER BY created_at LIMIT 1');
+    let business: 'cafe' | 'billiards' = 'billiards';
+    try {
+      if ((JSON.parse(club?.settings ?? '{}') as { business?: { type?: string } }).business?.type === 'cafe') business = 'cafe';
+    } catch {
+      // A damaged value reads as the default.
+    }
+    return { people: hub.auth.roster(), business };
   });
 
   app.get('/api/auth/me', async (req): Promise<MeResponse> => {

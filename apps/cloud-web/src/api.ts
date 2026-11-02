@@ -45,7 +45,7 @@ import type { AlertEvent } from './api-supabase.ts';
 import { SUPABASE_MODE } from './config.ts';
 import type { HubCodeResponse } from './onboarding.ts';
 import type { SignupRequest, SignupResponse } from './signup.ts';
-import type { TrialSnapshot, TrialView } from './trials.ts';
+import type { TrialPlanRequest, TrialSnapshot, TrialView } from './trials.ts';
 
 /**
  * One API for the pages, two backends chosen at build time (config.ts):
@@ -417,6 +417,16 @@ export async function extendTrial(id: string, days: number): Promise<TrialView> 
 
 export async function endTrial(id: string): Promise<TrialView> {
   return SUPABASE_MODE ? (await sb()).endTrial(id) : noTrials();
+}
+
+/** «Продлить до…»: the end becomes `until` (ms); a paid plan moves its paid date. */
+export async function extendTrialUntil(id: string, until: number): Promise<TrialView> {
+  return SUPABASE_MODE ? (await sb()).extendTrialUntil(id, until) : noTrials();
+}
+
+/** «Сделать постоянной» (paid until a date or without an end) / «Вернуть в пробную». */
+export async function setTrialPlan(id: string, body: TrialPlanRequest): Promise<TrialView> {
+  return SUPABASE_MODE ? (await sb()).setTrialPlan(id, body) : noTrials();
 }
 
 /** The trial's last SQLite copy as base64; CloudRequestError 404 when there is none. */

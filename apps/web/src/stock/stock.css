@@ -819,3 +819,194 @@
     grid-column: 2;
   }
 }
+
+/* «Заполнить примером» */
+
+.stock-sample {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+  padding: var(--space-5, 24px) var(--space-4);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.stock-sample p {
+  margin: 0;
+  max-width: 70ch;
+}
+
+.stock-sample-title {
+  font-size: var(--fs-lg, 1.15rem);
+  font-weight: 700;
+}
+
+.stock-sample-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--accent, #3b82f6) 10%, var(--surface));
+  font-size: var(--fs-sm);
+}
+
+.stock-sample-banner > span {
+  flex: 1 1 220px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.stock-sample-banner .btn {
+  min-height: var(--control-lg);
+}
+
+/* «Докупить на неделю» */
+
+.stock-buy-btn {
+  flex: 0 0 auto;
+  min-height: var(--control-lg);
+}
+
+.stock-buy-note {
+  margin: 0 0 var(--space-3);
+  font-size: var(--fs-sm);
+}
+
+.stock-buy-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.stock-buy-item {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.stock-buy-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stock-buy-main .muted {
+  font-size: var(--fs-sm);
+}
+
+.stock-buy-qty {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.stock-buy-qty strong {
+  font-size: var(--fs-lg, 1.15rem);
+}
+
+.stock-buy-foot {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.stock-buy-foot .row {
+  justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+  .stock-buy-btn {
+    flex: 1 1 100%;
+  }
+
+  .stock-buy-foot .row .btn {
+    flex: 1 1 100%;
+  }
+}
+
+/* Printed list (printSheet.tsx): only the sheet, black on white. */
+
+#print-sheet {
+  display: none;
+}
+
+@media print {
+  body:has(> #print-sheet) > :not(#print-sheet),
+  body:has(> #print-sheet) dialog {
+    display: none !important;
+  }
+
+  body:has(> #print-sheet) dialog::backdrop {
+    display: none !important;
+  }
+
+  html:has(#print-sheet),
+  html:has(#print-sheet) > body {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  #print-sheet {
+    display: block;
+  }
+}
+
+.buy-sheet {
+  font: 11pt/1.4 system-ui, sans-serif;
+  color: #000;
+}
+
+.buy-sheet h1 {
+  margin: 0 0 2mm;
+  font-size: 16pt;
+}
+
+.buy-sheet p {
+  margin: 0 0 5mm;
+}
+
+.buy-sheet table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.buy-sheet th,
+.buy-sheet td {
+  padding: 2mm 2mm;
+  border-bottom: 0.3mm solid #999;
+  text-align: left;
+  vertical-align: top;
+}
+
+.buy-sheet th:nth-child(n + 3),
+.buy-sheet td:nth-child(n + 3) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.buy-sheet tfoot td {
+  border-bottom: 0;
+  border-top: 0.5mm solid #000;
+}
+
+.buy-sheet-box {
+  width: 6mm;
+  font-size: 13pt;
+}

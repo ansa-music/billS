@@ -69,7 +69,7 @@ test('a real HUB starts clean: one empty club, no demo data, only a support key'
   assert.deepEqual(hub.auth.bootstrapKeys(false), []);
 
   // Nobody to pick on «Кто на смене?» yet, and the support key signs in.
-  assert.deepEqual(await roster(app), { people: [] });
+  assert.deepEqual((await roster(app)).people, []);
   const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { key: keys[0]!.key } });
   assert.equal(login.statusCode, 200);
   const state = await app.inject({
@@ -130,7 +130,7 @@ test('«Кто на смене?»: public names and roles of people with a worki
   });
   assert.equal(off.statusCode, 200, off.body);
   assert.equal(loadSettings(db, clubId(db)).display.showRoster, false);
-  assert.deepEqual(await roster(app), { people: [] });
+  assert.deepEqual((await roster(app)).people, []);
 });
 
 test('settings from the cloud carry the business type chosen at sign-up', async (t) => {

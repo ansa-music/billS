@@ -84,11 +84,21 @@ export function primaryRole(roles: RoleSet): Role | null {
   return ROLES.find((r) => list.includes(r)) ?? null;
 }
 
-/** "Официант + кассир". */
-export function rolesLabel(roles: RoleSet): string {
+/** In a coffee shop the bartender is a barista: staff screens of a cafe say «Бариста». */
+export const CAFE_ROLE_LABEL: Partial<Record<Role, string>> = {
+  bartender: 'Бариста',
+};
+
+/** The label of a role for the venue: `cafe` — the coffee-shop words. */
+export function roleLabel(role: Role, business?: 'cafe' | 'billiards' | null): string {
+  return (business === 'cafe' ? CAFE_ROLE_LABEL[role] : undefined) ?? ROLE_LABEL[role];
+}
+
+/** "Официант + кассир"; with `business = 'cafe'` the coffee-shop words («Бариста»). */
+export function rolesLabel(roles: RoleSet, business?: 'cafe' | 'billiards' | null): string {
   const list = ROLES.filter((r) => asList(roles).includes(r));
   if (list.length === 0) return '—';
-  const text = list.map((r) => ROLE_LABEL[r].toLowerCase()).join(' + ');
+  const text = list.map((r) => roleLabel(r, business).toLowerCase()).join(' + ');
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 

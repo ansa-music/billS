@@ -2,15 +2,16 @@
  * «Пробные версии» of the platform cabinet: pure helpers (no browser globals, so `node --test`
  * runs them as is) — the trial's term, last activity and the backup file in words and shapes.
  */
-import type { TrialStats, TrialStatus, TrialView } from '@bills/domain';
-import { TRIAL_EXTEND_MAX_DAYS, formatMoney } from '@bills/domain';
+import type { TrialPlan, TrialPlanRequest, TrialStats, TrialStatus, TrialView } from '@bills/domain';
+import { PAID_MAX_DAYS, TRIAL_EXTEND_MAX_DAYS, formatMoney } from '@bills/domain';
 
-export type { TrialStats, TrialStatus, TrialView } from '@bills/domain';
+export type { TrialPlan, TrialPlanRequest, TrialStats, TrialStatus, TrialView } from '@bills/domain';
 
-/** GET /platform/trials/:id/snapshot: the trial's last SQLite file, base64. */
+/** GET /platform/trials/:id/snapshot: the trial's last SQLite file, base64 (gzip when encoding is 'gzip'). */
 export interface TrialSnapshot {
   snapshot: string;
   snapshotAt: number;
+  encoding?: 'raw' | 'gzip';
 }
 
 const DAY_MS = 86_400_000;
@@ -60,6 +61,73 @@ export function trialDay(ms: number): string {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
+export const TRIAL_PLAN_LABEL: Record<TrialPlan, string> = { trial: 'Пробная', paid: 'Постоянная' };
+
+const planOf = (t: Pick<TrialView, 'plan'>): TrialPlan => (t.plan === 'paid' ? 'paid' : 'trial');
+
+/** YYYY-MM-DD → the first instant of the next day in Almaty: «оплачено до 12 декабря» includes the 12th. */
+export function dayEndMs(day: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day.trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const guess = Date.UTC(y, mo - 1, d + 1);
+  if (new Date(Date.UTC(y, mo - 1, d)).getUTCDate() !== d) return null;
+  // Almaty's offset at that moment (the zone has no DST now, but read it rather than assume).
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: TRIAL_ZONE, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' }).formatToParts(guess);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  const local = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'));
+  return guess - (local - guess);
+}
+
+/** The last paid day of a paid period (its end is the next day's midnight), YYYY-MM-DD in Almaty. */
+export function paidLastDay(paidUntil: number): string {
+  return trialDay(paidUntil - 1);
+}
+
+/** «Продлить до…» / «Сделать постоянной до…»: a date input → the end in ms, or an error in words. */
+export function parseUntilDay(day: string, now: number, maxDays: number): { until: number } | { error: string } {
+  const until = dayEndMs(day);
+  if (until === null) return { error: 'Выберите дату' };
+  if (until <= now) return { error: 'Дата должна быть в будущем' };
+  if (until > now + maxDays * DAY_MS) return { error: `Не дальше ${maxDays} дней от сегодня` };
+  return { until };
+}
+
+export const PAID_MAX = PAID_MAX_DAYS;
+
+/** «Сделать постоянной»: the request for «до даты» or «без срока». */
+export function paidRequest(forever: boolean, day: string, now: number): TrialPlanRequest | { error: string } {
+  if (forever) return { plan: 'paid', paidUntil: null };
+  const r = parseUntilDay(day, now, PAID_MAX_DAYS);
+  return 'error' in r ? r : { plan: 'paid', paidUntil: r.until };
+}
+
+export type TrialFilter = 'all' | 'trial' | 'paid' | 'live' | 'over';
+
+export const TRIAL_FILTERS: ReadonlyArray<{ id: TrialFilter; label: string }> = [
+  { id: 'all', label: 'Все' },
+  { id: 'trial', label: 'Пробные' },
+  { id: 'paid', label: 'Постоянные' },
+  { id: 'live', label: 'Работают сейчас' },
+  { id: 'over', label: 'Закончились' },
+];
+
+export function filterTrials(list: readonly TrialView[], filter: TrialFilter, now: number): TrialView[] {
+  switch (filter) {
+    case 'all':
+      return [...list];
+    case 'trial':
+    case 'paid':
+      return list.filter((t) => planOf(t) === filter);
+    case 'live':
+      return list.filter((t) => isWorkingNow(t.lastSeenAt, now));
+    case 'over':
+      return list.filter((t) => effectiveStatus(t, now) !== 'active');
+  }
+}
+
 /** The status as the screen should treat it: an «active» trial past its end is already over. */
 export function effectiveStatus(t: Pick<TrialView, 'status' | 'endsAt'>, now: number): TrialStatus {
   return t.status === 'active' && t.endsAt <= now ? 'expired' : t.status;
@@ -78,15 +146,22 @@ export const TRIAL_STATUS_LABEL: Record<TrialStatus, string> = {
 };
 
 /** Colour of the chip, the same tones as the license chip: ok / warn (2 days or less) / danger. */
-export function trialTone(t: Pick<TrialView, 'status' | 'endsAt'>, now: number): 'ok' | 'warn' | 'danger' {
+export function trialTone(t: Pick<TrialView, 'status' | 'endsAt'> & Partial<Pick<TrialView, 'plan' | 'paidUntil'>>, now: number): 'ok' | 'warn' | 'danger' {
   const status = effectiveStatus(t, now);
   if (status !== 'active') return 'danger';
+  if (t.plan === 'paid') return t.paidUntil && t.paidUntil - now <= 7 * DAY_MS ? 'warn' : 'ok';
   return trialDaysLeft(t, now) <= 2 ? 'warn' : 'ok';
 }
 
 /** «осталось 5 дней · до 12 ноября» / «последний день · до 12 ноября» / «завершена досрочно» / «истекла 12 ноября». */
-export function trialTermText(t: Pick<TrialView, 'status' | 'endsAt'>, now: number): string {
+export function trialTermText(t: Pick<TrialView, 'status' | 'endsAt'> & Partial<Pick<TrialView, 'plan' | 'paidUntil'>>, now: number): string {
   const status = effectiveStatus(t, now);
+  if (t.plan === 'paid') {
+    if (status === 'ended') return 'доступ закрыт досрочно';
+    if (status === 'expired') return `оплата закончилась ${trialDate(t.endsAt - 1)}`;
+    if (!t.paidUntil) return 'без срока';
+    return `оплачено до ${trialDate(t.paidUntil - 1)}`;
+  }
   if (status === 'ended') return 'завершена досрочно';
   if (status === 'expired') return `истекла ${trialDate(t.endsAt)}`;
   const left = trialDaysLeft(t, now);

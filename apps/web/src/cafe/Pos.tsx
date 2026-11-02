@@ -30,6 +30,7 @@ import { OpenShiftForm } from '../cash/ShiftPanel.tsx';
 import { Icon } from '../icons.tsx';
 import { OfflineBanner } from '../OfflineBanner.tsx';
 import { sellable, sortCatalog } from '../pages/bar/useCatalog.tsx';
+import { useStockHints } from '../stock/alerts.ts';
 import { GuestPad } from '../loyalty/GuestPad.tsx';
 import type { PickedGuest } from '../loyalty/GuestPad.tsx';
 import { earnedLine, giftOrdinal, guestChip, loyaltyOf } from '../loyalty/model.ts';
@@ -492,6 +493,8 @@ export function PosPage() {
   }, []);
 
   // ── Tiles ─────────────────────────────────────────────────────────────────
+  // «мало: молоко» when a raw material of the drink ran out: a hint only, the sale goes through.
+  const stockHints = useStockHints();
   const tiles = useMemo(
     () =>
       ordered(shown, tileLook.looks.order).map((p) => {
@@ -507,9 +510,10 @@ export function PosPage() {
           out: left === 0,
           low: left !== null && left > 0 && left <= LOW_STOCK ? left : null,
           options: options.length > 0,
+          hint: stockHints.get(p.id) ?? null,
         };
       }),
-    [shown, pendingStock, inOrder, hueOf, money, tileLook.looks.order],
+    [shown, pendingStock, inOrder, hueOf, money, tileLook.looks.order, stockHints],
   );
 
   if (!sorted) {
@@ -1013,6 +1017,8 @@ interface Tile {
   out: boolean;
   low: number | null;
   options: boolean;
+  /** «мало: молоко»: a raw material of the drink is at zero (never blocks the sale). */
+  hint: string | null;
 }
 
 /** The menu grid; re-renders only when the tiles change (not on the HUB clock tick). */
@@ -1043,6 +1049,7 @@ const MenuGrid = memo(function MenuGrid({
           <TilePhoto look={looks[t.id]} />
           <TileBadge look={looks[t.id]} />
           <span className="pos-tile-name">{t.name}</span>
+          {t.hint && !t.out && <span className="pos-tile-hint">{t.hint}</span>}
           <span className="pos-tile-foot">
             <span className="pos-tile-price">{t.price}</span>
             {t.out ? (
