@@ -10,6 +10,7 @@ import { ClubSection } from './settings/ClubSection.tsx';
 import { DisplaySettings } from './settings/DisplaySettings.tsx';
 import { LicenseSection } from './settings/LicenseSection.tsx';
 import { LoyaltySection } from './settings/LoyaltySection.tsx';
+import { ReceiptSection } from './settings/ReceiptSection.tsx';
 import { GuardSection } from './settings/GuardSection.tsx';
 import { RulesSettings } from './settings/RulesSettings.tsx';
 import { TablesEditor } from './settings/TablesEditor.tsx';
@@ -25,6 +26,7 @@ const TABS = [
   { id: 'display', title: 'Экран зала' },
   { id: 'rules', title: 'Правила' },
   { id: 'loyalty', title: 'Лояльность' },
+  { id: 'receipt', title: 'Чек' },
   { id: 'guard', title: 'Сторож' },
   { id: 'devices', title: 'Установка на планшеты' },
   { id: 'license', title: 'Лицензия' },
@@ -46,6 +48,7 @@ export function ClubSettingsPage() {
     (t) =>
       (t.id !== 'license' || roleCan('license.view')) &&
       (t.id !== 'guard' || roleCan('club.edit')) &&
+      (t.id !== 'receipt' || roleCan('receipt.edit')) &&
       (t.id !== 'devices' || can('equipment.view')) &&
       !(cafe && BILLIARDS_ONLY.includes(t.id)),
   ).map(
@@ -113,6 +116,8 @@ export function ClubSettingsPage() {
         return <RulesSettings {...props} canEdit={can('rules.edit')} />;
       case 'loyalty':
         return <LoyaltySection {...props} canEdit={can('club.edit')} />;
+      case 'receipt':
+        return <ReceiptSection {...props} canEdit={can('receipt.edit')} />;
       case 'guard':
         return <GuardSection {...props} canEdit={can('club.edit')} />;
       case 'license':

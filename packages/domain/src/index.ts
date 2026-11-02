@@ -40,3 +40,4 @@ export * from './archive.ts';
 export * from './stock.ts';
 export * from './stock-sample.ts';
 export * from './stock-reports.ts';
+export * from './receipt.ts';
