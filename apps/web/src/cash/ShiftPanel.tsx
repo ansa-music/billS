@@ -274,6 +274,7 @@ function CloseShiftDialog({
   onClosed: (report: ShiftReport | null, number: number) => void;
 }) {
   const { currency } = desk.state.club;
+  const cafe = useHub().business === 'cafe';
   const [counted, setCounted] = useState('');
   const [note, setNote] = useState('');
   const action = useAction();
@@ -305,7 +306,11 @@ function CloseShiftDialog({
         <>
           <FormError error={action.error?.message} />
           {action.error?.code === 'UNPAID_CHECKS' && (
-            <p className="hint">Примите оплату или отмените игры в панели «Ожидают оплаты».</p>
+            <p className="hint">
+              {cafe
+                ? 'Примите оплату неоплаченных заказов или отмените их в панели «Ожидают оплаты».'
+                : 'Примите оплату или отмените игры в панели «Ожидают оплаты».'}
+            </p>
           )}
           <div className="modal-actions">
             <button type="submit" form={formId} className="btn btn-danger" disabled={action.pending}>
@@ -340,7 +345,11 @@ function CloseShiftDialog({
           <textarea rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
         </label>
         {unpaidLeft && action.error?.code !== 'UNPAID_CHECKS' && (
-          <p className="hint hint-warn">Есть неоплаченные игры, счета или заказы бара — смену закрыть не получится.</p>
+          <p className="hint hint-warn">
+            {cafe
+              ? 'Есть неоплаченные заказы — смену закрыть не получится.'
+              : 'Есть неоплаченные игры, счета или заказы бара — смену закрыть не получится.'}
+          </p>
         )}
       </form>
     </Modal>

@@ -34,3 +34,5 @@ export * from './trial-link-crypto.ts';
 export * from './trial-link-realtime.ts';
 export * from './archive.ts';
 export * from './stock.ts';
+export * from './stock-sample.ts';
+export * from './stock-reports.ts';

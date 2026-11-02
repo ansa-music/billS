@@ -1,0 +1,70 @@
+/* Low stock for the staff: a hint on a POS tile, the «Заканчивается» strip on «Бариста». */
+
+.pos-tile-hint {
+  display: block;
+  align-self: start;
+  max-width: 100%;
+  margin-top: 2px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pos-tile-hint[data-level='out'] {
+  background: color-mix(in oklab, var(--danger) 14%, var(--surface));
+  color: var(--danger);
+}
+
+.stock-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  border: 1px solid color-mix(in oklab, var(--warn) 55%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--warn) 12%, var(--surface));
+  color: var(--text);
+}
+
+.stock-strip > svg {
+  flex: 0 0 auto;
+  color: var(--warn);
+}
+
+.stock-strip-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.stock-strip-out {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.stock-strip .btn {
+  flex: 0 0 auto;
+  min-height: var(--control-lg);
+  min-width: var(--control-lg);
+}
+
+/* On «Бариста» it is one more row of the screen, read from a step away like the other hints. */
+.kds > .stock-strip {
+  flex: none;
+  min-height: 52px;
+  margin: 0;
+  padding: 8px 10px 8px 14px;
+  border-width: 2px;
+  border-color: var(--warn);
+  border-radius: 14px;
+  background: var(--warn-soft);
+  font-size: 16px;
+}

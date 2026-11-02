@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import type { IngredientUnit, IngredientView, SuppliesView, SupplyLineInput, SupplyView } from '@bills/domain';
+import { useEffect, useMemo, useState } from 'react';
+import type { IngredientUnit, IngredientView, Minor, SuppliesView, SupplyLineInput, SupplyView } from '@bills/domain';
 import { bigUnitOf, formatMoney, INGREDIENT_UNITS } from '@bills/domain';
 import { fetchJson } from '../api.ts';
 import { FormError, Modal } from '../cash/Modal.tsx';
@@ -8,6 +8,7 @@ import { Icon } from '../icons.tsx';
 import { parseMajor, toMajorText } from '../pages/bar/money.tsx';
 import { formatDateTime } from '../ui.tsx';
 import { useHub, useLive } from '../useHub.tsx';
+import type { SupplyDraft } from './BuyList.tsx';
 import { QtyInput } from './QtyInput.tsx';
 import { byName, matches, packOf, qtyInput, qtyLabel, typedQty } from './stock.ts';
 
@@ -22,9 +23,21 @@ interface Line {
   /** Base units per typed unit: 1000 when typed in кг or л. */
   factor: number;
   amount: string;
+  /** Rough sum from «Докупить на неделю», shown as the placeholder of the sum. */
+  approx?: Minor | null;
 }
 
 let nextKey = 1;
+
+/** Lines of «Докупить на неделю» for a new delivery: the amounts in кг, л or штуки, no sums yet. */
+function draftLines(draft: SupplyDraft | null | undefined, ingredients: readonly IngredientView[]): Line[] {
+  return (draft ?? []).flatMap((d) => {
+    const ing = ingredients.find((i) => i.id === d.ingredientId && !i.isArchived);
+    if (!ing) return [];
+    const typed = qtyInput(d.quantity, ing.unit);
+    return [{ key: nextKey++, ingredientId: ing.id, fresh: null, quantity: typed.text, factor: typed.factor, amount: '', approx: d.approx }];
+  });
+}
 
 const UNIT_WORD: Record<IngredientUnit, string> = { г: 'кг / г', мл: 'л / мл', шт: 'штуки' };
 const DELETE_REASONS = ['Ввели дважды', 'Не та поставка', 'Ошибка в накладной'];
@@ -34,7 +47,26 @@ const DELETE_REASONS = ['Ввели дважды', 'Не та поставка',
  * not on the stock yet is created right here), and the deliveries so far — each may be corrected
  * or deleted by the director or the administrator, or by whoever entered it within 30 minutes.
  */
-export function SuppliesTab({ ingredients, run, busy, notify }: { ingredients: IngredientView[]; run: Run; busy: boolean; notify: (m: string) => void }) {
+export function SuppliesTab({
+  ingredients,
+  run,
+  busy,
+  notify,
+  draft,
+  onDraftUsed,
+}: {
+  ingredients: IngredientView[];
+  run: Run;
+  busy: boolean;
+  notify: (m: string) => void;
+  /** «Создать поставку» from «Докупить на неделю»: the first new-delivery form starts with these lines. */
+  draft?: SupplyDraft | null;
+  onDraftUsed?: () => void;
+}) {
+  const [startLines] = useState(draft ?? null);
+  useEffect(() => {
+    if (draft) onDraftUsed?.();
+  }, [draft, onDraftUsed]);
   const { state, version, serverNow } = useHub();
   const currency = state.club.currency;
   const tz = state.club.timezone;
@@ -55,6 +87,7 @@ export function SuppliesTab({ ingredients, run, busy, notify }: { ingredients: I
       <SupplyForm
         key={`${editing?.id ?? 'new'}:${formKey}`}
         editing={editing}
+        draft={!editing && formKey === 0 ? startLines : null}
         ingredients={ingredients}
         suppliers={suppliers}
         currency={currency}
@@ -163,6 +196,7 @@ export function SuppliesTab({ ingredients, run, busy, notify }: { ingredients: I
 
 function SupplyForm({
   editing,
+  draft,
   ingredients,
   suppliers,
   currency,
@@ -173,6 +207,7 @@ function SupplyForm({
   onCancel,
 }: {
   editing: SupplyView | null;
+  draft: SupplyDraft | null;
   ingredients: IngredientView[];
   suppliers: string[];
   currency: string;
@@ -185,7 +220,7 @@ function SupplyForm({
   const [supplier, setSupplier] = useState(editing?.supplier ?? '');
   const [note, setNote] = useState(editing?.note ?? '');
   const [lines, setLines] = useState<Line[]>(() =>
-    (editing?.lines ?? []).map((l) => {
+    (editing?.lines ?? []).map((l): Line => {
       const typed = qtyInput(l.quantity, l.unit);
       return {
         key: nextKey++,
@@ -195,7 +230,7 @@ function SupplyForm({
         factor: typed.factor,
         amount: l.amount ? toMajorText(l.amount, currency) : '',
       };
-    }),
+    }).concat(editing ? [] : draftLines(draft, ingredients)),
   );
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -336,7 +371,12 @@ function SupplyForm({
                   </label>
                   <label className="field">
                     <span>Сумма, {currency}</span>
-                    <input inputMode="decimal" value={l.amount} onChange={(e) => patch(l.key, { amount: e.target.value })} placeholder="0" />
+                    <input
+                      inputMode="decimal"
+                      value={l.amount}
+                      onChange={(e) => patch(l.key, { amount: e.target.value })}
+                      placeholder={l.approx != null ? `≈ ${formatMoney(l.approx, currency)}` : '0'}
+                    />
                   </label>
                 </div>
                 {(perPack !== null || (l.qty !== null && l.factor > 1)) && (

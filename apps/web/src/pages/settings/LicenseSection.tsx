@@ -82,13 +82,17 @@ function plural(n: number, one: string, few: string, many: string): string {
 export function LicenseFacts({ info, timeZone, children }: { info: LicenseResponse; timeZone: string; children?: ReactNode }) {
   const s: LicenseStatus = info.status;
   const summary = licenseSummary(info, timeZone);
+  const cafe = useHub().business === 'cafe';
   return (
     <div className="license-facts">
       <p className="license-line" data-tone={summary.tone}>
         <span className={TONE_TAG[summary.tone]}>{summary.text}</span>
       </p>
       {s.readOnly && info.enforced && (
-        <p className="hint">Пока лицензия не действует, касса работает «только для просмотра»: новые игры, заказы и изменения не сохраняются.</p>
+        <p className="hint">
+          Пока лицензия не действует, касса работает «только для просмотра»: {cafe ? 'новые заказы' : 'новые игры, заказы'} и изменения не
+          сохраняются.
+        </p>
       )}
       <details className="license-more">
         <summary>Что входит</summary>

@@ -1,0 +1,106 @@
+/* «Докупить на неделю» and «Заполнить примером» on «Склад» (BuyList.tsx, SampleFill.tsx). */
+
+.stock-buy-btn {
+  flex: 0 0 auto;
+  min-height: var(--control-lg);
+}
+
+.stock-buy-note {
+  margin: 0 0 var(--space-3);
+  font-size: var(--fs-sm);
+}
+
+.stock-buy-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.stock-buy-item {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.stock-buy-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stock-buy-main .muted {
+  font-size: var(--fs-sm);
+}
+
+.stock-buy-qty {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.stock-buy-qty strong {
+  font-size: var(--fs-lg);
+}
+
+.stock-buy-foot {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.stock-buy-foot .modal-actions {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .stock-buy-btn {
+    flex: 1 1 100%;
+  }
+
+  .stock-buy-foot .modal-actions .btn {
+    flex: 1 1 100%;
+  }
+}
+
+/* An empty «Остатки»: start from the example instead of typing every raw material. */
+
+.stock-sample {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+  padding: var(--space-5) var(--space-4);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.stock-sample p {
+  margin: 0;
+  max-width: 70ch;
+}
+
+.stock-sample-title {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+
+.stock-sample-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+@media (max-width: 640px) {
+  .stock-sample-actions .btn {
+    flex: 1 1 100%;
+  }
+}

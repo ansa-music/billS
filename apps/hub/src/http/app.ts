@@ -15,6 +15,7 @@ import type { VersionInfo } from '../version.ts';
 import { versionInfo } from '../version.ts';
 import { registerBookingRoutes } from '../bookings.ts';
 import { registerStockRoutes } from './routes/stock.ts';
+import { registerStockReportRoutes } from './routes/stock-reports.ts';
 import { registerAuth } from './auth.ts';
 import type { AuthHookOptions } from './auth.ts';
 import { actorOf, emptyBody, guard, runCommand } from './command.ts';
@@ -343,6 +344,7 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   registerTemplateRoutes(app, hub);
   registerBookingRoutes(app, hub);
   registerStockRoutes(app, hub);
+  registerStockReportRoutes(app, hub);
 
   // Server-sent events: screens refetch /api/state when something changes.
   app.get('/api/events', (req, reply) => {

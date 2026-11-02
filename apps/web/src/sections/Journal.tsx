@@ -409,6 +409,9 @@ export function JournalSection({ params }: { params: URLSearchParams }) {
   const hub = useHub();
   const { state } = hub;
   const tz = state.club.timezone;
+  // A coffee shop has no tables, games or lamps: those filters would always be empty there.
+  const cafe = hub.business === 'cafe';
+  const filters = cafe ? FILTERS.filter((f) => f.value !== 'games' && f.value !== 'lamps').map((f) => (f.value === 'bar' ? { ...f, label: 'Заказы и склад' } : f)) : FILTERS;
   const tableId = params.get('table') ?? '';
   const [filter, setFilter] = useState<Filter>('all');
   /** «Все» hides routine system records (startup checks, sync); this shows them. */
@@ -461,13 +464,14 @@ export function JournalSection({ params }: { params: URLSearchParams }) {
   return (
     <div className="page">
       <p className="page-lead">
-        Всё, что происходит в заведении: кто открыл и остановил стол, оплаты, смены, свет и тревоги. Записи не удаляются и не
-        меняются.
+        {cafe
+          ? 'Всё, что происходит в кофейне: заказы и их отмены, оплаты, смены, склад и сотрудники. Записи не удаляются и не меняются.'
+          : 'Всё, что происходит в заведении: кто открыл и остановил стол, оплаты, смены, свет и тревоги. Записи не удаляются и не меняются.'}
       </p>
       <SectionCard
         title="Журнал действий"
         actions={
-          <select
+          cafe ? undefined : <select
             className="select"
             aria-label="Стол"
             value={tableId}
@@ -483,7 +487,7 @@ export function JournalSection({ params }: { params: URLSearchParams }) {
         }
       >
         <div className="chips" role="group" aria-label="Что показывать">
-          {FILTERS.map((f) => (
+          {filters.map((f) => (
             <button key={f.value} type="button" className="filter-chip" aria-pressed={f.value === filter} onClick={() => setFilter(f.value)}>
               {f.label}
             </button>

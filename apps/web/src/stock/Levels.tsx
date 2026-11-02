@@ -18,7 +18,10 @@ import { Icon } from '../icons.tsx';
 import { parseMajor, toMajorText } from '../pages/bar/money.tsx';
 import { formatDateTime } from '../ui.tsx';
 import { useHub, useLive } from '../useHub.tsx';
+import type { SupplyDraft } from './BuyList.tsx';
+import { BuyListModal } from './BuyList.tsx';
 import { QtyInput } from './QtyInput.tsx';
+import { SampleStart } from './SampleFill.tsx';
 import { byName, daysLabel, matches, packOf, packPrice, plural, qtyInput, qtyLabel, typedQty } from './stock.ts';
 
 type Run = <T>(key: string, path: string, body?: object) => Promise<T | undefined>;
@@ -39,6 +42,7 @@ export function LevelsTab({
   notify,
   openNew,
   onNewOpened,
+  onStartSupply,
 }: {
   ingredients: IngredientView[];
   run: Run;
@@ -47,6 +51,8 @@ export function LevelsTab({
   /** The checklist asked for «Добавить сырьё». */
   openNew?: boolean;
   onNewOpened?: () => void;
+  /** «Создать поставку» from «Докупить на неделю»; absent for someone who does not receive deliveries. */
+  onStartSupply?: ((draft: SupplyDraft) => void) | undefined;
 }) {
   const { state, canNow } = useHub();
   const currency = state.club.currency;
@@ -57,6 +63,7 @@ export function LevelsTab({
   const [history, setHistory] = useState<IngredientView | null>(null);
   const [removing, setRemoving] = useState<IngredientView | null>(null);
   const [sampleOpen, setSampleOpen] = useState(false);
+  const [buying, setBuying] = useState(false);
   const canEdit = canNow('stock.edit');
   const canWriteOff = canNow('stock.writeoff');
 
@@ -113,6 +120,11 @@ export function LevelsTab({
         <button type="button" className="chip" aria-pressed={archived} onClick={() => setArchived((a) => !a)}>
           Архив
         </button>
+        {active.length > 0 && (
+          <button type="button" className="btn stock-buy-btn" onClick={() => setBuying(true)}>
+            Докупить на неделю
+          </button>
+        )}
         {canEdit && (
           <button type="button" className="btn btn-primary stock-add" onClick={() => setEditing('new')}>
             <Icon name="plus" size={18} /> Добавить сырьё
@@ -120,7 +132,9 @@ export function LevelsTab({
         )}
       </div>
 
-      {shown.length === 0 ? (
+      {active.length === 0 && !archived && !query && canEdit ? (
+        <SampleStart run={run} busy={busy} notify={notify} />
+      ) : shown.length === 0 ? (
         <EmptyState icon="orders" title={query ? 'Ничего не нашлось' : archived ? 'Архив пуст' : 'Сырья пока нет'}>
           {!query && !archived && 'Добавьте кофе, молоко, стаканы — всё, из чего готовите.'}
           {!query && archived && 'Сюда уходит удалённое сырьё, по которому уже была история.'}
@@ -256,6 +270,19 @@ export function LevelsTab({
         />
       )}
       {history && <HistoryModal ingredient={history} onClose={() => setHistory(null)} />}
+      {buying && (
+        <BuyListModal
+          onClose={() => setBuying(false)}
+          onStartSupply={
+            onStartSupply &&
+            ((draft) => {
+              setBuying(false);
+              onStartSupply(draft);
+              notify('Список перенесён в поставку: укажите поставщика и суммы по накладной');
+            })
+          }
+        />
+      )}
       {sampleOpen && (
         <RemoveSampleDialog
           busy={busy}
