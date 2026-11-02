@@ -69,6 +69,7 @@ import type { TileLook } from './edit/useTileLook.ts';
 import { ordered, useTileLook } from './edit/useTileLook.ts';
 // Last: phone, tablet and touch layout over the shared café styles.
 import './pos-touch.css';
+import './pos-polish.css';
 
 const HITS = 'hits';
 /** The «Заказ 17» card stays this long after the HUB confirmed, then the counter is ready for the next guest. */
