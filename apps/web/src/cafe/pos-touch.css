@@ -1,7 +1,7 @@
 /* «Касса» on phones, tablets and touch screens. Loaded after cafe.css (Pos.tsx) and refines it:
  *
- *  - every size: touch targets of 48 px, tabular numbers, «Отправить бариста» and «Без оплаты —
- *    счёт потом» as real buttons, the «Заказ 17 отправлен бариста» card;
+ *  - every size: touch targets of 48 px, tabular numbers, «Отправить бариста» as a real button,
+ *    the «Заказ 17 отправлен бариста» card (the full-screen payment step is pay-step.css);
  *  - split (`.pos[data-layout='split']`, 768 px and wider): menu and order side by side, the page
  *    fills the window — a tablet in portrait gets the same two panes as a laptop;
  *  - phone (`.pos[data-layout='phone']`, under 768 px): one hand. The menu scrolls with the page;
@@ -22,10 +22,6 @@
     .pos-qty output,
     .pos-count,
     .pos-held-chip strong,
-    .pos-pay-due strong,
-    .pos-cash-btn,
-    .pos-display-sum,
-    .pos-display-change,
     .pos-flash-number,
     .pos-flash-change,
     .pos-flash-sub,
@@ -291,67 +287,6 @@
   text-align: center;
 }
 
-/* Payment view: «Без оплаты — счёт потом» is a button you can see, not a footnote. */
-.pos-later {
-  display: grid;
-  gap: 2px;
-  min-height: 60px;
-  padding: var(--space-2) var(--space-4);
-  border: 2px dashed var(--border-strong);
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--text);
-  font-size: var(--fs-lg);
-  font-weight: 750;
-  text-align: center;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-
-.pos-later small {
-  color: var(--text-2);
-  font-size: var(--fs-sm);
-  font-weight: 600;
-}
-
-.pos-later:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-
-.pos-later:active:not(:disabled) {
-  transform: scale(0.98);
-}
-
-.pos-later:disabled,
-.pos-other-sum:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.pos .pos-pay-extra .check {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: 48px;
-}
-
-.pos .pos-pay-extra .check input {
-  width: 22px;
-  height: 22px;
-}
-
-.pos-other-sum {
-  min-height: 52px;
-  padding: 0 var(--space-4);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  background: var(--surface-2);
-  color: var(--text);
-  font-size: var(--fs-base);
-  font-weight: 700;
-  cursor: pointer;
-}
-
 /* «Заказ 17 отправлен бариста». */
 .pos-flash-num,
 .pos-flash-info {
@@ -473,13 +408,6 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-  }
-
-  .pos[data-layout='split'] .pos-pay {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
   }
 
   .pos[data-layout='split'] .pos-foot {
@@ -942,15 +870,6 @@
   padding-bottom: var(--space-2);
 }
 
-.pos[data-layout='phone'] .pos-side[data-open] .pos-pay {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  gap: var(--space-3);
-  padding-bottom: var(--space-2);
-}
-
 .pos[data-layout='phone'] .pos-lines-wrap {
   overscroll-behavior: contain;
 }
@@ -1023,34 +942,6 @@
 
 .pos[data-layout='phone'] .pos-paybar {
   min-height: 60px;
-}
-
-/* Payment on a phone: the sum, three big ways to pay, round sums, then «без оплаты». */
-.pos[data-layout='phone'] .pos-pay-due strong {
-  font-size: var(--fs-3xl);
-}
-
-.pos[data-layout='phone'] .pos-method {
-  min-height: 64px;
-}
-
-/* Three round sums in one row: no half-empty second row. */
-.pos[data-layout='phone'] .pos-pay-quick {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.pos[data-layout='phone'] .pos-cash-btn {
-  min-height: 56px;
-  padding-inline: var(--space-2);
-  font-size: var(--fs-lg);
-}
-
-.pos[data-layout='phone'] .pos-cash-btn small {
-  font-size: var(--fs-xs);
-}
-
-.pos[data-layout='phone'] .pos-keypad button {
-  min-height: 56px;
 }
 
 @media (prefers-reduced-motion: reduce) {
