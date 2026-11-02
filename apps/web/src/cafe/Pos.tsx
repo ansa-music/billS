@@ -605,9 +605,11 @@ export function PosPage() {
               type="button"
               className="ts-design-toggle"
               aria-pressed={designing}
+              aria-label={designing ? 'Готово' : 'Редактировать дизайн'}
               onClick={() => setDesigning((d) => !d)}
             >
-              <span aria-hidden="true">✎</span> {designing ? 'Готово' : 'Редактировать дизайн'}
+              <span aria-hidden="true">✎</span>{' '}
+              <span className="ts-design-toggle-text">{designing ? 'Готово' : 'Редактировать дизайн'}</span>
             </button>
           </div>
           {multiplier !== null && (
