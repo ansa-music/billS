@@ -1,0 +1,21 @@
+{
+  "name": "@bills/cloud-hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Prototype: the HUB in a Cloudflare Worker, one Durable Object (SQLite) per café.",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:web": "node scripts/build-web.mjs",
+    "dev": "wrangler dev --ip 127.0.0.1 --port 8790 --var ADMIN_TOKEN:local-admin",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "e2e": "node scripts/e2e.mjs",
+    "trial-snapshot": "node scripts/make-trial-snapshot.ts"
+  },
+  "dependencies": {
+    "@bills/domain": "*"
+  },
+  "devDependencies": {
+    "wrangler": "4.151.3"
+  }
+}

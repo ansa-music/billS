@@ -13,6 +13,7 @@ import type {
   ProductView,
 } from '@bills/domain';
 import { command, fetchJson, HUB_URL, hubUrl } from '../api.ts';
+import { CLOUD } from '../cloud/cloud-cafe.ts';
 
 /**
  * Coffee shop screens (settings.business.type === 'cafe'): the counter («Касса»),
@@ -49,9 +50,11 @@ export const moveCounterStage = (actor: string, orderId: string, stage: CounterS
  * How often the counter screens re-read the HUB while visible. Change events
  * from the HUB (SSE, `trigger`) refresh them at once as well; when the HUB
  * sends dedicated counter events, only this hook needs to change.
+ * «Облачная касса» (cloud/cloud-cafe.ts): every poll is a billed request that wakes the café's Durable
+ * Object, and the WebSocket already brings each change at once — polling is only a slow safety net there.
  */
-export const COUNTER_POLL_MS = 2500;
-export const BOARD_POLL_MS = 2000;
+export const COUNTER_POLL_MS = CLOUD ? 30_000 : 2500;
+export const BOARD_POLL_MS = CLOUD ? 30_000 : 2000;
 
 /**
  * Loads `load` on mount, whenever `trigger` changes (HUB change events) and every

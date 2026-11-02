@@ -1,0 +1,34 @@
+# TS cloud cash desk (prototype): the HUB in a Worker, one SQLite Durable Object per café.
+# Local only so far: `npm run dev -w @bills/cloud-hub` (wrangler dev, Miniflare keeps the data in .wrangler/).
+# Nothing here is deployed; a deploy would need `wrangler login`, `wrangler secret put ADMIN_TOKEN`
+# and a decision on where the data may live (see README.md).
+name = "ts-cloud-hub"
+main = "dist/worker.js"
+compatibility_date = "2026-10-15"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[build]
+command = "node build.mjs"
+watch_dir = ["src", "../hub/src", "../../packages/domain/src", "../web/src/demo-hub"]
+
+# The TS screens built for the cloud (scripts/build-web.mjs) on the same origin: no CORS, no preflights,
+# and static asset requests are free. Only café API and admin calls run the Worker.
+[assets]
+directory = "./web-dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/c/*", "/admin/*"]
+
+[[durable_objects.bindings]]
+name = "CAFE"
+class_name = "CafeHub"
+
+# SQLite-backed Durable Objects (the only kind on the Workers Free plan).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CafeHub"]
+
+[vars]
+# Screens served from another origin (Cloudflare Pages) may call the API too.
+ALLOWED_ORIGINS = "https://*.pages.dev,http://localhost:5173"

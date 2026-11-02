@@ -14,6 +14,7 @@ import { linkFromHash, watchTokenFromHash } from '@bills/domain';
 import { watchToken } from './demo-hub/watch-mode.ts';
 import type { LinkTarget } from './demo-hub/link-mode.ts';
 import { linkTarget } from './demo-hub/link-mode.ts';
+import { cloudCafeCode, cloudHubUrl } from './cloud/cloud-cafe.ts';
 
 applyStoredTheme();
 
@@ -29,7 +30,11 @@ function render() {
 // welcome screen and then runs in the page like the demo, kept in IndexedDB. A device link
 // (#/link/<secret>, «Подключить устройство») makes this page a phone or tablet working through the cash
 // desk; a watch link (#/watch/<token>, «Смотреть с телефона») opens the cash desk's latest data read-only.
-if (import.meta.env.VITE_DEMO_LOCAL === '1' && import.meta.env.VITE_TRIAL === '1') {
+if (import.meta.env.VITE_CLOUD_HUB === '1') {
+  // «Облачная касса» (prototype, apps/cloud-hub): the café's HUB is in the TS cloud; the device only needs
+  // the café code once, then the usual sign-in. Live updates come over a WebSocket (cloud/cloud-events.ts).
+  void startCloud();
+} else if (import.meta.env.VITE_DEMO_LOCAL === '1' && import.meta.env.VITE_TRIAL === '1') {
   const linked = linkTarget();
   const watching = linked ? null : watchToken();
   if (linked) void startLink(linked);
@@ -111,6 +116,25 @@ async function startWatch(token: string): Promise<void> {
       <ui.WatchGate>
         <App />
       </ui.WatchGate>
+    </StrictMode>,
+  );
+}
+
+async function startCloud(): Promise<void> {
+  const rootEl = document.getElementById('root')!;
+  const [events, ui] = await Promise.all([import('./cloud/cloud-events.ts'), import('./cloud/CloudCafe.tsx')]);
+  const code = cloudCafeCode();
+  const root = createRoot(rootEl);
+  if (!code) {
+    root.render(<ui.CloudCafeCode />);
+    return;
+  }
+  events.installCloudEventSource(cloudHubUrl(code));
+  root.render(
+    <StrictMode>
+      <ui.CloudCafeGate code={code}>
+        <App />
+      </ui.CloudCafeGate>
     </StrictMode>,
   );
 }

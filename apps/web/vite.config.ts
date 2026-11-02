@@ -57,7 +57,8 @@ export default defineConfig(({ mode }) => {
           // Inter Variable (woff2) is well over the default 2 MiB limit.
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
           navigateFallback: 'index.html',
-          navigateFallbackDenylist: [/^\/api\//],
+          // /c/<café>/… and /admin/…: the cloud cash desk's Worker (VITE_CLOUD_HUB=1, apps/cloud-hub).
+          navigateFallbackDenylist: [/^\/api\//, /^\/c\//, /^\/admin\//],
           cleanupOutdatedCaches: true,
           // A new build waits until the user taps «Обновить» (src/pwa.tsx) — no forced reloads.
           skipWaiting: false,

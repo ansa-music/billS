@@ -12,6 +12,7 @@ import type {
   SessionView,
   TlsStatus,
 } from '@bills/domain';
+import { CLOUD, cloudHubUrl } from './cloud/cloud-cafe.ts';
 
 export class HubRequestError extends Error {
   readonly code: string;
@@ -52,8 +53,9 @@ function errorText(code: string, message: string | undefined): string {
  * Where the HUB is. Empty (the usual case): the screen is served by the HUB itself or by
  * Vite with a proxy, and requests go to the same origin. The public demo on Firebase Hosting
  * is built with VITE_HUB_URL=https://<demo-hub>.onrender.com and calls it cross-origin (CORS).
+ * «Облачная касса» (VITE_CLOUD_HUB=1, prototype): the café's HUB in the TS cloud, `/c/<café code>`.
  */
-export const HUB_URL = (import.meta.env.VITE_HUB_URL ?? '').trim().replace(/\/+$/, '');
+export const HUB_URL = (CLOUD ? cloudHubUrl() : (import.meta.env.VITE_HUB_URL ?? '')).trim().replace(/\/+$/, '');
 
 /** `/api/...` → absolute URL on the HUB when it lives on another origin. */
 export function hubUrl(path: string): string {
