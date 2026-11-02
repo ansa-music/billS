@@ -2,9 +2,19 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { TrialView } from '../src/trials.ts';
 import {
+  REJECT_MESSAGE_MAX,
+  TRIAL_STATUS_LABEL,
   agoText,
   bytesText,
+  canChangeTerm,
+  canDeleteTrial,
+  duplicateText,
   effectiveStatus,
+  parseRejectMessage,
+  pendingCount,
+  requestSeenText,
+  sortTrials,
+  waitingText,
   endDateDefault,
   endDateRange,
   endDateText,
@@ -27,6 +37,7 @@ import {
 
 const DAY = 86_400_000;
 const MIN = 60_000;
+const HOUR_MS = 3_600_000;
 // 29 Oct 2026, 12:00 in Almaty (UTC+5).
 const NOW = Date.UTC(2026, 9, 29, 7, 0, 0);
 
@@ -43,9 +54,78 @@ function trial(over: Partial<TrialView> = {}): TrialView {
     stats: null,
     snapshotAt: null,
     snapshotBytes: null,
+    requestedAt: null,
+    decidedAt: null,
+    ownerMessage: null,
+    duplicateOf: null,
     ...over,
   };
 }
+
+test('requests, rejected and permanent trials: chip, tone and term in words', () => {
+  const req = trial({ id: 'r', status: 'pending', requestedAt: Date.UTC(2026, 9, 29, 9, 30), startedAt: Date.UTC(2026, 9, 29, 9, 30) });
+  assert.equal(TRIAL_STATUS_LABEL.pending, 'Заявка');
+  assert.equal(TRIAL_STATUS_LABEL.permanent, 'Постоянная');
+  assert.equal(TRIAL_STATUS_LABEL.rejected, 'Отклонена');
+  assert.equal(trialTermText(req, NOW), 'ждёт подтверждения с 29 октября, 14:30');
+  assert.equal(trialTone(req, NOW), 'warn');
+  assert.equal(trialDaysLeft(req, NOW), 0);
+  // A request stays a request whatever its placeholder end says.
+  assert.equal(effectiveStatus(trial({ status: 'pending', endsAt: NOW - DAY }), NOW), 'pending');
+  const no = trial({ status: 'rejected', decidedAt: NOW - DAY });
+  assert.equal(trialTermText(no, NOW), 'отклонена 28 октября');
+  assert.equal(trialTone(no, NOW), 'danger');
+  const full = trial({ status: 'permanent', endsAt: NOW - 30 * DAY });
+  assert.equal(trialTermText(full, NOW), 'без срока');
+  assert.equal(trialTone(full, NOW), 'ok');
+  assert.equal(effectiveStatus(full, NOW), 'permanent', 'never expires');
+});
+
+test('requests come first and are counted; what each trial offers', () => {
+  const list = [
+    trial({ id: 'old', startedAt: NOW - 9 * DAY }),
+    trial({ id: 'req1', status: 'pending', requestedAt: NOW - 2 * HOUR_MS, startedAt: NOW - 2 * HOUR_MS }),
+    trial({ id: 'new', startedAt: NOW - DAY }),
+    trial({ id: 'req2', status: 'pending', requestedAt: NOW - HOUR_MS, startedAt: NOW - HOUR_MS }),
+    trial({ id: 'no', status: 'rejected', startedAt: NOW - 3 * DAY }),
+  ];
+  assert.deepEqual(sortTrials(list).map((t) => t.id), ['req2', 'req1', 'new', 'no', 'old']);
+  assert.equal(pendingCount(list), 2);
+  assert.equal(pendingCount(null), 0);
+  assert.equal(waitingText(1), 'Новая заявка на пробную версию ждёт ответа');
+  assert.equal(waitingText(3), '3 заявки на пробную версию ждут ответа');
+  assert.equal(waitingText(5), '5 заявок на пробную версию ждут ответа');
+
+  // «Удалить» only for what does not run; «Продлить» / «Дата окончания» only after the approval.
+  assert.equal(canDeleteTrial(trial({ status: 'pending' }), NOW), true);
+  assert.equal(canDeleteTrial(trial({ status: 'rejected' }), NOW), true);
+  assert.equal(canDeleteTrial(trial({ status: 'ended' }), NOW), true);
+  assert.equal(canDeleteTrial(trial({ endsAt: NOW - MIN }), NOW), true, 'expired');
+  assert.equal(canDeleteTrial(trial(), NOW), false, 'active');
+  assert.equal(canDeleteTrial(trial({ status: 'permanent' }), NOW), false);
+  assert.equal(canChangeTerm(trial({ status: 'pending' })), false);
+  assert.equal(canChangeTerm(trial({ status: 'rejected' })), false);
+  assert.equal(canChangeTerm(trial({ status: 'permanent' })), true);
+  assert.equal(canChangeTerm(trial({ status: 'ended' })), true);
+});
+
+test('a request’s page: open now or closed', () => {
+  assert.equal(requestSeenText(NOW - MIN, NOW), 'страница заявки открыта');
+  assert.equal(requestSeenText(NOW - 2 * HOUR_MS, NOW), 'страница закрыта · была 2 ч назад');
+  assert.equal(requestSeenText(null, NOW), 'страница заявки не выходила на связь');
+});
+
+test('«похоже на повтор» and the rejection message', () => {
+  const dup = { id: 'a', venue: 'Coffee book', managerName: 'Аиша', status: 'active' as const, startedAt: Date.UTC(2026, 10, 1, 6) };
+  assert.equal(duplicateText(dup), 'похоже на повтор: «Coffee book» (Аиша, с 1 ноября)');
+  assert.equal(duplicateText({ ...dup, managerName: '' }), 'похоже на повтор: «Coffee book» (с 1 ноября)');
+  assert.equal(duplicateText({ ...dup, status: 'pending' }), 'похоже на повтор: «Coffee book» (Аиша, заявка от 1 ноября)');
+  assert.equal(duplicateText(null), null);
+  assert.equal(parseRejectMessage('  у вас уже есть пробная версия  '), 'у вас уже есть пробная версия');
+  assert.equal(parseRejectMessage('   '), null);
+  assert.equal(parseRejectMessage('x'.repeat(REJECT_MESSAGE_MAX + 1)), undefined);
+  assert.equal(parseRejectMessage('x'.repeat(REJECT_MESSAGE_MAX)), 'x'.repeat(REJECT_MESSAGE_MAX));
+});
 
 test('dates are Almaty days', () => {
   assert.equal(trialDate(Date.UTC(2026, 10, 12, 6)), '12 ноября');

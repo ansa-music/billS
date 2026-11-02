@@ -30,6 +30,8 @@ import type {
   OwnerKeyView,
   OwnerOverview,
   OwnerView,
+  PlatformDevicesView,
+  PlatformNotifyTestResponse,
   PushRule,
   PushSettingsView,
   TelegramLinkResponse,
@@ -405,9 +407,59 @@ const noTrials = (): never => {
   throw new CloudRequestError(404, 'NOT_AVAILABLE', 'Доступно только в облачной версии');
 };
 
-/** Newest first. */
+/** Requests first, then newest first; each with `duplicateOf` («похоже на повтор»). */
 export async function listTrials(): Promise<TrialView[]> {
   return SUPABASE_MODE ? (await sb()).listTrials() : noTrials();
+}
+
+/** «Подтвердить»: the request becomes a trial of 14 days from now. */
+export async function approveTrial(id: string): Promise<TrialView> {
+  return SUPABASE_MODE ? (await sb()).approveTrial(id) : noTrials();
+}
+
+/** «Отклонить» with an optional message the coffee shop sees on its page. */
+export async function rejectTrial(id: string, message: string | null): Promise<TrialView> {
+  return SUPABASE_MODE ? (await sb()).rejectTrial(id, message) : noTrials();
+}
+
+/** «Сделать постоянной»: no end date; «Дата окончания» puts it back on a term. */
+export async function makeTrialPermanent(id: string): Promise<TrialView> {
+  return SUPABASE_MODE ? (await sb()).makeTrialPermanent(id) : noTrials();
+}
+
+/** «Удалить» a request or a trial that does not run (with its copy of the data). */
+export async function deleteTrial(id: string): Promise<void> {
+  return SUPABASE_MODE ? (await sb()).deleteTrial(id) : noTrials();
+}
+
+// «Уведомления о заявках»: the platform person's own Telegram chats and browser push.
+
+export async function fetchPlatformTelegram(): Promise<TelegramStatusView> {
+  return SUPABASE_MODE ? (await sb()).fetchPlatformTelegram() : { configured: false, botUsername: null, chats: [] };
+}
+
+export async function linkPlatformTelegram(): Promise<TelegramLinkResponse> {
+  return SUPABASE_MODE ? (await sb()).linkPlatformTelegram() : noTrials();
+}
+
+export async function unlinkPlatformTelegram(chatId: string): Promise<void> {
+  return SUPABASE_MODE ? (await sb()).unlinkPlatformTelegram(chatId) : noTrials();
+}
+
+export async function fetchPlatformDevices(): Promise<PlatformDevicesView> {
+  return SUPABASE_MODE ? (await sb()).fetchPlatformDevices() : { pushEnabled: false, devices: [] };
+}
+
+export async function registerPlatformDevice(body: RegisterDeviceBody): Promise<DeviceView> {
+  return SUPABASE_MODE ? (await sb()).registerPlatformDevice(body) : noTrials();
+}
+
+export async function removePlatformDevice(id: string): Promise<void> {
+  return SUPABASE_MODE ? (await sb()).removePlatformDevice(id) : noTrials();
+}
+
+export async function testPlatformNotify(): Promise<PlatformNotifyTestResponse> {
+  return SUPABASE_MODE ? (await sb()).testPlatformNotify() : noTrials();
 }
 
 /** Adds `days` (1..90) to the trial; the cloud answers with the updated trial. */

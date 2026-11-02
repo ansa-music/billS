@@ -135,17 +135,19 @@ async function startTrial(): Promise<void> {
       return;
     }
   }
+  // The gate shows «Заявка отправлена» while TS has not approved the request, «Готово» with the code once
+  // (a new trial, or right after the approval), then the cash desk — switching by itself as the terms change.
   const begin = async (fresh: Parameters<typeof startTrialHub>[0]) => {
     rootEl.setAttribute('aria-busy', 'true');
-    const info = await startTrialHub(fresh);
+    await startTrialHub(fresh);
     rootEl.removeAttribute('aria-busy');
-    const app = (
+    root.render(
       <StrictMode>
-        <App />
-      </StrictMode>
+        <ui.TrialGate fresh={fresh !== null}>
+          <App />
+        </ui.TrialGate>
+      </StrictMode>,
     );
-    if (fresh) root.render(<ui.TrialReady venue={info.venue} managerKey={info.managerKey} onContinue={() => root.render(app)} />);
-    else root.render(app);
   };
   if (await hasSavedTrial()) {
     await begin(null);

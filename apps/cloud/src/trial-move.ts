@@ -10,6 +10,11 @@
  * token and bumps desk_gen in one transaction — and hands out the snapshot inside that same transaction, so a
  * report the old desk sends a moment later is refused (its token is retired) and can never overwrite it.
  * Codes and tickets never appear in URLs or logs.
+ *
+ * A request waiting for TS (pending / rejected, apps/cloud/src/trial.ts) sends no reports, so it has no copy
+ * and gets no café code: there is nothing to move until TS approves it. A move keeps whatever status the trial
+ * has (active, permanent, ended…). It also forgets the old browser's installId: /trial/start with it can never
+ * hand that browser the cash desk back (it would be a new request).
  */
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { TrialCafeCode, TrialMoveFinish, TrialMoveStart, TrialMoveState, TrialReportMoveAnswer, TrialTerms } from '@bills/domain';
@@ -27,6 +32,7 @@ import {
   TRIAL_MOVE_RATE,
   TRIAL_MOVED_MESSAGE,
   trialTerms,
+  trialWaiting,
 } from '@bills/domain';
 import type { SqlDriver } from './db/driver.ts';
 import { CloudError } from './errors.ts';
@@ -81,14 +87,17 @@ const codeHash = (code: string): string => sha256(cafeCodeHashInput(code));
 // The cash desk: its own token
 
 /** The trial `id` whose token is `token`: 404 for an unknown id, 401 for a missing or wrong token. */
-async function authorizedTrial(db: SqlDriver, id: unknown, token: string | null): Promise<string> {
+async function authorizedTrial(db: SqlDriver, id: unknown, token: string | null): Promise<{ id: string; status: string }> {
   if (!token) throw badTrialToken();
   if (typeof id !== 'string' || !UUID_RE.test(id)) throw trialNotFound();
-  const rows = await db.all<{ id: string; token_hash: string }>('SELECT id::text AS id, token_hash FROM trials WHERE id = ?::uuid', [id]);
+  const rows = await db.all<{ id: string; token_hash: string; status: string }>(
+    'SELECT id::text AS id, token_hash, status FROM trials WHERE id = ?::uuid',
+    [id],
+  );
   const row = rows[0];
   if (!row) throw trialNotFound();
   if (!sameHash(sha256(token), row.token_hash)) throw badTrialToken();
-  return row.id;
+  return { id: row.id, status: row.status };
 }
 
 /** A new café code for the trial: drawn at random, stored as sha256 (a clash with another trial's code is drawn again). */
@@ -107,7 +116,9 @@ async function issueCode(db: SqlDriver, now: number, trialId: string): Promise<s
 
 /** POST /trial/code {id}: «Сменить код» (or «Получить код») — a new café code, returned once; the old one stops working. */
 export async function regenerateCafeCode(db: SqlDriver, now: number, token: string | null, raw: unknown): Promise<TrialCafeCode> {
-  const trialId = await authorizedTrial(db, isObject(raw) ? raw.id : undefined, token);
+  const trial = await authorizedTrial(db, isObject(raw) ? raw.id : undefined, token);
+  if (trialWaiting(trial.status)) throw new CloudError(409, 'TRIAL_NOT_APPROVED', 'Код кофейни появится, когда TS подтвердит заявку');
+  const trialId = trial.id;
   await countAttempt(db, now, `code:${trialId}`, TRIAL_MOVE_RATE.codesPerTrialHour, 'Код кофейни меняли слишком часто. Попробуйте через час');
   return { cafeCode: await issueCode(db, now, trialId) };
 }
@@ -122,8 +133,8 @@ export async function withMove<T extends TrialTerms>(db: SqlDriver, now: number,
   const body = isObject(raw) ? raw : {};
   const id = body.id;
   if (typeof id !== 'string' || !UUID_RE.test(id)) return answer;
-  const rows = await db.all<{ code_hash: string | null; wanted: number | string | null; snapshot_at: number | string | null }>(
-    `SELECT code_hash, ${ms('snapshot_wanted_at')} AS wanted, ${ms('snapshot_at')} AS snapshot_at FROM trials WHERE id = ?::uuid`,
+  const rows = await db.all<{ code_hash: string | null; status: string; wanted: number | string | null; snapshot_at: number | string | null }>(
+    `SELECT code_hash, status, ${ms('snapshot_wanted_at')} AS wanted, ${ms('snapshot_at')} AS snapshot_at FROM trials WHERE id = ?::uuid`,
     [id],
   );
   const row = rows[0];
@@ -138,7 +149,7 @@ export async function withMove<T extends TrialTerms>(db: SqlDriver, now: number,
       out.sendSnapshot = true;
     }
   }
-  if (body.needCode === true && row.code_hash === null) {
+  if (body.needCode === true && row.code_hash === null && !trialWaiting(row.status)) {
     const hash = attemptHash(`code:${id}`);
     if ((await attemptsWithinHour(db, now, hash)) < TRIAL_MOVE_RATE.codesPerTrialHour) {
       await noteAttempt(db, now, hash);
@@ -174,11 +185,12 @@ interface TrialMoveRow {
   desk_gen: number | string;
   code_hash: string | null;
   token_hash: string;
+  owner_message: string | null;
 }
 
 const TRIAL_MOVE_COLUMNS = `id::text AS id, venue, manager_name, status, ${ms('started_at')} AS started_at, ${ms('ends_at')} AS ends_at,
   ${ms('last_seen_at')} AS last_seen_at, ${ms('snapshot_at')} AS snapshot_at, ${ms('snapshot_wanted_at')} AS snapshot_wanted_at,
-  desk_gen, code_hash, token_hash`;
+  desk_gen, code_hash, token_hash, owner_message`;
 
 /**
  * POST /trial/move/start {code}: the café code typed on the new computer. 429 past 30 attempts or 10 wrong
@@ -315,7 +327,7 @@ export async function finishMove(db: SqlDriver, now: number, token: string | nul
     );
     await tx.run(
       `UPDATE trials SET token_hash = ?, desk_gen = desk_gen + 1, moved_at = ?::timestamptz, snapshot_wanted_at = NULL,
-         last_seen_at = ?::timestamptz WHERE id = ?::uuid`,
+         last_seen_at = ?::timestamptz, install_hash = NULL WHERE id = ?::uuid`,
       [sha256(newToken), iso(now), iso(now), row.id],
     );
     await tx.run('UPDATE trial_moves SET finished_at = ?::timestamptz WHERE id = ?::uuid', [iso(now), t.move_id]);
@@ -327,7 +339,8 @@ export async function finishMove(db: SqlDriver, now: number, token: string | nul
       startedAt: Number(row.started_at),
       snapshot: snapshot.replace(/\s+/g, ''),
       snapshotAt,
-      ...trialTerms({ status: row.status, endsAt: Number(row.ends_at) }, now),
+      // The moving page is a current one: the terms in full (permanent stays permanent).
+      ...trialTerms({ status: row.status, endsAt: Number(row.ends_at), ownerMessage: row.owner_message }, now),
     };
   });
 }

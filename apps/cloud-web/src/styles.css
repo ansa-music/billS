@@ -3239,6 +3239,58 @@ input[aria-invalid='true'] {
   max-width: 100%;
 }
 
+/* How many requests wait, on the «Пробные версии» tab. */
+.tab-count {
+  display: inline-block;
+  min-width: 20px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A request waiting for «Подтвердить» / «Отклонить»: a card with buttons, not a button itself. */
+.trial-request {
+  cursor: default;
+  border-color: color-mix(in oklab, var(--warn) 55%, var(--border));
+  background: color-mix(in oklab, var(--warn) 8%, var(--surface-2));
+}
+
+.trial-request:hover {
+  border-color: color-mix(in oklab, var(--warn) 75%, var(--border));
+}
+
+.trial-dup {
+  color: color-mix(in oklab, var(--warn) 70%, var(--text));
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.trial-reject {
+  display: grid;
+  gap: 8px;
+}
+
+.trial-reject textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+.trial-devices {
+  margin: 0;
+  padding-left: 1.2em;
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+
 .trial-list {
   list-style: none;
   margin: 0;

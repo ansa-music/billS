@@ -55,8 +55,15 @@ function deviceName(): string {
   return [browser, os].filter(Boolean).join(', ') + (standalone() ? ' (приложение)' : '');
 }
 
-/** Permission → push subscription (VAPID) → device row 'webpush' with the subscription JSON as the token. */
-export async function enableWebPush(): Promise<WebPushResult> {
+/**
+ * Permission → push subscription (VAPID) → device row 'webpush' with the subscription JSON as the token.
+ * The platform cabinet passes its own `register` (POST /platform/devices) and keeps its row apart (`slot`).
+ */
+export async function enableWebPush(
+  options: { register?: (body: { platform: 'webpush'; token: string; name: string }) => Promise<{ id: string }>; slot?: 'webpush' | 'platform-webpush' } = {},
+): Promise<WebPushResult> {
+  const register = options.register ?? registerDevice;
+  const slot = options.slot ?? 'webpush';
   const support = webPushSupport();
   if (!support.ok) return { ok: false, reason: 'unsupported', message: support.reason };
   try {
@@ -76,8 +83,8 @@ export async function enableWebPush(): Promise<WebPushResult> {
       }
     }
     sub ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
-    const device = await registerDevice({ platform: 'webpush', token: JSON.stringify(sub), name: deviceName() });
-    writeLocalDevice('webpush', { deviceId: device.id, token: sub.endpoint });
+    const device = await register({ platform: 'webpush', token: JSON.stringify(sub), name: deviceName() });
+    writeLocalDevice(slot, { deviceId: device.id, token: sub.endpoint });
     return { ok: true, deviceId: device.id };
   } catch (e) {
     return { ok: false, reason: 'error', message: (e as Error).message || 'Не удалось включить уведомления' };
@@ -85,8 +92,13 @@ export async function enableWebPush(): Promise<WebPushResult> {
 }
 
 /** Id of this browser's device row, if it registered one. */
-export function webPushDeviceId(): string | null {
-  return readLocalDevice('webpush')?.deviceId ?? null;
+export function webPushDeviceId(slot: 'webpush' | 'platform-webpush' = 'webpush'): string | null {
+  return readLocalDevice(slot)?.deviceId ?? null;
+}
+
+/** The platform cabinet's row of this browser was removed: forget the mark (the subscription stays for the owners' alerts). */
+export function forgetPlatformWebPush(): void {
+  writeLocalDevice('platform-webpush', null);
 }
 
 /** After the row was deleted in the list: stop the browser subscription too. */

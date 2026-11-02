@@ -7,6 +7,7 @@
  */
 
 import type { TrialStatus } from '@bills/domain';
+import { isTrialStatus, trialPageOver, trialWaiting } from '@bills/domain';
 import type { StoredLinkDevice } from './link-control.ts';
 
 const DB_NAME = 'ts-trial';
@@ -28,13 +29,22 @@ export interface TrialInfo {
   venue: string;
   managerName: string;
   managerKey: string;
+  /**
+   * This browser's own random id of the trial, made once and saved before the first POST /start: a repeated
+   * start (a lost answer) returns the same trial instead of a second request (TrialStartRequest.installId).
+   */
+  installId?: string;
   /** The trial as the TS cloud knows it (demo-hub/trial-cloud.ts); absent until POST /start answered. */
   cloudId?: string;
   cloudToken?: string;
   /** The end the cloud set (extensions included); without it startedAt + TRIAL_DAYS. */
   endsAt?: number;
+  /**
+   * 'pending' from the welcome form until TS approves the request (the cash desk waits, read-only); then
+   * what the cloud says. Absent on a trial without a cloud (no VITE_SUPABASE_URL, a local copy).
+   */
   status?: TrialCloudStatus;
-  /** The cloud's words for an ended trial («Пробный период завершён…»). */
+  /** The cloud's words for an ended trial («Пробный период завершён…») or TS's message on a rejected request. */
   message?: string | null;
   /** When the last backup copy went to the cloud, and a fingerprint of it (sent only when changed). */
   snapshotAt?: number;
@@ -155,15 +165,56 @@ export function trialVersion(): number {
 
 type TrialTermsInfo = Pick<TrialInfo, 'startedAt' | 'endsAt' | 'status'>;
 
-/** The trial is over: the cloud said so, or its end has passed. */
+/** The trial is over: the cloud said so, or its end has passed (never a permanent one or a request). */
 export function trialOver(info: TrialTermsInfo, now = Date.now()): boolean {
-  return info.status === 'ended' || info.status === 'expired' || trialEndsAt(info) <= now;
+  return trialPageOver(info, now, TRIAL_DAYS);
 }
 
-/** Whole days left, rounded up; 0 once the trial is over. */
+/** TS made it the full version: no end date, no countdown. */
+export function trialPermanent(info: Pick<TrialInfo, 'status'>): boolean {
+  return info.status === 'permanent';
+}
+
+/** The request waits for TS (or TS turned it down): the welcome screens stand in front of the cash desk. */
+export function trialAwaiting(info: Pick<TrialInfo, 'status'>): boolean {
+  return trialWaiting(info.status);
+}
+
+/** Whole days left, rounded up; 0 once the trial is over, while it is a request, and for a permanent one. */
 export function daysLeft(info: TrialTermsInfo, now = Date.now()): number {
-  if (info.status === 'ended' || info.status === 'expired') return 0;
+  if (trialOver(info, now) || trialAwaiting(info) || trialPermanent(info)) return 0;
   return Math.max(0, Math.ceil((trialEndsAt(info) - now) / DAY_MS));
+}
+
+/** A new installId: 24 random bytes as base64url (32 characters). */
+export function newInstallId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** The waiting screen's line about the last check: when the cloud last answered (or failed to). */
+export interface TrialCloudCheck {
+  at: number;
+  ok: boolean;
+}
+let lastCheck: TrialCloudCheck | null = null;
+let checkNowHook: (() => Promise<unknown>) | null = null;
+
+/** trial-cloud.ts: the cloud answered (ok) or not; the waiting screen re-renders. */
+export function noteTrialCheck(ok: boolean, at = Date.now()): void {
+  lastCheck = { at, ok };
+  version++;
+  for (const l of listeners) l();
+}
+export function trialLastCheck(): TrialCloudCheck | null {
+  return lastCheck;
+}
+/** «Проверить сейчас» on the waiting screen asks the cloud at once (set by boot.ts when the cloud link runs). */
+export function setTrialCheckNow(fn: (() => Promise<unknown>) | null): void {
+  checkNowHook = fn;
+}
+export function trialCheckNow(): Promise<unknown> {
+  return checkNowHook ? checkNowHook() : Promise.resolve(null);
 }
 
 export function trialEndsAt(info: Pick<TrialInfo, 'startedAt' | 'endsAt'>): number {
@@ -210,6 +261,7 @@ export async function restoreBackup(file: File): Promise<void> {
   if (data.format !== 'ts-trial-backup' || typeof data.db !== 'string' || typeof data.startedAt !== 'number') {
     throw new Error('Это не копия TS: выберите файл «….ts-backup.json»');
   }
+  const linked = typeof data.cloudId === 'string' && !!data.cloudId && typeof data.cloudToken === 'string' && !!data.cloudToken;
   await saveTrial({
     db: fromBase64(data.db),
     startedAt: data.startedAt,
@@ -217,17 +269,17 @@ export async function restoreBackup(file: File): Promise<void> {
     managerName: String(data.managerName ?? ''),
     managerKey: String(data.managerKey ?? ''),
     savedAt: Date.now(),
-    ...(typeof data.cloudId === 'string' && data.cloudId && typeof data.cloudToken === 'string' && data.cloudToken
-      ? { cloudId: data.cloudId, cloudToken: data.cloudToken }
-      : { localOnly: true }),
+    ...(linked ? { cloudId: data.cloudId as string, cloudToken: data.cloudToken as string } : { localOnly: true }),
     ...(typeof data.endsAt === 'number' && Number.isFinite(data.endsAt) ? { endsAt: data.endsAt } : {}),
-    ...(isStatus(data.status) ? { status: data.status } : {}),
+    // A copy without the cloud link never waits for TS: there is no request to wait for.
+    ...(isStatus(data.status) && (linked || !trialWaiting(data.status)) ? { status: data.status } : {}),
     ...(typeof data.message === 'string' ? { message: data.message } : {}),
   });
 }
 
+/** Every status the cloud may answer (pending, active, ended, expired, rejected, permanent). */
 export function isStatus(v: unknown): v is TrialCloudStatus {
-  return v === 'active' || v === 'ended' || v === 'expired';
+  return isTrialStatus(v);
 }
 
 // Latin only: Chromium drops a download name with Cyrillic letters and saves the file as «download».

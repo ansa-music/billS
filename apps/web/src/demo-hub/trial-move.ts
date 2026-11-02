@@ -12,7 +12,7 @@
  * Light (no HUB): the welcome screen and the trial details import it.
  */
 import type { TrialCafeCode, TrialMoveFinish, TrialMoveStart, TrialMoveState, TrialReportMoveAnswer, TrialReportMoveFields } from '@bills/domain';
-import { isDeskSignal, normalizeCafeCode, TRIAL_MOVE } from '@bills/domain';
+import { isDeskSignal, normalizeCafeCode, TRIAL_MOVE, trialWaiting } from '@bills/domain';
 import type { TrialInfo, TrialRecord } from './trial-store.ts';
 import { currentTrial, saveTrial } from './trial-store.ts';
 
@@ -189,9 +189,10 @@ export function deskMoveApi(): DeskMoveApi | null {
   return api;
 }
 
-/** A refused call that means «this token was retired by a move». */
+/** A refused call that means «this token was retired by a move» (a MoveHttpError or trial-cloud.ts's TrialCloudError). */
 export function isMovedError(err: unknown): boolean {
-  return err instanceof MoveHttpError && err.status === 410 && err.code === 'TRIAL_MOVED';
+  const e = err as { status?: unknown; code?: unknown } | null;
+  return typeof e === 'object' && e !== null && e.status === 410 && e.code === 'TRIAL_MOVED';
 }
 
 /** The cash desk's side of moving (trial-cloud.ts starts it with the cloud link). */
@@ -223,7 +224,8 @@ export function deskMove(deps: DeskMoveDeps): DeskMove {
   };
 
   const signal = async () => {
-    if (stopped || !info.cloudId || !info.cloudToken || !SIGNAL_URL) return;
+    // A request waiting for TS has no copy and no café code yet: nothing to signal about.
+    if (stopped || !info.cloudId || !info.cloudToken || !SIGNAL_URL || trialWaiting(info.status)) return;
     try {
       const res = await fetch(SIGNAL_URL, {
         method: 'POST',

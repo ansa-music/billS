@@ -10,7 +10,7 @@
  */
 import initSqlJs from 'sql.js';
 import wasmUrl from 'sql.js/dist/sql-wasm-browser.wasm?url';
-import { DEMO_KEYS } from '@bills/domain';
+import { DEMO_KEYS, trialPageLicense, trialWithoutReloadLink } from '@bills/domain';
 import { systemClock } from '@ts-hub/clock.ts';
 import { openDb } from '@ts-hub/db.ts';
 import { buildApp } from '@ts-hub/http/app.ts';
@@ -25,9 +25,9 @@ import { provideSqlJs } from './shims/sqlite.ts';
 import { clearSnapshot, loadSnapshot, nextResetAt, resetDemo, saveSnapshot } from './storage.ts';
 import { setupTrialClub, trialKey } from '@ts-hub/trial.ts';
 import type { TrialInfo, TrialRecord } from './trial-store.ts';
-import { loadTrial, saveTrial, setCurrentTrial, TRIAL_DAYS, updateCurrentTrial } from './trial-store.ts';
+import { loadTrial, newInstallId, saveTrial, setCurrentTrial, setTrialCheckNow, TRIAL_DAYS, updateCurrentTrial } from './trial-store.ts';
 import type { TrialTerms } from './trial-cloud.ts';
-import { startTrialCloud } from './trial-cloud.ts';
+import { startTrialCloud, TRIAL_CLOUD_URL } from './trial-cloud.ts';
 import { setWatchSoonHook } from './trial-watch.ts';
 import { installEventSource, installFetch } from './page-api.ts';
 import { installTrialLinkHost } from './link-host.ts';
@@ -146,9 +146,9 @@ export async function hasSavedTrial(): Promise<boolean> {
 
 /**
  * The two-week browser trial (VITE_TRIAL=1): the same in-page HUB as the demo, but the coffee
- * shop is the person's own — kept in IndexedDB with no nightly reset, no demo keys, a trial
- * license counted from the first day. `fresh` creates it (first visit); otherwise the saved
- * one is opened.
+ * shop is the person's own — kept in IndexedDB with no nightly reset, no demo keys. `fresh` creates
+ * it (first visit): the club from the welcome form is set up at once, but with the TS cloud it is a
+ * request ('pending', read-only) until TS approves it (trial-cloud.ts); otherwise the saved one is opened.
  */
 export function startTrialHub(fresh: NewTrial | null): Promise<TrialInfo> {
   trialStarted ??= bootTrial(fresh);
@@ -164,9 +164,10 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
   if (saved) {
     provideSqlJs(SQL, saved.db);
     db = openDb(':memory:');
-    // Records from before the cloud link have no cloud fields: they load as they are.
+    // Records from before the cloud link have no cloud fields: they load as they are. One that an old
+    // cached page linked to TRIAL_RELOAD_ID (the cloud told it to reload) becomes a request again.
     const { db: _bytes, savedAt: _savedAt, ...facts } = saved;
-    info = facts;
+    info = trialWithoutReloadLink(facts);
   } else {
     provideSqlJs(SQL, null);
     db = openDb(':memory:');
@@ -175,6 +176,9 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
       venue: fresh?.venue.trim() || 'Моя кофейня',
       managerName: fresh?.managerName.trim() || 'Директор',
       managerKey: trialKey(),
+      // With the TS cloud a new trial is a request until TS approves it; the installId is saved with the
+      // first save below, before trial-cloud.ts sends it.
+      ...(TRIAL_CLOUD_URL ? { status: 'pending' as const, installId: newInstallId() } : {}),
     };
   }
   setCurrentTrial(info);
@@ -241,7 +245,7 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
     onChange: (listener) => hub.events.on('changed', listener),
     persist: (patch) => {
       updateCurrentTrial(patch);
-      saver.saveNow();
+      return saver.saveNow();
     },
     applyTerms: (_terms: TrialTerms) => {
       void installTrialLicense(hub, movedLicenseView(info), Date.now()).catch((err: unknown) => console.warn('[trial] could not apply the new terms', err));
@@ -255,41 +259,49 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
     (window as unknown as { __tsTrialReportNow?: () => Promise<unknown> }).__tsTrialReportNow = link.reportNow;
     // «Открыть на телефоне»: a fresh copy goes up right away, so the phone opens on current data.
     setWatchSoonHook(link.watchSoon);
+    // «Проверить сейчас» on the waiting screen.
+    setTrialCheckNow(link.reportNow);
   }
   return info;
 }
 
 /**
- * The trial license of the in-page HUB: until the end the cloud set (or startedAt + TRIAL_DAYS
- * before it answered); a trial the cloud ended is valid until now, so the counter is read-only.
+ * The trial license of the in-page HUB (trialPageLicense): until the end the cloud set (or startedAt +
+ * TRIAL_DAYS before it answered); a request waiting for TS and a trial that is over are valid until now,
+ * so the counter is read-only; a permanent one («Полная версия») never runs out.
  */
 async function installTrialLicense(hub: Hub, info: TrialInfo, now: number): Promise<void> {
-  const over = info.status === 'ended' || info.status === 'expired';
-  const endsAt = info.endsAt !== undefined ? (over ? Math.min(info.endsAt, now) : info.endsAt) : over ? now : undefined;
+  const { validUntil, permanent } = trialPageLicense(info, now, TRIAL_DAYS);
   await installDemoLicense(hub.license, now, {
     startedAt: info.startedAt,
     days: TRIAL_DAYS,
-    ...(endsAt !== undefined ? { endsAt } : {}),
+    endsAt: validUntil,
     companyName: info.venue,
+    ...(permanent ? { permanent: true } : {}),
   });
 }
 
-/** Like keepSaved, into IndexedDB; the first save happens right away so a new trial survives a reload. */
-function keepTrialSaved(db: DatabaseSync, hub: Hub, info: TrialInfo): { changed: () => void; saveNow: () => void; halt: () => void } {
+/**
+ * Like keepSaved, into IndexedDB; the first save happens right away so a new trial survives a reload.
+ * `saveNow` resolves once this save is written (the installId is on disk before the first /start).
+ */
+function keepTrialSaved(db: DatabaseSync, hub: Hub, info: TrialInfo): { changed: () => void; saveNow: () => Promise<void>; halt: () => void } {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let writing: Promise<void> = Promise.resolve();
   // Halted when a café moved in from another computer replaces this one (trial-move.ts), until the reload.
   let halted = false;
-  const save = () => {
+  const save = (): Promise<void> => {
     clearTimeout(timer);
     timer = undefined;
-    if (halted) return;
+    if (halted) return writing;
     if (db.isTransaction) {
-      timer = setTimeout(save, 50);
-      return;
+      return new Promise<void>((resolve) => {
+        timer = setTimeout(() => void save().then(resolve), 50);
+      });
     }
     const rec: TrialRecord = { ...info, db: db.export(), savedAt: Date.now() };
     writing = writing.then(() => (halted ? undefined : saveTrial(rec))).catch((err: unknown) => console.warn('[trial] could not save the coffee shop', err));
+    return writing;
   };
   const changed = () => {
     clearTimeout(timer);

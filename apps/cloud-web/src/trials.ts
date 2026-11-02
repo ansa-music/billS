@@ -3,7 +3,16 @@
  * runs them as is) — the trial's term, last activity and the backup file in words and shapes.
  */
 import type { TrialStats, TrialStatus, TrialView } from '@bills/domain';
-import { TRIAL_DEFAULT_TIMEZONE, TRIAL_EXTEND_MAX_DAYS, formatMoney, trialCalendarDay, trialDayEnd, trialEndDate, trialEndDateRange } from '@bills/domain';
+import {
+  TRIAL_DEFAULT_TIMEZONE,
+  TRIAL_EXTEND_MAX_DAYS,
+  TRIAL_MESSAGE_MAX,
+  formatMoney,
+  trialCalendarDay,
+  trialDayEnd,
+  trialEndDate,
+  trialEndDateRange,
+} from '@bills/domain';
 
 export type { TrialStats, TrialStatus, TrialView } from '@bills/domain';
 
@@ -100,6 +109,55 @@ export function effectiveStatus(t: Pick<TrialView, 'status' | 'endsAt'>, now: nu
   return t.status === 'active' && t.endsAt <= now ? 'expired' : t.status;
 }
 
+/** A request still waiting for «Подтвердить» / «Отклонить». */
+export function isRequest(t: Pick<TrialView, 'status'>): boolean {
+  return t.status === 'pending';
+}
+
+/** How many requests wait: the number on the «Пробные версии» tab. */
+export function pendingCount(trials: ReadonlyArray<Pick<TrialView, 'status'>> | null | undefined): number {
+  return (trials ?? []).filter(isRequest).length;
+}
+
+/** «Новая заявка на пробную версию ждёт ответа» / «3 заявки на пробную версию ждут ответа» (the clients tab). */
+export function waitingText(n: number): string {
+  if (n === 1) return 'Новая заявка на пробную версию ждёт ответа';
+  return `${n} ${plural(n, 'заявка', 'заявки', 'заявок')} на пробную версию ${plural(n, 'ждёт', 'ждут', 'ждут')} ответа`;
+}
+
+/** Requests first (newest request first), then the trials by start, newest first — as the cloud sends them. */
+export function sortTrials<T extends Pick<TrialView, 'id' | 'status' | 'startedAt' | 'requestedAt'>>(trials: readonly T[]): T[] {
+  const key = (t: T) => (isRequest(t) ? (t.requestedAt ?? t.startedAt) : t.startedAt);
+  return [...trials].sort((a, b) => Number(isRequest(b)) - Number(isRequest(a)) || key(b) - key(a) || a.id.localeCompare(b.id));
+}
+
+/** «Удалить» is offered for what does not run: a request, a rejected, ended or expired trial. */
+export function canDeleteTrial(t: Pick<TrialView, 'status' | 'endsAt'>, now: number): boolean {
+  const s = effectiveStatus(t, now);
+  return s === 'pending' || s === 'rejected' || s === 'ended' || s === 'expired';
+}
+
+/** «Продлить» / «Дата окончания» / «Завершить» are for a trial TS approved (not for a request). */
+export function canChangeTerm(t: Pick<TrialView, 'status'>): boolean {
+  return t.status !== 'pending' && t.status !== 'rejected';
+}
+
+/** «похоже на повтор: «Coffee book» (Аиша, с 1 ноября)» — the earlier trial a request repeats. */
+export function duplicateText(dup: TrialView['duplicateOf'], timeZone: string = TRIAL_ZONE): string | null {
+  if (!dup) return null;
+  const since = dup.status === 'pending' ? `заявка от ${trialDate(dup.startedAt, timeZone)}` : `с ${trialDate(dup.startedAt, timeZone)}`;
+  return `похоже на повтор: «${dup.venue}» (${dup.managerName ? `${dup.managerName}, ` : ''}${since})`;
+}
+
+/** The rejection message as typed: trimmed; null when empty; undefined when longer than the cloud takes. */
+export function parseRejectMessage(text: string): string | null | undefined {
+  const s = text.trim();
+  if (s.length > TRIAL_MESSAGE_MAX) return undefined;
+  return s || null;
+}
+
+export const REJECT_MESSAGE_MAX = TRIAL_MESSAGE_MAX;
+
 /** Whole days left, rounded up; 0 when the trial is not running. */
 export function trialDaysLeft(t: Pick<TrialView, 'status' | 'endsAt'>, now: number): number {
   if (effectiveStatus(t, now) !== 'active') return 0;
@@ -107,21 +165,38 @@ export function trialDaysLeft(t: Pick<TrialView, 'status' | 'endsAt'>, now: numb
 }
 
 export const TRIAL_STATUS_LABEL: Record<TrialStatus, string> = {
+  pending: 'Заявка',
   active: 'Идёт',
   ended: 'Завершена',
   expired: 'Истекла',
+  rejected: 'Отклонена',
+  permanent: 'Постоянная',
 };
 
-/** Colour of the chip, the same tones as the license chip: ok / warn (2 days or less) / danger. */
+/** Colour of the chip, the same tones as the license chip: ok / warn (2 days or less, a request) / danger. */
 export function trialTone(t: Pick<TrialView, 'status' | 'endsAt'>, now: number): 'ok' | 'warn' | 'danger' {
   const status = effectiveStatus(t, now);
+  if (status === 'permanent') return 'ok';
+  if (status === 'pending') return 'warn';
   if (status !== 'active') return 'danger';
   return trialDaysLeft(t, now) <= 2 ? 'warn' : 'ok';
 }
 
-/** «осталось 5 дней · до 12 ноября» / «последний день · до 12 ноября» / «завершена досрочно» / «истекла 12 ноября». */
-export function trialTermText(t: Pick<TrialView, 'status' | 'endsAt'> & Partial<Pick<TrialView, 'timezone'>>, now: number): string {
+/**
+ * «осталось 5 дней · до 12 ноября» / «последний день · до 12 ноября» / «завершена досрочно» / «истекла 12 ноября» /
+ * «ждёт подтверждения с 12 ноября, 14:30» / «отклонена 12 ноября» / «без срока».
+ */
+export function trialTermText(
+  t: Pick<TrialView, 'status' | 'endsAt'> & Partial<Pick<TrialView, 'timezone' | 'requestedAt' | 'decidedAt' | 'startedAt'>>,
+  now: number,
+): string {
   const status = effectiveStatus(t, now);
+  if (status === 'pending') {
+    const at = t.requestedAt ?? t.startedAt;
+    return at ? `ждёт подтверждения с ${trialDate(at, t.timezone)}, ${formatIn(clockFormats, t.timezone ?? TRIAL_ZONE, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(at)}` : 'ждёт подтверждения';
+  }
+  if (status === 'rejected') return t.decidedAt ? `отклонена ${trialDate(t.decidedAt, t.timezone)}` : 'отклонена';
+  if (status === 'permanent') return 'без срока';
   if (status === 'ended') return 'завершена досрочно';
   if (status === 'expired') return `истекла ${trialDate(t.endsAt, t.timezone)}`;
   const left = trialDaysLeft(t, now);
@@ -148,6 +223,13 @@ export function lastSeenText(lastSeenAt: number | null, now: number): string {
   if (lastSeenAt === null) return 'ещё не выходил(а) на связь';
   if (isWorkingNow(lastSeenAt, now)) return 'сейчас работает';
   return `был(а) ${agoText(now - lastSeenAt)} назад`;
+}
+
+/** A request's page asks every half a minute while open: «страница заявки открыта» / «страница закрыта · была 2 ч назад». */
+export function requestSeenText(lastSeenAt: number | null, now: number): string {
+  if (lastSeenAt === null) return 'страница заявки не выходила на связь';
+  if (isWorkingNow(lastSeenAt, now)) return 'страница заявки открыта';
+  return `страница закрыта · была ${agoText(now - lastSeenAt)} назад`;
 }
 
 /** «последний заказ 25 мин назад» / «последний заказ только что» / «заказов ещё не было». */

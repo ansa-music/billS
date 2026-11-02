@@ -344,7 +344,10 @@ export function TrialMoveIn({ onDone, replacing = false, onFinished }: { onDone:
               {s.step === 'checking' ? 'Проверяем код…' : 'Продолжить'}
             </button>
           </div>
-          <p className="onboarding-note">После переноса войдите своим кодом — тем же, что и раньше.</p>
+          <p className="onboarding-note">
+            После переноса войдите своим кодом — тем же, что и раньше. Заявку на пробную версию ещё не подтвердили? Тогда кода кофейни пока
+            нет — дождитесь подтверждения на компьютере, где отправляли заявку.
+          </p>
         </form>
       );
     }

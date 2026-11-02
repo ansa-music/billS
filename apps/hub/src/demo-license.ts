@@ -16,6 +16,11 @@ export interface TrialTerms {
   days?: number;
   endsAt?: number;
   companyName: string;
+  /**
+   * TS made the trial permanent («Полная версия»): the license is «paid» and runs until `endsAt`
+   * (TRIAL_PERMANENT_LICENSE_UNTIL, in practice no end), so no countdown shows anywhere.
+   */
+  permanent?: boolean;
 }
 
 /**
@@ -37,7 +42,7 @@ export async function installDemoLicense(license: LicenseService, now: number, t
       id: randomUUID(),
       companyId: trial ? 'trial-company' : 'demo-company',
       companyName: trial?.companyName ?? 'Демо компания',
-      plan: 'trial',
+      plan: trial?.permanent ? 'paid' : 'trial',
       issuedAt: now,
       validFrom,
       validUntil,

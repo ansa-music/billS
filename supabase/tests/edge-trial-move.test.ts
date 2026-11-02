@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import type { TrialMoveFinish, TrialMoveStart, TrialMoveState, TrialStats } from '@bills/domain';
 import { cafeCodeHashInput, formatCafeCode, normalizeCafeCode, TRIAL_MOVE, TRIAL_MOVE_RATE, TRIAL_MOVED_MESSAGE } from '@bills/domain';
+import { handlePlatform } from '../../apps/cloud/src/edge/platform.ts';
 import { handleTrial } from '../../apps/cloud/src/edge/trial.ts';
 import type { EdgeTest } from './edge-helpers.ts';
 import { edgeTest, HOUR, MONDAY_NOON } from './edge-helpers.ts';
+import { newInstallId, platformAuth, startActive, startRequest } from './trial-helpers.ts';
 
 const DAY = 24 * HOUR;
 const MINUTE = 60_000;
@@ -26,10 +28,10 @@ const STATS: TrialStats = {
 const sqlite = (tag: string) => Buffer.concat([Buffer.from(`SQLite format 3\0${tag}`), randomBytes(20_000)]);
 
 let ipSeq = 0;
-async function start(e: EdgeTest, venue = 'Кофейня «Утро»') {
-  const res = await e.call(handleTrial, 'POST', '/functions/v1/trial/trial/start', { headers: { 'x-forwarded-for': `198.51.100.${++ipSeq % 250}` }, body: { venue, managerName: 'Айгерим' } });
-  assert.equal(res.status, 201, JSON.stringify(res.body));
-  return { id: res.body.id as string, token: res.body.token as string, auth: { authorization: `Bearer ${res.body.token}` } };
+/** A request the platform owner approved at once (an active trial of 14 days from now). */
+async function start(e: EdgeTest, venue = 'Кофейня «Утро»', installId = newInstallId()) {
+  const s = await startActive(e, { venue, managerName: 'Айгерим', installId }, `198.51.100.${++ipSeq % 250}`);
+  return { id: s.id, token: s.token, installId: s.installId, auth: s.auth };
 }
 type Desk = { id: string; token: string; auth: Record<string, string> };
 
@@ -366,4 +368,45 @@ test('trial_desk_signal (PostgREST, anon): ok / snapshot / moved / unknown, and 
       table,
     );
   }
+});
+
+test('requests and statuses: a waiting request gets no café code; a move keeps «permanent»; the old installId cannot take the cash desk back', async (t) => {
+  const e = await edgeTest(t);
+  // A request waiting for TS: no code on a report, «Получить код» refused.
+  const req = await startRequest(e, { venue: 'Ждёт', managerName: 'Аслан' }, '198.51.100.201');
+  const asked = await report(e, { id: req.id, token: req.token, auth: req.auth }, { needCode: true, v: 2 });
+  assert.equal(asked.status, 200, JSON.stringify(asked.body));
+  assert.equal(asked.body.status, 'pending');
+  assert.equal(asked.body.cafeCode, undefined);
+  const refused = await e.call(handleTrial, 'POST', '/trial/code', { headers: req.auth, body: { id: req.id } });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.body.error.code, 'TRIAL_NOT_APPROVED');
+
+  // A permanent trial moves as permanent; the new desk is told so in full.
+  const installId = newInstallId();
+  const d = await start(e, 'Навсегда', installId);
+  const made = await e.call(handlePlatform, 'POST', `/platform/trials/${d.id}/permanent`, { headers: await platformAuth(e) });
+  assert.equal(made.status, 200, JSON.stringify(made.body));
+  const first = await report(e, d, { needCode: true, v: 2 }, sqlite('permanent'));
+  assert.equal(first.body.status, 'permanent');
+  const code = first.body.cafeCode as string;
+  assert.ok(normalizeCafeCode(code));
+  e.clock.now += HOUR;
+  const s = await moveStart(e, code, '203.0.113.150');
+  const f = await moveFinish(e, s.body.ticket);
+  assert.equal(f.status, 200, JSON.stringify(f.body));
+  assert.equal(f.body.status, 'permanent');
+  const moved = { id: d.id, token: f.body.token, auth: { authorization: `Bearer ${f.body.token}` } };
+  const terms = await e.call(handleTrial, 'GET', `/trial/terms?id=${d.id}&v=2`, { headers: moved.auth });
+  assert.equal(terms.body.status, 'permanent');
+  assert.equal((await e.call(handleTrial, 'GET', `/trial/terms?id=${d.id}&v=2`, { headers: d.auth })).status, 410, 'old desk, current page');
+
+  // The old browser's installId no longer finds this trial: /start with it is a new request, the moved desk keeps working.
+  const again = await e.call(handleTrial, 'POST', '/trial/start', { headers: { 'x-forwarded-for': '198.51.100.202' }, body: { venue: 'Навсегда', installId } });
+  assert.equal(again.status, 201, JSON.stringify(again.body));
+  assert.notEqual(again.body.id, d.id);
+  assert.equal(again.body.status, 'pending');
+  assert.equal((await report(e, moved, { v: 2 })).status, 200, 'the new cash desk is still the cash desk');
+  const [row] = await e.s.db.all<{ install_hash: string | null }>('SELECT install_hash FROM trials WHERE id = ?::uuid', [d.id]);
+  assert.equal(row!.install_hash, null);
 });

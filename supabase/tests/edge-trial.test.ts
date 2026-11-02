@@ -2,12 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import type { TrialStats, TrialView } from '@bills/domain';
-import { TRIAL_ENDED_MESSAGE, TRIAL_EXPIRED_MESSAGE, TRIAL_SNAPSHOT_MAX_BYTES } from '@bills/domain';
+import { TRIAL_ENDED_MESSAGE, TRIAL_EXPIRED_MESSAGE, TRIAL_PENDING_LEGACY_MESSAGE, TRIAL_SNAPSHOT_MAX_BYTES } from '@bills/domain';
 import { handlePlatform } from '../../apps/cloud/src/edge/platform.ts';
 import { handleTrial } from '../../apps/cloud/src/edge/trial.ts';
 import { DEMO_PLATFORM } from '../../apps/cloud/src/seed.ts';
 import type { EdgeTest } from './edge-helpers.ts';
 import { edgeTest, HOUR, linkOwner, MONDAY_NOON, userJwt } from './edge-helpers.ts';
+import { approve, newInstallId, platformAuth, startActive, startRequest } from './trial-helpers.ts';
 
 const DAY = 24 * HOUR;
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -38,41 +39,59 @@ function assertCors(headers: Headers, what: string) {
   for (const [k, v] of Object.entries(CORS)) assert.equal(headers.get(k), v, `${what}: ${k}`);
 }
 
-async function start(e: EdgeTest, body: Record<string, unknown> = { venue: '  Кофейня «Зерно»  ', managerName: 'Айгерим', timezone: 'Asia/Almaty' }, ip = '198.51.100.4') {
-  const res = await e.call(handleTrial, 'POST', '/functions/v1/trial/trial/start', { headers: { 'x-forwarded-for': ip }, body });
-  assert.equal(res.status, 201, JSON.stringify(res.body));
-  return { id: res.body.id as string, token: res.body.token as string, auth: { authorization: `Bearer ${res.body.token}` }, body: res.body };
-}
+const start = startRequest;
+const platformToken = platformAuth;
 
-async function platformToken(e: EdgeTest, key: string): Promise<Record<string, string>> {
-  const r = await e.call(handlePlatform, 'POST', '/platform/login', { body: { key } });
-  assert.equal(r.status, 200, JSON.stringify(r.body));
-  return { authorization: `Bearer ${r.body.token}` };
-}
-
-test('trial: start → report → terms; the token is stored only as sha256', async (t) => {
+test('trial: a request (pending) → the platform owner approves → report → terms; the token is stored only as sha256', async (t) => {
   const e = await edgeTest(t);
   const s = await start(e);
   assert.match(s.id, /^[0-9a-f-]{36}$/);
   assert.match(s.token, /^[A-Za-z0-9_-]{43}$/, '32 random bytes, base64url');
-  assert.deepEqual(s.body, { id: s.id, token: s.token, startedAt: MONDAY_NOON, endsAt: MONDAY_NOON + 14 * DAY, status: 'active' });
-  const [row] = await e.s.db.all<{ token_hash: string; venue: string; created_ip: string; status: string }>(
-    'SELECT token_hash, venue, created_ip, status FROM trials WHERE id = ?::uuid',
+  assert.deepEqual(s.body, { id: s.id, token: s.token, startedAt: MONDAY_NOON, endsAt: MONDAY_NOON + 14 * DAY, status: 'pending' });
+  const [row] = await e.s.db.all<{ token_hash: string; venue: string; created_ip: string; status: string; install_hash: string; requested_at: number }>(
+    `SELECT token_hash, venue, created_ip, status, install_hash, (extract(epoch FROM requested_at) * 1000)::bigint AS requested_at
+     FROM trials WHERE id = ?::uuid`,
     [s.id],
   );
-  assert.deepEqual(row, { token_hash: sha(s.token), venue: 'Кофейня «Зерно»', created_ip: '198.51.100.4', status: 'active' });
+  assert.deepEqual(row, {
+    token_hash: sha(s.token),
+    venue: 'Кофейня «Зерно»',
+    created_ip: '198.51.100.4',
+    status: 'pending',
+    install_hash: sha(`ts-trial-install:${s.installId}`),
+    requested_at: MONDAY_NOON,
+  });
+
+  // While it waits: the current page (v=2) reads «pending»; an old page is told in its own words to reload.
+  assert.deepEqual((await e.call(handleTrial, 'GET', `/trial/terms?id=${s.id}&v=2`, { headers: s.auth })).body, { status: 'pending', endsAt: MONDAY_NOON + 14 * DAY });
+  assert.deepEqual((await e.call(handleTrial, 'GET', `/trial/terms?id=${s.id}`, { headers: s.auth })).body, {
+    status: 'ended',
+    endsAt: MONDAY_NOON,
+    message: TRIAL_PENDING_LEGACY_MESSAGE,
+  });
+
+  // Approved three hours later: the 14 days count from the approval.
+  e.clock.now += 3 * HOUR;
+  const approvedAt = e.clock.now;
+  const approved = (await approve(e, s.id)) as unknown as TrialView;
+  assert.equal(approved.status, 'active');
+  assert.equal(approved.startedAt, approvedAt);
+  assert.equal(approved.endsAt, approvedAt + 14 * DAY);
+  assert.equal(approved.requestedAt, MONDAY_NOON);
+  assert.equal(approved.decidedAt, approvedAt);
+  assert.ok(e.log.some((l) => l.includes('подтвердил заявку') && l.includes(s.id)));
 
   e.clock.now += HOUR;
-  const rep = await e.call(handleTrial, 'POST', '/trial/report', { headers: s.auth, body: { id: s.id, stats: { ...STATS, junk: 1 } } });
+  const rep = await e.call(handleTrial, 'POST', '/trial/report', { headers: s.auth, body: { id: s.id, v: 2, stats: { ...STATS, junk: 1 } } });
   assert.equal(rep.status, 200, JSON.stringify(rep.body));
-  assert.deepEqual(rep.body, { status: 'active', endsAt: MONDAY_NOON + 14 * DAY });
+  assert.deepEqual(rep.body, { status: 'active', endsAt: approvedAt + 14 * DAY });
   assert.equal(rep.headers.get('cache-control'), 'no-store');
   assertCors(rep.headers, 'report');
 
   e.clock.now += HOUR;
-  const terms = await e.call(handleTrial, 'GET', `/trial/terms?id=${s.id}`, { headers: s.auth });
+  const terms = await e.call(handleTrial, 'GET', `/trial/terms?id=${s.id}&v=2`, { headers: s.auth });
   assert.equal(terms.status, 200);
-  assert.deepEqual(terms.body, { status: 'active', endsAt: MONDAY_NOON + 14 * DAY });
+  assert.deepEqual(terms.body, { status: 'active', endsAt: approvedAt + 14 * DAY });
 
   const owner = await platformToken(e, DEMO_PLATFORM[0].key);
   const list = await e.call<{ trials: TrialView[] }>(handlePlatform, 'GET', '/platform/platform/trials', { headers: owner });
@@ -83,13 +102,17 @@ test('trial: start → report → terms; the token is stored only as sha256', as
       venue: 'Кофейня «Зерно»',
       managerName: 'Айгерим',
       timezone: 'Asia/Almaty',
-      startedAt: MONDAY_NOON,
-      endsAt: MONDAY_NOON + 14 * DAY,
+      startedAt: approvedAt,
+      endsAt: approvedAt + 14 * DAY,
       status: 'active',
-      lastSeenAt: MONDAY_NOON + 2 * HOUR,
+      lastSeenAt: approvedAt + 2 * HOUR,
       stats: STATS,
       snapshotAt: null,
       snapshotBytes: null,
+      requestedAt: MONDAY_NOON,
+      decidedAt: approvedAt,
+      ownerMessage: null,
+      duplicateOf: null,
     },
   ]);
 });
@@ -101,12 +124,17 @@ test('trial: bad input, bad token (401), unknown id (404), stats validation, COR
   assertCors(pre.headers, 'OPTIONS');
 
   for (const venue of ['', '   ', 'x'.repeat(81), 5]) {
-    const r = await e.call(handleTrial, 'POST', '/trial/start', { body: { venue } });
+    const r = await e.call(handleTrial, 'POST', '/trial/start', { body: { venue, installId: newInstallId() } });
     assert.equal(r.status, 422, String(venue));
     assert.equal(r.body.error.code, 'VENUE_INVALID');
     assertCors(r.headers, '422');
   }
-  assert.equal((await e.call(handleTrial, 'POST', '/trial/start', { body: { venue: 'x'.repeat(80) } })).status, 201);
+  for (const installId of ['short', 'x'.repeat(65), 'не латиница-0123456789', 12345678901234567890, {}]) {
+    const r = await e.call(handleTrial, 'POST', '/trial/start', { body: { venue: 'Кофейня', installId } });
+    assert.equal(r.status, 422, JSON.stringify(installId));
+    assert.equal(r.body.error.code, 'INSTALL_ID_INVALID');
+  }
+  await start(e, { venue: 'x'.repeat(80) });
 
   const s = await start(e);
   const noToken = await e.call(handleTrial, 'POST', '/trial/report', { body: { id: s.id, stats: STATS } });
@@ -141,13 +169,18 @@ test('trial: bad input, bad token (401), unknown id (404), stats validation, COR
   assertCors(nothing.headers, 'unknown route');
 });
 
-test('trial: rate limits — 10 starts an hour per IP, 120 reports an hour per trial', async (t) => {
+test('trial: rate limits — 10 new requests an hour per IP (a repeated installId is not one), 120 reports an hour per trial', async (t) => {
   const e = await edgeTest(t);
-  for (let i = 0; i < 10; i++) await start(e, { venue: `К${i}` }, '203.0.113.9');
-  const over = await e.call(handleTrial, 'POST', '/trial/start', { headers: { 'x-forwarded-for': '203.0.113.9' }, body: { venue: 'Ещё' } });
+  const first = await start(e, { venue: 'К0' }, '203.0.113.9');
+  for (let i = 1; i < 10; i++) await start(e, { venue: `К${i}` }, '203.0.113.9');
+  const over = await e.call(handleTrial, 'POST', '/trial/start', { headers: { 'x-forwarded-for': '203.0.113.9' }, body: { venue: 'Ещё', installId: newInstallId() } });
   assert.equal(over.status, 429);
   assert.equal(over.body.error.code, 'RATE_LIMITED');
   assertCors(over.headers, '429');
+  // The same browser asking again (its answer was lost) still gets its trial: nothing new is stored.
+  const again = await e.call(handleTrial, 'POST', '/trial/start', { headers: { 'x-forwarded-for': '203.0.113.9' }, body: { venue: 'К0', installId: first.installId } });
+  assert.equal(again.status, 200, JSON.stringify(again.body));
+  assert.equal(again.body.id, first.id);
   await start(e, { venue: 'Соседи' }, '203.0.113.10');
   e.clock.now += HOUR + 1;
   const s = await start(e, { venue: 'Через час' }, '203.0.113.9');
@@ -162,7 +195,7 @@ test('trial: rate limits — 10 starts an hour per IP, 120 reports an hour per t
 
 test('trial: expired is computed; the platform owner extends and ends; a non-platform caller is refused', async (t) => {
   const e = await edgeTest(t);
-  const s = await start(e);
+  const s = await startActive(e);
   const owner = await platformToken(e, DEMO_PLATFORM[0].key);
 
   // Refused: no session, a client's manager (Supabase JWT, not on the platform team), the trial's own token.
@@ -173,6 +206,7 @@ test('trial: expired is computed; the platform owner extends and ends; a non-pla
       ['POST', `/platform/trials/${s.id}/extend`, { days: 7 }],
       ['POST', `/platform/trials/${s.id}/end-date`, { date: '2026-11-01' }],
       ['POST', `/platform/trials/${s.id}/end`, undefined],
+      ['POST', `/platform/trials/${s.id}/permanent`, undefined],
       ['GET', `/platform/trials/${s.id}/snapshot`, undefined],
     ] as const) {
       const r = await e.call(handlePlatform, method, path, { headers, ...(body ? { body } : {}) });
@@ -231,7 +265,7 @@ test('trial: expired is computed; the platform owner extends and ends; a non-pla
   assert.equal(back.body.endsAt, e.clock.now + DAY);
 });
 
-test('trial: the snapshot goes up with a report and comes back to the platform byte for byte; newest trials first', async (t) => {
+test('trial: the snapshot goes up with a report and comes back to the platform byte for byte; newest first', async (t) => {
   const e = await edgeTest(t);
   const first = await start(e, { venue: 'Первая' });
   e.clock.now += HOUR;
@@ -293,52 +327,32 @@ async function rowOf(e: EdgeTest, id: string): Promise<{ startedAt: number; ends
 
 const trialCount = async (e: EdgeTest): Promise<number> => Number((await e.s.db.all<{ n: number }>('SELECT COUNT(*) AS n FROM trials'))[0]!.n);
 
-test('trial: the 14 days count from the browser’s startedAt (clamped to the last 60 days, never ahead), not from the registration', async (t) => {
+test('trial: the 14 days count from the approval — not from the request or the browser’s startedAt; startedAt is still checked', async (t) => {
   const e = await edgeTest(t);
   const venue = 'Кофейня «Зерно»';
 
-  // Began in the browser two days ago, registers only now (offline at first, or opened after an update): 12 days left.
+  // Began in the browser two days ago (offline at first): still a request, the term starts when TS says yes.
   const late = await start(e, { venue, timezone: 'Asia/Almaty', startedAt: MONDAY_NOON - 2 * DAY }, '198.51.100.1');
-  assert.deepEqual(late.body, { id: late.id, token: late.token, startedAt: MONDAY_NOON - 2 * DAY, endsAt: MONDAY_NOON + 12 * DAY, status: 'active' });
-  assert.deepEqual(await rowOf(e, late.id), { startedAt: MONDAY_NOON - 2 * DAY, endsAt: MONDAY_NOON + 12 * DAY, timezone: 'Asia/Almaty' });
-  // Registering again (the answer was lost, the link not saved) makes a second row with the same term: no extra days.
-  e.clock.now += 3 * HOUR;
-  const again = await start(e, { venue, startedAt: MONDAY_NOON - 2 * DAY }, '198.51.100.1');
-  assert.notEqual(again.id, late.id);
-  assert.equal(again.body.endsAt, MONDAY_NOON + 12 * DAY);
+  assert.equal(late.body.status, 'pending');
+  assert.equal(late.body.startedAt, MONDAY_NOON);
+  e.clock.now = MONDAY_NOON + 2 * DAY;
+  const a = (await approve(e, late.id)) as unknown as TrialView;
+  assert.equal(a.startedAt, MONDAY_NOON + 2 * DAY);
+  assert.equal(a.endsAt, MONDAY_NOON + 16 * DAY);
+  assert.deepEqual(await rowOf(e, late.id), { startedAt: MONDAY_NOON + 2 * DAY, endsAt: MONDAY_NOON + 16 * DAY, timezone: 'Asia/Almaty' });
   e.clock.now = MONDAY_NOON;
 
-  // A clock ahead cannot start the trial in the future.
-  const ahead = await start(e, { venue, startedAt: MONDAY_NOON + 3 * DAY }, '198.51.100.2');
-  assert.equal(ahead.body.startedAt, MONDAY_NOON);
-  assert.equal(ahead.body.endsAt, MONDAY_NOON + 14 * DAY);
-
-  // An old page sends no startedAt (or null): counted from now.
-  const old = await start(e, { venue, startedAt: null }, '198.51.100.2');
-  assert.equal(old.body.startedAt, MONDAY_NOON);
-  assert.equal(old.body.endsAt, MONDAY_NOON + 14 * DAY);
-
-  // Began 14 days ago or earlier: expired right away — the honest result. Older than 60 days is clamped.
-  const done = await start(e, { venue, startedAt: MONDAY_NOON - 14 * DAY }, '198.51.100.3');
-  assert.deepEqual(done.body, {
-    id: done.id,
-    token: done.token,
-    startedAt: MONDAY_NOON - 14 * DAY,
-    endsAt: MONDAY_NOON,
-    status: 'expired',
-    message: TRIAL_EXPIRED_MESSAGE,
-  });
-  const ancient = await start(e, { venue, startedAt: MONDAY_NOON - 400 * DAY }, '198.51.100.3');
-  assert.equal(ancient.body.startedAt, MONDAY_NOON - 60 * DAY);
-  assert.equal(ancient.body.endsAt, MONDAY_NOON - 46 * DAY);
-  assert.equal(ancient.body.status, 'expired');
-  const terms = await e.call(handleTrial, 'GET', `/trial/terms?id=${ancient.id}`, { headers: ancient.auth });
-  assert.deepEqual(terms.body, { status: 'expired', endsAt: MONDAY_NOON - 46 * DAY, message: TRIAL_EXPIRED_MESSAGE });
+  // A clock ahead, null, 400 days back: all just a request now.
+  for (const startedAt of [MONDAY_NOON + 3 * DAY, null, MONDAY_NOON - 400 * DAY]) {
+    const r = await start(e, { venue, startedAt }, '198.51.100.2');
+    assert.equal(r.body.status, 'pending', String(startedAt));
+    assert.equal(r.body.startedAt, MONDAY_NOON);
+  }
 
   // Not a time: 422 before anything is stored or counted against the address.
   const before = await trialCount(e);
   for (const startedAt of ['вчера', '1760000000000', -5, {}, [], true]) {
-    const r = await e.call(handleTrial, 'POST', '/trial/start', { headers: { 'x-forwarded-for': '198.51.100.9' }, body: { venue, startedAt } });
+    const r = await e.call(handleTrial, 'POST', '/trial/start', { headers: { 'x-forwarded-for': '198.51.100.9' }, body: { venue, startedAt, installId: newInstallId() } });
     assert.equal(r.status, 422, JSON.stringify(startedAt));
     assert.equal(r.body.error.code, 'STARTED_AT_INVALID');
   }
@@ -351,15 +365,15 @@ test('trial: the 14 days count from the browser’s startedAt (clamped to the la
   const owner = await platformToken(e, DEMO_PLATFORM[0].key);
   const list = await e.call<{ trials: TrialView[] }>(handlePlatform, 'GET', '/platform/trials', { headers: owner });
   assert.equal(list.body.trials.find((v) => v.id === mars.id)!.timezone, 'Asia/Almaty');
-  assert.equal(list.body.trials.find((v) => v.id === late.id)!.startedAt, MONDAY_NOON - 2 * DAY);
+  assert.equal(list.body.trials.find((v) => v.id === late.id)!.startedAt, MONDAY_NOON + 2 * DAY);
 });
 
 test('trial: the platform sets the end date — through that day in the trial’s zone, today…today+90, shortens and re-activates', async (t) => {
   // MONDAY_NOON = 12 Oct 2026 07:00 UTC: 12:00 on the 12th in Almaty (UTC+5), 21:00 on the 11th in Honolulu (UTC−10).
   const e = await edgeTest(t);
-  const almaty = await start(e, { venue: 'Алматы', timezone: 'Asia/Almaty' });
-  const hono = await start(e, { venue: 'Гонолулу', timezone: 'Pacific/Honolulu' });
-  const nozone = await start(e, { venue: 'Без зоны' });
+  const almaty = await startActive(e, { venue: 'Алматы', timezone: 'Asia/Almaty' });
+  const hono = await startActive(e, { venue: 'Гонолулу', timezone: 'Pacific/Honolulu' });
+  const nozone = await startActive(e, { venue: 'Без зоны' });
   const owner = await platformToken(e, DEMO_PLATFORM[0].key);
   const setDate = (id: string, body: unknown, headers = owner) => e.call(handlePlatform, 'POST', `/platform/platform/trials/${id}/end-date`, { headers, body });
   const almatyEnd = (y: number, m: number, d: number) => Date.UTC(y, m - 1, d, 19) - 1;

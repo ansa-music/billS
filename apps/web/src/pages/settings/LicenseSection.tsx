@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { LicensePayload, LicenseResponse, LicenseStatus } from '@bills/domain';
-import { LICENSE_MODULES, MODULE_LABEL, peekLicense } from '@bills/domain';
+import { LICENSE_MODULES, MODULE_LABEL, peekLicense, TRIAL_PERMANENT_LICENSE_UNTIL } from '@bills/domain';
 import { HubRequestError, command, fetchJson } from '../../api.ts';
 import { actorName } from '../../auth.ts';
 import { LICENSE_STATE_LABEL, licenseTone } from '../../license.tsx';
@@ -55,6 +55,8 @@ export function licenseSummary(info: LicenseResponse, timeZone: string): { text:
     case 'expiring':
     case 'last_day':
       if (s.plan === 'trial') return { text: s.state === 'last_day' ? 'Пробный период: последний день' : `Пробный период: ${left}`, tone };
+      // A browser trial TS made permanent: its license runs to a far date that means «no end».
+      if (s.validUntil !== null && s.validUntil >= TRIAL_PERMANENT_LICENSE_UNTIL) return { text: 'Полная версия — без срока', tone };
       return { text: until ? `Оплачено до ${until}${s.state === 'active' ? '' : ` (${left})`}` : 'Оплачено', tone };
     case 'expired':
       return { text: `${s.plan === 'trial' ? 'Пробный период закончился' : 'Оплата закончилась'}${until ? ` ${until}` : ''} — продлите в кабинете TS`, tone };

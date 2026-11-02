@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DemoInfo, HubState, LicenseResponse } from '@bills/domain';
-import { DEMO_KEYS, DEMO_LOGIN_THROTTLE, ROLES, zonedParts } from '@bills/domain';
+import { DEMO_KEYS, DEMO_LOGIN_THROTTLE, ROLES, TRIAL_PERMANENT_LICENSE_UNTIL, trialPageLicense, zonedParts } from '@bills/domain';
 import { DEMO_LICENSE_KEYS, installDemoLicense } from '../src/demo-license.ts';
 import { loadConfig } from '../src/config.ts';
 import { nextDemoReset, wipeDemoDatabase } from '../src/demo.ts';
@@ -109,6 +109,32 @@ test('browser trial: an explicit end from the cloud wins over startedAt + days; 
   assert.equal(await installDemoLicense(hub.license, MONDAY_NOON, { startedAt, endsAt: MONDAY_NOON + 5 * DAY, companyName: 'Кофейня' }), true);
   assert.equal(hub.license.status().readOnly, false);
   assert.equal(hub.license.status().daysLeft, 5);
+});
+
+test('browser trial: a request waiting for TS is read-only at once; a permanent trial is «paid» and never runs out', async (t) => {
+  const { h, hub } = await demoHub(t, true);
+  const DAY = 86_400_000;
+  // A new request: the page installs a license valid until now (trialPageLicense) — no orders while TS decides.
+  const waiting = trialPageLicense({ startedAt: MONDAY_NOON, status: 'pending' }, MONDAY_NOON);
+  assert.equal(await installDemoLicense(hub.license, MONDAY_NOON, { startedAt: MONDAY_NOON, endsAt: waiting.validUntil, companyName: 'Кофейня' }), true);
+  h.clock.advance(1000);
+  assert.equal(hub.license.status().readOnly, true);
+  // Approved: 14 days from now.
+  const approved = trialPageLicense({ startedAt: MONDAY_NOON, status: 'active', endsAt: MONDAY_NOON + 14 * DAY }, MONDAY_NOON);
+  assert.equal(await installDemoLicense(hub.license, MONDAY_NOON, { startedAt: MONDAY_NOON, endsAt: approved.validUntil, companyName: 'Кофейня' }), true);
+  assert.equal(hub.license.status().readOnly, false);
+  assert.equal(hub.license.status().plan, 'trial');
+  // «Сделать постоянной»: plan «paid», no countdown, still well-formed years later.
+  const permanent = trialPageLicense({ startedAt: MONDAY_NOON, status: 'permanent', endsAt: MONDAY_NOON - DAY }, MONDAY_NOON);
+  assert.equal(permanent.permanent, true);
+  assert.equal(await installDemoLicense(hub.license, MONDAY_NOON, { startedAt: MONDAY_NOON, endsAt: permanent.validUntil, companyName: 'Кофейня', permanent: true }), true);
+  const st = hub.license.status();
+  assert.equal(st.plan, 'paid');
+  assert.equal(st.state, 'active');
+  assert.equal(st.readOnly, false);
+  assert.equal(st.validUntil, TRIAL_PERMANENT_LICENSE_UNTIL);
+  h.clock.advance(3 * 365 * DAY);
+  assert.equal(hub.license.status().readOnly, false);
 });
 
 test('GET /api/demo is public on a demo HUB and absent otherwise', async (t) => {

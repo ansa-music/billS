@@ -3,8 +3,32 @@ import assert from 'node:assert/strict';
 import type { TrialStats } from '../src/trial.ts';
 import {
   cleanTrialStats,
+  isTrialInstallId,
+  isTrialStatus,
+  legacyTrialTerms,
+  parseTrialTerms,
   TRIAL_ENDED_MESSAGE,
   TRIAL_EXPIRED_MESSAGE,
+  TRIAL_LEGACY_STATUSES,
+  TRIAL_PENDING_LEGACY_MESSAGE,
+  TRIAL_PERMANENT_LEGACY_ENDS_AT,
+  TRIAL_REJECTED_MESSAGE,
+  TRIAL_DELETED_MESSAGE,
+  TRIAL_IDLE_CHECK_MS,
+  TRIAL_PENDING_CHECK_MS,
+  TRIAL_PERMANENT_LICENSE_UNTIL,
+  TRIAL_RELOAD_ID,
+  trialCheckEveryMs,
+  trialDuplicates,
+  trialGoneTerms,
+  trialNameKey,
+  trialPageLicense,
+  trialPageOver,
+  trialWithoutReloadLink,
+  trialRejectMessage,
+  trialRequestLine,
+  trialWaiting,
+  trialZoneCity,
   trialCalendarDay,
   trialDayEnd,
   trialEndDate,
@@ -84,6 +108,132 @@ test('trialStatus: active until endsAt, then expired; ended stays ended', () => 
   assert.equal(trialStatus({ status: 'active', endsAt }, endsAt + 1), 'expired');
   assert.equal(trialStatus({ status: 'ended', endsAt }, endsAt - 1), 'ended');
   assert.equal(trialStatus({ status: 'ended', endsAt }, endsAt + 1), 'ended');
+});
+
+test('trialStatus: a request (pending), a rejected one and a permanent one stay as stored, whatever endsAt says', () => {
+  for (const status of ['pending', 'rejected', 'permanent'] as const) {
+    assert.equal(trialStatus({ status, endsAt: 10 }, 5), status);
+    assert.equal(trialStatus({ status, endsAt: 10 }, 50), status);
+  }
+  assert.equal(trialStatus({ status: 'something new', endsAt: 10 }, 5), 'active', 'an unknown stored word counts as active');
+  assert.ok(trialWaiting('pending') && trialWaiting('rejected'));
+  assert.ok(!trialWaiting('active') && !trialWaiting('permanent') && !trialWaiting(undefined));
+  assert.ok(isTrialStatus('permanent') && !isTrialStatus('paused') && !isTrialStatus(1));
+});
+
+test('trialTerms / legacyTrialTerms: the page reads every status; an old page only active / ended / expired', () => {
+  assert.deepEqual(trialTerms({ status: 'pending', endsAt: 10 }, 5), { status: 'pending', endsAt: 10 });
+  assert.deepEqual(trialTerms({ status: 'permanent', endsAt: 1 }, 5), { status: 'permanent', endsAt: 1 });
+  assert.deepEqual(trialTerms({ status: 'rejected', endsAt: 10, ownerMessage: '  у вас уже есть пробная  ' }, 5), { status: 'rejected', endsAt: 10, message: 'у вас уже есть пробная' });
+  assert.deepEqual(trialTerms({ status: 'rejected', endsAt: 10, ownerMessage: '  ' }, 5), { status: 'rejected', endsAt: 10 });
+
+  const now = 1000;
+  assert.deepEqual(legacyTrialTerms({ status: 'permanent', endsAt: 1 }, now), { status: 'active', endsAt: TRIAL_PERMANENT_LEGACY_ENDS_AT });
+  assert.deepEqual(legacyTrialTerms({ status: 'pending', endsAt: 5000 }, now), { status: 'ended', endsAt: now, message: TRIAL_PENDING_LEGACY_MESSAGE });
+  assert.deepEqual(legacyTrialTerms({ status: 'rejected', endsAt: 5000, message: 'нет' }, now), { status: 'ended', endsAt: now, message: 'нет' });
+  assert.deepEqual(legacyTrialTerms({ status: 'rejected', endsAt: 5000 }, now), { status: 'ended', endsAt: now, message: TRIAL_REJECTED_MESSAGE });
+  const active = { status: 'active', endsAt: 5000 } as const;
+  assert.equal(legacyTrialTerms(active, now), active);
+  for (const status of ['pending', 'active', 'ended', 'expired', 'rejected', 'permanent'] as const) {
+    assert.ok(TRIAL_LEGACY_STATUSES.includes(legacyTrialTerms(trialTerms({ status, endsAt: 5000 }, now), now).status), status);
+  }
+  assert.ok(new Date(TRIAL_PERMANENT_LEGACY_ENDS_AT).getUTCFullYear() >= 2100);
+});
+
+test('parseTrialTerms: what the current page accepts from the cloud', () => {
+  assert.deepEqual(parseTrialTerms({ status: 'pending', endsAt: 5, junk: 1 }), { status: 'pending', endsAt: 5 });
+  assert.deepEqual(parseTrialTerms({ status: 'rejected', endsAt: 5, message: '  нет  ' }), { status: 'rejected', endsAt: 5, message: 'нет' });
+  assert.deepEqual(parseTrialTerms({ status: 'permanent', endsAt: 5, message: '' }), { status: 'permanent', endsAt: 5 });
+  for (const body of [null, 'x', [], { status: 'paused', endsAt: 5 }, { status: 'active' }, { status: 'active', endsAt: Infinity }, { status: 'active', endsAt: '5' }]) {
+    assert.equal(parseTrialTerms(body), null, JSON.stringify(body));
+  }
+});
+
+test('isTrialInstallId and trialRejectMessage', () => {
+  assert.ok(isTrialInstallId('AbCdEf0123456789_-xy'));
+  assert.ok(!isTrialInstallId('short'));
+  assert.ok(!isTrialInstallId('x'.repeat(65)));
+  assert.ok(!isTrialInstallId('пробел и кириллица 0123456789'));
+  assert.ok(!isTrialInstallId(1234567890123456));
+  assert.equal(trialRejectMessage(undefined), null);
+  assert.equal(trialRejectMessage('   '), null);
+  assert.equal(trialRejectMessage('  откройте там, где начинали '), 'откройте там, где начинали');
+  assert.equal(trialRejectMessage('x'.repeat(301)), undefined);
+  assert.equal(trialRejectMessage(5), undefined);
+});
+
+test('trialDuplicates: the earliest earlier trial with the same venue, or the same manager from the same address', () => {
+  const row = (id: string, venue: string, managerName: string, ip: string | null, createdAt: number) => ({
+    id,
+    venue,
+    managerName,
+    ip,
+    status: 'pending' as const,
+    startedAt: createdAt,
+    createdAt,
+  });
+  assert.equal(trialNameKey('  Coffee   BOOK '), 'coffee book');
+  const dups = trialDuplicates([
+    row('c', 'coffee book ', 'Аиша', '1.1.1.2', 3),
+    row('a', 'Coffee book', 'Аиша', '1.1.1.1', 1),
+    row('b', 'COFFEE  BOOK', '', '1.1.1.3', 2),
+    row('d', 'Кофе Тау', 'аиша', '1.1.1.1', 4),
+    row('e', 'Другая', 'Аиша', '1.1.1.9', 5),
+    row('f', 'Ещё', '', '1.1.1.1', 6),
+    row('g', 'Без адреса', 'Аиша', null, 7),
+  ]);
+  assert.equal(dups.get('a'), undefined, 'the first one is the original');
+  assert.equal(dups.get('b')?.id, 'a');
+  assert.equal(dups.get('c')?.id, 'a');
+  assert.deepEqual(dups.get('d'), { id: 'a', venue: 'Coffee book', managerName: 'Аиша', status: 'pending', startedAt: 1 });
+  assert.equal(dups.get('e'), undefined, 'same name, another address');
+  assert.equal(dups.get('f'), undefined, 'no manager name: the address alone is not enough');
+  assert.equal(dups.get('g'), undefined);
+});
+
+test('trialRequestLine: «venue» · manager · city of the zone', () => {
+  assert.equal(trialRequestLine({ venue: 'coffee book', managerName: 'Аиша', timezone: 'Asia/Almaty' }), '«coffee book» · Аиша · Алматы');
+  assert.equal(trialRequestLine({ venue: 'Тау', managerName: ' ', timezone: 'Mars/Olympus' }), '«Тау»');
+  assert.equal(trialZoneCity('Asia/Qostanay'), 'Костанай');
+  assert.equal(trialZoneCity(null), null);
+});
+
+test('the page: how often it asks, when it is over, its license, a reload link from an old page, a deleted request', () => {
+  const now = Date.UTC(2026, 10, 2, 7);
+  // A request: every 30 s on screen, every 5 min hidden; rejected: every 5 min; a trial: as it reports.
+  assert.equal(trialCheckEveryMs('pending', true, 300_000), TRIAL_PENDING_CHECK_MS);
+  assert.equal(trialCheckEveryMs('pending', false, 60_000), TRIAL_IDLE_CHECK_MS);
+  assert.equal(trialCheckEveryMs('rejected', true, 60_000), TRIAL_IDLE_CHECK_MS);
+  assert.equal(trialCheckEveryMs('active', true, 60_000), 60_000);
+  assert.equal(trialCheckEveryMs(undefined, false, 300_000), 300_000);
+
+  const started = now - 3 * DAY;
+  assert.equal(trialPageOver({ startedAt: started }, now), false);
+  assert.equal(trialPageOver({ startedAt: now - 14 * DAY }, now), true, 'startedAt + 14 days before the cloud answered');
+  assert.equal(trialPageOver({ startedAt: started, endsAt: now - 1, status: 'active' }, now), true);
+  assert.equal(trialPageOver({ startedAt: started, endsAt: now - 1, status: 'permanent' }, now), false);
+  assert.equal(trialPageOver({ startedAt: started, endsAt: now - 1, status: 'pending' }, now), false);
+  assert.equal(trialPageOver({ startedAt: started, endsAt: now + DAY, status: 'ended' }, now), true);
+
+  assert.deepEqual(trialPageLicense({ startedAt: started }, now), { validUntil: started + 14 * DAY, permanent: false });
+  assert.deepEqual(trialPageLicense({ startedAt: started, endsAt: now + 20 * DAY, status: 'active' }, now), { validUntil: now + 20 * DAY, permanent: false });
+  for (const status of ['pending', 'rejected', 'ended', 'expired'] as const) {
+    assert.deepEqual(trialPageLicense({ startedAt: started, endsAt: now + 9 * DAY, status }, now), { validUntil: now, permanent: false }, status);
+  }
+  assert.deepEqual(trialPageLicense({ startedAt: started, status: 'pending' }, now), { validUntil: now, permanent: false }, 'a new request: read-only at once');
+  assert.deepEqual(trialPageLicense({ startedAt: started, endsAt: now - DAY, status: 'permanent' }, now), {
+    validUntil: TRIAL_PERMANENT_LICENSE_UNTIL,
+    permanent: true,
+  });
+
+  const fromOldPage = { startedAt: started, venue: 'Coffee book', cloudId: TRIAL_RELOAD_ID, cloudToken: 'reload', status: 'ended' as const, endsAt: now, message: 'Обновите…' };
+  assert.deepEqual(trialWithoutReloadLink(fromOldPage), { startedAt: started, venue: 'Coffee book', status: 'pending' });
+  const linked = { startedAt: started, cloudId: '11111111-1111-4111-8111-111111111111', cloudToken: 't', status: 'active' as const };
+  assert.equal(trialWithoutReloadLink(linked), linked);
+
+  assert.deepEqual(trialGoneTerms({ startedAt: started, status: 'pending', endsAt: now + DAY }, now), { status: 'rejected', endsAt: now + DAY, message: TRIAL_DELETED_MESSAGE });
+  assert.equal(trialGoneTerms({ startedAt: started, status: 'ended' }, now), null);
+  assert.equal(trialGoneTerms({ startedAt: started, status: 'active' }, now), null, 'a running trial never locks itself on a 404');
 });
 
 test('trialTerms: a message only when the trial is over', () => {

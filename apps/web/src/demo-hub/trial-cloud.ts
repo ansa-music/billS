@@ -1,26 +1,29 @@
 /**
  * The browser trial's link to the TS cloud (VITE_TRIAL=1). The coffee shop still lives only in
- * this browser; the cloud gets a short report of how it is used (and, now and then, a backup
- * copy) so TS can see the trial and extend or end it remotely. Its answer carries the terms
- * (end date, status), which boot.ts turns into the license of the in-page HUB.
+ * this browser. After the welcome form the page sends a request (POST /start with this browser's
+ * installId) and waits — read-only — until TS approves it; then the cloud gets a short report of how
+ * the trial is used (and, now and then, a backup copy) so TS can see it and extend, end or make it
+ * permanent remotely. Every answer carries the terms (status, end), which boot.ts turns into the
+ * license of the in-page HUB.
  *
  * Contract (supabase/functions/trial): base `${VITE_SUPABASE_URL}/functions/v1/trial`
- *   POST /start  {venue, managerName, timezone, startedAt}  → {id, token, startedAt, endsAt, status}
- *                (the cloud counts the 14 days from this browser's startedAt, not from the call)
- *   POST /report Bearer token, {id, stats, snapshot?, needCode?} → {status, endsAt, message?, watching?, cafeCode?, sendSnapshot?}
- *   GET  /terms?id=  Bearer token                          → {status, endsAt, message?}
+ *   POST /start  {venue, managerName, timezone, startedAt, installId} → {id, token, startedAt, endsAt, status: 'pending'}
+ *                (the same installId again → the same trial with a new token)
+ *   GET  /terms?id=&v=2  Bearer token                         → {status, endsAt, message?}  (while waiting: every 30 s)
+ *   POST /report Bearer token, {id, v: 2, stats, snapshot?, needCode?} → {status, endsAt, message?, watching?, cafeCode?, sendSnapshot?}
+ *                (needCode / cafeCode / sendSnapshot and 410 TRIAL_MOVED: moving the cash desk, trial-move.ts)
  * Without VITE_SUPABASE_URL everything here is off. Nothing waits on the network: a failed
  * call is tried again on the next tick.
  */
 import type { TrialReportRequest, TrialStartRequest, TrialStartResponse, TrialStats, TrialTerms } from '@bills/domain';
-import { TRIAL_SNAPSHOT_MAX_BYTES, workingDay } from '@bills/domain';
+import { parseTrialTerms, TRIAL_SNAPSHOT_MAX_BYTES, TRIAL_TERMS_VERSION, trialCheckEveryMs, trialGoneTerms, trialWaiting, workingDay } from '@bills/domain';
 import type { DatabaseSync } from './shims/sqlite.ts';
 import type { TrialInfo } from './trial-store.ts';
-import { isStatus } from './trial-store.ts';
+import { newInstallId, noteTrialCheck } from './trial-store.ts';
 import type { TrialReportAnswer, TrialReportMoveFields } from '@bills/domain';
 import { TRIAL_SNAPSHOT, TRIAL_WATCH, trialReportEveryMs, trialSnapshotDueNow } from '@bills/domain';
 import type { ForcedCopy } from './trial-move.ts';
-import { deskMove, httpError } from './trial-move.ts';
+import { deskMove } from './trial-move.ts';
 
 export type { TrialStats, TrialTerms };
 type TrialDayStats = TrialStats['days'][number];
@@ -33,19 +36,25 @@ const BASE = String(import.meta.env.VITE_SUPABASE_URL ?? '')
 export const TRIAL_CLOUD_URL = BASE ? `${BASE}/functions/v1/trial` : '';
 
 const APP_VERSION = String(import.meta.env.VITE_APP_VERSION ?? 'trial');
-/** How often «is a report due?» is asked: every 5 minutes, or every minute while a phone watches (TRIAL_WATCH). */
-const REPORT_TICK_MS = 15_000;
+/**
+ * How often «is a call due?» is asked: a report every 5 minutes, or every minute while a phone watches
+ * (TRIAL_WATCH); a waiting request's terms every 30 s on screen (trialCheckEveryMs).
+ */
+const REPORT_TICK_MS = 5_000;
 const FIRST_CHANGE_DELAY_MS = 20_000;
 const SNAPSHOT_MAX_BYTES = TRIAL_SNAPSHOT_MAX_BYTES;
 const STATS_DAYS = 14;
 const TIMEOUT_MS = 20_000;
 
-function parseTerms(body: unknown): TrialTerms | null {
-  if (!body || typeof body !== 'object') return null;
-  const o = body as Record<string, unknown>;
-  if (!isStatus(o.status) || typeof o.endsAt !== 'number' || !Number.isFinite(o.endsAt)) return null;
-  const message = typeof o.message === 'string' ? o.message.trim() : '';
-  return { status: o.status, endsAt: o.endsAt, ...(message ? { message } : {}) };
+/** A call the cloud answered with an error: its HTTP status and code (TRIAL_NOT_FOUND after a deletion). */
+export class TrialCloudError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 async function call(path: string, init: RequestInit & { token?: string | undefined }): Promise<unknown> {
@@ -56,8 +65,12 @@ async function call(path: string, init: RequestInit & { token?: string | undefin
   const timer = controller ? setTimeout(() => controller.abort(), TIMEOUT_MS) : undefined;
   try {
     const res = await fetch(`${TRIAL_CLOUD_URL}${path}`, { ...rest, headers, cache: 'no-store', ...(controller ? { signal: controller.signal } : {}) });
-    // With the cloud's code (trial-move.ts reads 410 TRIAL_MOVED: «Касса перенесена»).
-    if (!res.ok) throw await httpError(path, res);
+    // The cloud's status and code: 404 TRIAL_NOT_FOUND after a deletion, 410 TRIAL_MOVED (trial-move.ts).
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: { code?: unknown } } | null;
+      const code = typeof body?.error?.code === 'string' ? body.error.code : '';
+      throw new TrialCloudError(res.status, code, `trial ${path}: HTTP ${res.status}${code ? ` ${code}` : ''}`);
+    }
     return await res.json();
   } finally {
     clearTimeout(timer);
@@ -66,20 +79,17 @@ async function call(path: string, init: RequestInit & { token?: string | undefin
 
 export async function cloudStart(body: TrialStartRequest): Promise<TrialStarted> {
   const o = (await call('/start', { method: 'POST', body: JSON.stringify(body) })) as Record<string, unknown>;
-  const terms = parseTerms(o);
+  const terms = parseTrialTerms(o);
   if (!terms || typeof o.id !== 'string' || typeof o.token !== 'string') throw new Error('trial /start: unexpected answer');
   return { ...terms, id: o.id, token: o.token, startedAt: typeof o.startedAt === 'number' ? o.startedAt : Date.now() };
 }
 
 export async function cloudReport(id: string, token: string, stats: TrialStats, snapshot?: string): Promise<TrialTerms> {
-  const req: TrialReportRequest = { id, stats, ...(snapshot ? { snapshot } : {}) };
-  const terms = parseTerms(await call('/report', { method: 'POST', token, body: JSON.stringify(req) }));
-  if (!terms) throw new Error('trial /report: unexpected answer');
-  return terms;
+  return cloudReportWatching(id, token, stats, snapshot);
 }
 
 export async function cloudTerms(id: string, token: string): Promise<TrialTerms> {
-  const terms = parseTerms(await call(`/terms?id=${encodeURIComponent(id)}`, { method: 'GET', token }));
+  const terms = parseTrialTerms(await call(`/terms?id=${encodeURIComponent(id)}&v=${TRIAL_TERMS_VERSION}`, { method: 'GET', token }));
   if (!terms) throw new Error('trial /terms: unexpected answer');
   return terms;
 }
@@ -177,10 +187,10 @@ async function cloudReportWatching(
   extra: TrialReportMoveFields = {},
   onBody?: (body: unknown) => void,
 ): Promise<TrialReportAnswer> {
-  const req: TrialReportRequest & TrialReportMoveFields = { id, stats, ...(snapshot ? { snapshot } : {}), ...extra };
+  const req: TrialReportRequest & TrialReportMoveFields = { id, v: TRIAL_TERMS_VERSION, stats, ...(snapshot ? { snapshot } : {}), ...extra };
   const body = await call('/report', { method: 'POST', token, body: JSON.stringify(req) });
   onBody?.(body);
-  const terms = parseTerms(body);
+  const terms = parseTrialTerms(body);
   if (!terms) throw new Error('trial /report: unexpected answer');
   return (body as { watching?: unknown }).watching === true ? { ...terms, watching: true } : terms;
 }
@@ -198,21 +208,26 @@ export interface TrialCloudDeps {
   timezone: string;
   /** Subscribe to the HUB's change events. */
   onChange(listener: () => void): void;
-  /** Store changed cloud facts (into the running trial and IndexedDB). */
-  persist(patch: Partial<TrialInfo>): void;
+  /** Store changed cloud facts (into the running trial and IndexedDB); resolves once written. */
+  persist(patch: Partial<TrialInfo>): Promise<void> | void;
   /** The cloud's terms changed: re-install the HUB's license. */
   applyTerms(terms: TrialTerms): void;
   /** Another computer took the cash desk over (trial-move.ts): lock this one read-only. */
   onMoved?(): void;
 }
 
+/** A waiting page asks again at most this often when it comes back on screen. */
+const REFOCUS_MIN_MS = 5_000;
+
 /**
- * Starts the link: POST /start once (retried until it answers), then a report every 5 minutes,
- * 20 s after the first change, and a last one (without the copy) when the page goes away.
- * While a phone watches (the report's answer says `watching`, or a watch link was just made) the
- * reports come every minute and carry the copy whenever it changed; otherwise a changed copy goes 2 minutes
- * after the last change (with the 5-minute report while busy).
- * Returns null when this build has no cloud or the coffee shop is a local-only copy.
+ * Starts the link. POST /start once with this browser's installId (saved first; retried until it answers),
+ * which makes a request. While it is a request the page asks GET /terms every 30 s on screen (every 5 minutes
+ * hidden, at once when it comes back) and sends no reports; when TS approves, the terms say so and boot.ts
+ * opens the cash desk. Then a report every 5 minutes, 20 s after the first change, and a last one (without
+ * the copy) when the page goes away. While a phone watches (the report's answer says `watching`, or a watch
+ * link was just made) the reports come every minute and carry the copy whenever it changed; otherwise a changed
+ * copy goes 2 minutes after the last change (with the 5-minute report while busy). Returns null when this build
+ * has no cloud or the coffee shop is a local-only copy.
  */
 export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
   const { db, info } = deps;
@@ -228,7 +243,7 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
     const message = terms.message ?? null;
     if (terms.endsAt === info.endsAt && terms.status === info.status && message === (info.message ?? null)) return;
     const licenseChanged = terms.endsAt !== info.endsAt || terms.status !== info.status;
-    deps.persist({ endsAt: terms.endsAt, status: terms.status, message });
+    void deps.persist({ endsAt: terms.endsAt, status: terms.status, message });
     if (licenseChanged) deps.applyTerms(terms);
   };
 
@@ -260,21 +275,48 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
     if (move.stopped) return null;
     try {
       if (!info.cloudId || !info.cloudToken) {
-        // startedAt: a trial that registers late (offline at first, opened after an update) keeps its own term.
-        const started = await cloudStart({ venue: info.venue, managerName: info.managerName, timezone: deps.timezone, startedAt: info.startedAt });
-        deps.persist({ cloudId: started.id, cloudToken: started.token });
+        // The installId is saved before the first start, so a lost answer finds the same request again.
+        if (!info.installId) await deps.persist({ installId: newInstallId() });
+        const started = await cloudStart({
+          venue: info.venue,
+          managerName: info.managerName,
+          timezone: deps.timezone,
+          startedAt: info.startedAt,
+          installId: info.installId!,
+        });
+        await deps.persist({ cloudId: started.id, cloudToken: started.token });
         take(started);
+        if (trialWaiting(started.status)) {
+          noteTrialCheck(true);
+          return started;
+        }
+      }
+      if (trialWaiting(info.status)) {
+        // A request: no reports until TS approves it, only its terms.
+        const terms = await cloudTerms(info.cloudId!, info.cloudToken!);
+        noteTrialCheck(true);
+        take(terms);
+        return terms;
       }
       const force = forceCopy;
       forceCopy = false;
       const snap = snapshot(force);
       const terms = await cloudReportWatching(info.cloudId!, info.cloudToken!, collectStats(db), snap?.data, move.fields(), (body) => move.onAnswer(body));
+      noteTrialCheck(true);
       watchedByCloud = terms.watching === true;
-      if (snap) deps.persist({ snapshotAt: Date.now(), snapshotHash: snap.hash });
+      if (snap) void deps.persist({ snapshotAt: Date.now(), snapshotHash: snap.hash });
       take(terms);
       return terms;
     } catch (err) {
+      noteTrialCheck(false);
+      // Another computer took the cash desk over (410 TRIAL_MOVED): «Касса перенесена», no more calls.
       if (move.onError(err)) return null;
+      // The platform owner deleted a request that was waiting: «Заявка удалена», and no more asking.
+      const gone = err instanceof TrialCloudError && err.status === 404 && err.code === 'TRIAL_NOT_FOUND' ? trialGoneTerms(info, Date.now()) : null;
+      if (gone) {
+        take(gone);
+        return gone;
+      }
       console.warn('[trial] the TS cloud did not answer, will try again', err);
       return null;
     }
@@ -303,11 +345,19 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
     void (running ?? Promise.resolve()).then(() => reportNow());
   };
 
-  // The first report a few seconds after opening, so the counter draws first.
-  setTimeout(() => void reportNow(), 3000);
+  const visible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
+  // A request asks at once (the waiting screen is up); a running trial reports a few seconds after
+  // opening, so the counter draws first.
+  setTimeout(() => void reportNow(), trialWaiting(info.status) ? 300 : 3000);
   setInterval(() => {
-    if (Date.now() - lastAttempt >= trialReportEveryMs(watched())) void reportNow();
+    if (Date.now() - lastAttempt >= trialCheckEveryMs(info.status, visible(), trialReportEveryMs(watched()))) void reportNow();
   }, REPORT_TICK_MS);
+  // Back on screen while waiting: ask now instead of up to half a minute later.
+  const refocus = () => {
+    if (visible() && trialWaiting(info.status) && Date.now() - lastAttempt >= REFOCUS_MIN_MS) void reportNow();
+  };
+  window.addEventListener('focus', refocus);
+  document.addEventListener('visibilitychange', refocus);
   let firstChange = true;
   let quietTimer: ReturnType<typeof setTimeout> | undefined;
   deps.onChange(() => {
@@ -321,7 +371,7 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
     setTimeout(() => void reportNow(), FIRST_CHANGE_DELAY_MS);
   });
   window.addEventListener('pagehide', () => {
-    if (!info.cloudId || !info.cloudToken || move.stopped) return;
+    if (!info.cloudId || !info.cloudToken || trialWaiting(info.status) || move.stopped) return;
     try {
       void fetch(`${TRIAL_CLOUD_URL}/report`, {
         method: 'POST',

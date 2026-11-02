@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { formatCafeCode, TRIAL_MOVED_MESSAGE } from '@bills/domain';
+import { formatCafeCode, TRIAL_MOVED_MESSAGE, trialWaiting } from '@bills/domain';
 import { useAuth } from '../auth.ts';
 import { Modal } from '../ui.tsx';
 import type { ForcedCopy } from '../demo-hub/trial-move.ts';
@@ -45,7 +45,7 @@ function useTrial() {
 function useCanMove(): boolean {
   const info = useTrial();
   const { roles } = useAuth();
-  return Boolean(info && !info.localOnly && !trialMovedAway(info) && MOVE_AVAILABLE && roles.some((r) => r === 'manager' || r === 'admin' || r === 'owner'));
+  return Boolean(info && !info.localOnly && !trialMovedAway(info) && !trialWaiting(info.status) && MOVE_AVAILABLE && roles.some((r) => r === 'manager' || r === 'admin' || r === 'owner'));
 }
 
 function moveTime(ms: number): string {

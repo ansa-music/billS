@@ -82,13 +82,16 @@ jobs:
         if: env.LIVE == 'true' && env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != ''
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Pinned: CLI 3.0 (2026-11-02) made `db push` target the local database by default and broke
+          # this step. Move to a new major on purpose, after reading its changelog.
+          version: 2.122.0
 
       - name: Supabase migrations
         if: env.LIVE == 'true' && env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != '' && env.SUPABASE_DB_PASSWORD != ''
         run: |
           supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
-          supabase db push --password "$SUPABASE_DB_PASSWORD" --include-all
+          # --linked: the project linked above, never a local database (the default of CLI 3+).
+          supabase db push --linked --password "$SUPABASE_DB_PASSWORD" --include-all
 
       # Первые владельцы платформы и демо-клиент: SQL через Management API (как SQL Editor, роль postgres).
       - name: Supabase platform owners and demo cloud

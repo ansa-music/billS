@@ -252,6 +252,89 @@ export async function consumeLinkCode(db: SqlDriver, now: number, code: string):
 }
 
 // ---------------------------------------------------------------------------
+// The platform team's chats: new trial requests (apps/cloud/src/platform-notify.ts)
+// ---------------------------------------------------------------------------
+
+/** Kept apart from the owners' codes: a platform code links a chat to a person of the TS team. */
+export function platformLinkCodeHash(code: string): string {
+  return createHash('sha256').update(`ts-telegram-platform:${code}`).digest('hex');
+}
+
+interface PlatformChatRow {
+  chat_id: string;
+  staff_id: string;
+  name: string;
+  created_at: number;
+  muted: number;
+}
+
+const platformChatView = (r: PlatformChatRow): TelegramChatView => ({
+  chatId: String(r.chat_id),
+  name: r.name || 'Telegram',
+  linkedAt: Number(r.created_at),
+  muted: Number(r.muted) === 1,
+});
+
+export async function listPlatformChats(db: SqlDriver, staffId: string): Promise<TelegramChatView[]> {
+  const rows = await db.all<PlatformChatRow>('SELECT * FROM platform_telegram WHERE staff_id = ? ORDER BY created_at, chat_id', [staffId]);
+  return rows.map(platformChatView);
+}
+
+/** A new `/start` code for «Получать заявки в Telegram» of the platform cabinet (15 minutes, sha256 only). */
+export async function createPlatformLinkCode(db: SqlDriver, now: number, staffId: string): Promise<{ code: string; expiresAt: number }> {
+  await db.run('DELETE FROM platform_telegram_codes WHERE expires_at < ?', [now - DAY_MS]);
+  const code = randomBytes(18).toString('base64url');
+  const expiresAt = now + TELEGRAM_LINK_TTL_MS;
+  await db.run('INSERT INTO platform_telegram_codes (code_hash, staff_id, created_at, expires_at) VALUES (?, ?, ?, ?)', [
+    platformLinkCodeHash(code),
+    staffId,
+    now,
+    expiresAt,
+  ]);
+  return { code, expiresAt };
+}
+
+export type PlatformCodeOutcome = { ok: true; staffId: string } | { ok: false; reason: 'expired' | 'used' | 'unknown'; staffId?: string };
+
+/** Uses a platform code once (same rules as the owners' codes). */
+export async function consumePlatformLinkCode(db: SqlDriver, now: number, code: string): Promise<PlatformCodeOutcome> {
+  if (!isTelegramStartCode(code)) return { ok: false, reason: 'unknown' };
+  const hash = platformLinkCodeHash(code);
+  return db.transaction(async (tx) => {
+    const row = (await tx.all<{ staff_id: string; expires_at: number; used_at: number | null }>(
+      'SELECT staff_id, expires_at, used_at FROM platform_telegram_codes WHERE code_hash = ?',
+      [hash],
+    ))[0];
+    if (!row) return { ok: false, reason: 'unknown' } as const;
+    if (row.used_at !== null && row.used_at !== undefined) return { ok: false, reason: 'used', staffId: row.staff_id } as const;
+    if (Number(row.expires_at) <= now) return { ok: false, reason: 'expired' } as const;
+    const changed = await tx.run('UPDATE platform_telegram_codes SET used_at = ? WHERE code_hash = ? AND used_at IS NULL', [now, hash]);
+    return changed > 0 ? ({ ok: true, staffId: row.staff_id } as const) : ({ ok: false, reason: 'used', staffId: row.staff_id } as const);
+  });
+}
+
+export async function linkPlatformChat(db: SqlDriver, now: number, staffId: string, chatId: string, name: string): Promise<void> {
+  await db.run(
+    `INSERT INTO platform_telegram (chat_id, staff_id, name, created_at, muted) VALUES (?, ?, ?, ?, 0)
+     ON CONFLICT (chat_id) DO UPDATE SET staff_id = excluded.staff_id, name = excluded.name, created_at = excluded.created_at, muted = 0`,
+    [chatId, staffId, name.slice(0, 80), now],
+  );
+}
+
+/** Forgets a platform chat; with `staffId` only when it is that person's. */
+export async function unlinkPlatformChat(db: SqlDriver, chatId: string, staffId?: string): Promise<boolean> {
+  const changed = staffId
+    ? await db.run('DELETE FROM platform_telegram WHERE chat_id = ? AND staff_id = ?', [chatId, staffId])
+    : await db.run('DELETE FROM platform_telegram WHERE chat_id = ?', [chatId]);
+  return changed > 0;
+}
+
+async function platformChatOf(db: SqlDriver, chatId: string): Promise<{ staff_id: string; muted: number } | null> {
+  const rows = await db.all<{ staff_id: string; muted: number }>('SELECT staff_id, muted FROM platform_telegram WHERE chat_id = ?', [chatId]);
+  return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
 // Alerts: the dispatcher's channel to linked chats
 // ---------------------------------------------------------------------------
 
@@ -451,6 +534,22 @@ const HELP = [
   '/stop — отключить этот чат',
 ].join('\n');
 
+const PLATFORM_HOW_TO_LINK = 'Откройте кабинет платформы TS → «Пробные версии» → «Получать заявки в Telegram» и нажмите кнопку.';
+
+const PLATFORM_HELP = ['Команды:', '/mute — пауза: не присылать заявки', '/unmute — снова присылать', '/stop — отключить этот чат'].join('\n');
+
+export const OPEN_TRIALS = 'Открыть пробные версии';
+
+/** «Пробные версии» of the platform cabinet: where a new request is approved. */
+export function trialsUrl(cabinetUrl: string): string {
+  return `${cabinetUrl.replace(/\/+$/, '')}/#/platform/trials`;
+}
+
+/** Button under a request: the cabinet's «Пробные версии». */
+export function trialsButton(cabinetUrl: string | null): InlineButton | null {
+  return cabinetUrl ? { text: OPEN_TRIALS, url: trialsUrl(cabinetUrl) } : null;
+}
+
 /** "/start@TS_bot abc" → { command: 'start', arg: 'abc' }; null for plain text. */
 export function parseCommand(text: string): { command: string; arg: string } | null {
   const m = /^\/([A-Za-z_]+)(?:@[A-Za-z0-9_]+)?(?:\s+([\s\S]*))?$/.exec(text.trim());
@@ -494,10 +593,25 @@ export async function handleTelegramUpdate(deps: TelegramDeps, update: TelegramU
   };
   const cmd = parseCommand(message.text);
   const linked = await ownerOfChat(db, chatId);
+  const platformChat = await platformChatOf(db, chatId);
 
   if (cmd?.command === 'start' && cmd.arg) {
     const outcome = await consumeLinkCode(db, now, cmd.arg);
-    if (outcome.ok) {
+    // Not an owner's code: maybe one from the platform cabinet («Уведомления о заявках»).
+    const platform = !outcome.ok && outcome.reason === 'unknown' ? await consumePlatformLinkCode(db, now, cmd.arg) : null;
+    if (platform?.ok) {
+      await linkPlatformChat(db, now, platform.staffId, chatId, chatName(message));
+      deps.log(`Telegram: чат подключён к команде платформы ${platform.staffId}`);
+      await bot
+        .sendMessage(chatId, `Готово! Сюда будут приходить новые заявки на пробные версии TS.\n\n${PLATFORM_HELP}`, trialsButton(cabinetUrl))
+        .then((res) => (res.ok ? undefined : deps.log(`Telegram: ответ боту не отправлен: ${res.description}`)));
+    } else if (platform?.reason === 'used' && platformChat && platformChat.staff_id === platform.staffId) {
+      await reply('Этот чат уже получает заявки на пробные версии TS.');
+    } else if (platform?.reason === 'expired') {
+      await reply(`Ссылка устарела: она действует 15 минут. ${PLATFORM_HOW_TO_LINK}`);
+    } else if (platform?.reason === 'used') {
+      await reply(`Эта ссылка уже использована. Возьмите новую: ${PLATFORM_HOW_TO_LINK.toLowerCase()}`);
+    } else if (outcome.ok) {
       await linkChat(db, now, outcome.ownerId, chatId, chatName(message));
       deps.log(`Telegram: чат подключён к владельцу ${outcome.ownerId}`);
       await reply(
@@ -515,8 +629,26 @@ export async function handleTelegramUpdate(deps: TelegramDeps, update: TelegramU
   }
 
   if (cmd?.command === 'stop') {
+    const fromPlatform = await unlinkPlatformChat(db, chatId);
     if (await unlinkChat(db, chatId)) await reply('Отключено. Тревоги и сводка больше не придут в этот чат. Подключить снова можно в кабинете TS.');
+    else if (fromPlatform) await reply('Отключено. Заявки на пробные версии больше не придут в этот чат. Подключить снова можно в кабинете платформы TS.');
     else await reply('Этот чат и так не подключён к TS.');
+    return;
+  }
+
+  if (cmd?.command === 'mute' || cmd?.command === 'unmute') {
+    if (linked || platformChat) {
+      const muted = cmd.command === 'mute';
+      await db.run('UPDATE owner_telegram SET muted = ? WHERE chat_id = ?', [muted ? 1 : 0, chatId]);
+      await db.run('UPDATE platform_telegram SET muted = ? WHERE chat_id = ?', [muted ? 1 : 0, chatId]);
+      if (linked) await reply(muted ? 'Пауза: тревоги и сводка не будут приходить, пока не отправите /unmute.' : 'Снова присылаю тревоги и сводку дня.');
+      else await reply(muted ? 'Пауза: заявки на пробные версии не будут приходить, пока не отправите /unmute.' : 'Снова присылаю заявки на пробные версии.');
+      return;
+    }
+  }
+
+  if (!linked && platformChat) {
+    await reply(`${platformChat.muted ? 'Сейчас пауза (/unmute — снова присылать).' : 'Этот чат получает новые заявки на пробные версии TS.'}\n\n${PLATFORM_HELP}`);
     return;
   }
 
@@ -527,12 +659,6 @@ export async function handleTelegramUpdate(deps: TelegramDeps, update: TelegramU
 
   if (cmd?.command === 'today') {
     await reply(await todayText(db, now, linked.company_id), true);
-    return;
-  }
-  if (cmd?.command === 'mute' || cmd?.command === 'unmute') {
-    const muted = cmd.command === 'mute';
-    await db.run('UPDATE owner_telegram SET muted = ? WHERE chat_id = ?', [muted ? 1 : 0, chatId]);
-    await reply(muted ? 'Пауза: тревоги и сводка не будут приходить, пока не отправите /unmute.' : 'Снова присылаю тревоги и сводку дня.');
     return;
   }
   await reply(`${linked.muted ? 'Сейчас пауза (/unmute — снова присылать).\n\n' : 'Этот чат подключён к TS.\n\n'}${HELP}`);
