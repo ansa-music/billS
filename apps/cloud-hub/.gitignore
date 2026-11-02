@@ -1,0 +1,8 @@
+# wrangler dev: local Durable Object data (Miniflare) and the bundle
+.wrangler/
+dist/
+# the TS screens built for the cloud (scripts/build-web.mjs)
+web-dist/
+# scripts/e2e.mjs: codes and keys of the local test cafés
+.e2e-*.json
+.dev.vars
