@@ -14,6 +14,7 @@
  * the answer to /trial/report carries `watching: true` and the cash desk reports (and sends a changed
  * snapshot) every minute instead of every 5 / 30 minutes. Pure types and rules for the cloud and the web.
  */
+import type { TrialCloudInfo } from './cloud-cafe.ts';
 import type { TrialStatus, TrialTerms } from './trial.ts';
 
 /** POST /trial/watch/links: the link's secret, shown once as a QR code. */
@@ -42,6 +43,8 @@ export interface TrialWatchState {
   /** When the cash desk sent its last snapshot; null before the first one. */
   snapshotAt: number | null;
   snapshotBytes: number | null;
+  /** The café moved to the cloud cash desk: the phone says so and opens it (cloud-cafe.ts). */
+  cloud?: TrialCloudInfo;
 }
 
 /** GET /trial/watch/snapshot: the latest snapshot of this trial, base64 SQLite. */

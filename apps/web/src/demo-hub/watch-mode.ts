@@ -6,6 +6,7 @@
  * without a trial of its own (trial-store.ts TRIAL_HERE_KEY), so a cash desk never reopens as a copy. Small and free of the
  * HUB, so auth.ts, license.tsx and the banner can import it. The copy itself is demo-hub/watch-hub.ts.
  */
+import type { TrialCloudInfo } from '@bills/domain';
 import { isWatchToken, watchTokenFromHash } from '@bills/domain';
 import { TRIAL, TRIAL_HERE_KEY } from './trial-store.ts';
 
@@ -66,8 +67,11 @@ export function stopWatching(): void {
 // ---------------------------------------------------------------------------
 // What the banner shows (set by watch-hub.ts)
 
-/** Why the copy is not shown: the link is off, the cash desk sent nothing yet, no internet, a broken copy. */
-export type WatchProblemKind = 'revoked' | 'empty' | 'offline' | 'broken';
+/**
+ * Why the copy is not shown: the link is off, the cash desk sent nothing yet, no internet, a broken copy, or the
+ * café moved to the cloud cash desk (then the phone opens it there).
+ */
+export type WatchProblemKind = 'revoked' | 'empty' | 'offline' | 'broken' | 'cloud';
 
 export interface WatchView {
   venue: string;
@@ -80,9 +84,11 @@ export interface WatchView {
   offline: boolean;
   /** The link was switched off at the cash desk: the copy is closed. */
   revoked: boolean;
+  /** The café moved to the cloud cash desk (GET /trial/watch says so): where to open it now. */
+  cloud: TrialCloudInfo | null;
 }
 
-let view: WatchView = { venue: '', snapshotAt: null, checkedAt: null, checking: false, offline: false, revoked: false };
+let view: WatchView = { venue: '', snapshotAt: null, checkedAt: null, checking: false, offline: false, revoked: false, cloud: null };
 let version = 0;
 const listeners = new Set<() => void>();
 let refresh: (() => void) | null = null;

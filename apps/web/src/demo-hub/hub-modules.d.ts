@@ -21,6 +21,11 @@ declare module '@ts-hub/demo-license.ts' {
   export function installDemoLicense(license: unknown, now: number, trial?: { startedAt: number; days?: number; endsAt?: number; companyName: string }): Promise<boolean>;
 }
 
+declare module '@ts-hub/auth.ts' {
+  /** The stored hash of a canonical key: long keys alone, digit keys together with the branch. */
+  export function keyHashOf(key: string, club: string): string;
+}
+
 declare module '@ts-hub/trial.ts' {
   export function trialKey(random?: () => number): string;
   export function setupTrialClub(
@@ -61,6 +66,12 @@ declare module '@ts-hub/hub.ts' {
     };
     readonly auth: {
       issueFixedKeys(keys: ReadonlyArray<{ roles: readonly string[]; name: string; key: string }>): unknown[];
+      /** Hashes a six-digit key may have in this branch (access_keys.key_hash). */
+      shortKeyHashes(key: string): string[];
+      /** Six digits already used in this branch (revoked keys included). */
+      shortKeyTaken(key: string): boolean;
+      /** Revokes a key and its sessions; your own keys you may always revoke. */
+      revokeKey(keyId: string, actor: { id: string | null; name: string; role: string; roles: string[] }): unknown;
     };
     start(): void;
     close(): void;

@@ -3518,3 +3518,71 @@ input[aria-invalid='true'] {
   color: var(--accent);
   font-weight: 600;
 }
+
+/* «Облачная касса», «Коды для входа», «Купили» in a trial's details (TrialCloud.tsx, TrialCodes.tsx, TrialPaid.tsx). */
+.trial-cloud,
+.trial-codes,
+.trial-paid-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.trial-cloud-link {
+  display: grid;
+  gap: 8px;
+}
+
+.trial-cloud-code {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 1.05em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  white-space: nowrap;
+}
+
+.trial-cloud-warn {
+  display: grid;
+  gap: 6px;
+  border-color: color-mix(in oklab, var(--warn) 55%, var(--border));
+}
+
+.trial-cloud-confirm ul {
+  margin: 6px 0;
+  padding-left: 1.2em;
+}
+
+.trial-cloud-approved {
+  margin-bottom: 14px;
+}
+
+.trial-paid-form textarea,
+.trial-paid-form input:not([type='date']) {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+.trial-paid-history {
+  margin-top: 14px;
+  overflow-x: auto;
+}
+
+.bought-grid td {
+  vertical-align: top;
+}
+
+.bought-grid .trial-badge {
+  display: inline-block;
+  margin-top: 4px;
+}
+
+@media (max-width: 720px) {
+  .bought-grid th:nth-child(4),
+  .bought-grid td:nth-child(4) {
+    display: none;
+  }
+}

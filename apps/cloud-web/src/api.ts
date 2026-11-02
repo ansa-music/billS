@@ -47,7 +47,8 @@ import type { AlertEvent } from './api-supabase.ts';
 import { SUPABASE_MODE } from './config.ts';
 import type { HubCodeResponse } from './onboarding.ts';
 import type { SignupRequest, SignupResponse } from './signup.ts';
-import type { TrialSnapshot, TrialView } from './trials.ts';
+import type { TrialsList, TrialSnapshot, TrialView } from './trials.ts';
+import type { TrialCloudApproved, TrialCloudMoveState, TrialCodesView, TrialDirectorKeyIssued, TrialPaidRequest } from '@bills/domain';
 
 /**
  * One API for the pages, two backends chosen at build time (config.ts):
@@ -407,9 +408,49 @@ const noTrials = (): never => {
   throw new CloudRequestError(404, 'NOT_AVAILABLE', 'Доступно только в облачной версии');
 };
 
-/** Requests first, then newest first; each with `duplicateOf` («похоже на повтор»). */
-export async function listTrials(): Promise<TrialView[]> {
+/** Requests first, then newest first; each with `duplicateOf` («похоже на повтор»); and whether the cloud cash desk is connected. */
+export async function listTrials(): Promise<TrialsList> {
   return SUPABASE_MODE ? (await sb()).listTrials() : noTrials();
+}
+
+/** «Перевести в облако», step 1: the on-line cash desk is asked for a fresh copy. */
+export async function startTrialCloudMove(id: string): Promise<TrialCloudMoveState> {
+  return SUPABASE_MODE ? (await sb()).startTrialCloudMove(id) : noTrials();
+}
+
+/** Has the fresh copy come (or is the trial already in the cloud)? */
+export async function trialCloudMoveState(id: string): Promise<TrialCloudMoveState> {
+  return SUPABASE_MODE ? (await sb()).trialCloudMoveState(id) : noTrials();
+}
+
+/** The move itself: the copy is imported into the cloud cash desk; `acceptOlder` — with the copy the cloud has. */
+export async function moveTrialToCloud(id: string, acceptOlder: boolean): Promise<TrialView> {
+  return SUPABASE_MODE ? (await sb()).moveTrialToCloud(id, acceptOlder) : noTrials();
+}
+
+/** «Повторить»: the terms go to the cloud café again. */
+export async function retryTrialCloudTerms(id: string): Promise<TrialView> {
+  return SUPABASE_MODE ? (await sb()).retryTrialCloudTerms(id) : noTrials();
+}
+
+/** «Подтвердить в облаке»: the request becomes a new cloud café; the director's key once. */
+export async function approveTrialInCloud(id: string): Promise<TrialCloudApproved<TrialView>> {
+  return SUPABASE_MODE ? (await sb()).approveTrialInCloud(id) : noTrials();
+}
+
+/** «Купили» / «Продлить оплату». */
+export async function markTrialPaid(id: string, body: TrialPaidRequest): Promise<TrialView> {
+  return SUPABASE_MODE ? (await sb()).markTrialPaid(id, body) : noTrials();
+}
+
+/** The café code and the director's code (the platform owner only). */
+export async function fetchTrialCodes(id: string): Promise<TrialCodesView> {
+  return SUPABASE_MODE ? (await sb()).fetchTrialCodes(id) : noTrials();
+}
+
+/** «Выдать новый код директора» (the platform owner only); the code is answered once. */
+export async function issueDirectorKey(id: string): Promise<TrialDirectorKeyIssued<TrialView>> {
+  return SUPABASE_MODE ? (await sb()).issueDirectorKey(id) : noTrials();
 }
 
 /** «Подтвердить»: the request becomes a trial of 14 days from now. */

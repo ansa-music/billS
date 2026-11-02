@@ -8,7 +8,7 @@ import { QrCode } from '../QrCode.tsx';
 import { Modal } from '../ui.tsx';
 import type { LinkDeviceView } from '../demo-hub/link-control.ts';
 import { linkHostApi, linkHostState, linkHostVersion, subscribeLinkHost } from '../demo-hub/link-control.ts';
-import { TRIAL } from '../demo-hub/trial-store.ts';
+import { currentTrial, subscribeTrial, TRIAL, trialVersion } from '../demo-hub/trial-store.ts';
 import { openTrialWatch, useCanWatchFromPhone } from './TrialWatch.tsx';
 import { watchTime } from './WatchBanner.tsx';
 import './trial.css';
@@ -39,7 +39,9 @@ export function openTrialLink(): void {
 export function useCanLinkDevices(): boolean {
   useSyncExternalStore(subscribeLinkHost, linkHostVersion);
   const { roles } = useAuth();
-  return TRIAL && linkHostApi() !== null && roles.some((r) => r === 'manager' || r === 'admin' || r === 'owner');
+  useSyncExternalStore(subscribeTrial, trialVersion);
+  // A cash desk moved to the cloud cash desk: devices open the cloud café instead.
+  return TRIAL && linkHostApi() !== null && !currentTrial()?.cloud && roles.some((r) => r === 'manager' || r === 'admin' || r === 'owner');
 }
 
 /** Mounted once (with the trial badge); the dialog goes to <body>. */

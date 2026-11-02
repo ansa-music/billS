@@ -87,7 +87,7 @@ export async function readOptionalJson(req: EdgeRequest): Promise<unknown> {
  * облака» alone tells the platform owner nothing, and Supabase logs are not at hand in the cabinet.
  */
 export function errorResponse(err: unknown, log: Log, headers: Record<string, string> = {}): Response {
-  if (err instanceof CloudError) return json(err.status, { error: { code: err.code, message: err.message } }, headers);
+  if (err instanceof CloudError) return json(err.status, { error: { ...err.extra, code: err.code, message: err.message } }, headers);
   log(`Внутренняя ошибка: ${(err as Error)?.stack ?? String(err)}`);
   return json(500, { error: { code: 'INTERNAL', message: internalMessage(err) } }, headers);
 }
