@@ -6,6 +6,7 @@
 //
 // Ports and database: --hub-port=4400 --web-port=5400 --db=local (apps/hub/data/<db>.db),
 // or LOCAL_HUB_PORT / LOCAL_WEB_PORT / LOCAL_DB. A second copy needs all three different.
+// --business=cafe: a coffee shop demo instead of the billiard club (needs a new --db).
 //
 // --dist: no Vite dev server; the HUB serves the built screen (apps/web/dist, run
 // `npm run build` first) like in a club. This is how the installable app (PWA:
@@ -56,6 +57,8 @@ start('hub', ['--watch', 'src/main.ts'], join(root, 'apps/hub'), {
   HUB_DB_PATH: join(root, `apps/hub/data/${dbName}.db`),
   // A real HUB starts empty; the local stand keeps demo data unless HUB_DEMO=0.
   HUB_DEMO: process.env.HUB_DEMO ?? '1',
+  // --business=cafe: the demo is a coffee shop instead of a billiard club (on a new database).
+  ...(flag('business') ? { HUB_DEMO_BUSINESS: flag('business') } : {}),
 });
 if (!serveDist) {
   start('web', [join(root, 'node_modules/vite/bin/vite.js')], join(root, 'apps/web'), {
