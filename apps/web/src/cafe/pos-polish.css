@@ -1,6 +1,166 @@
-/* «Касса» polish: loaded last (Pos.tsx, after pos-touch.css). Calmer chrome around the menu,
-   the category visible on every tile, bigger tiles on big screens, and buttons that look
-   switched off when there is nothing to pay. Theme tokens only. */
+/* «Касса» polish: loaded last (Pos.tsx, after pos-touch.css). «Режим стойки»: the screen belongs
+   to the sale (the sections fold into an icon rail), «Как обычно» drinks one tap away, calmer chrome
+   around the menu, the category visible on every tile, bigger tiles on big screens, and buttons
+   that look switched off when there is nothing to pay. Theme tokens only. */
+
+/* ── Режим стойки: the icon rail on the till at every width ─────────────────────
+   shell.css draws this rail on tablets (768–1180); on the till it stays from 1181 up too,
+   giving the tiles the 140 px the full menu took. Other sections keep the full menu. */
+@media (min-width: 1181px) {
+  .shell[data-section='pos'] {
+    grid-template-columns: 92px minmax(0, 1fr);
+  }
+
+  .shell[data-section='pos'] .sidebar {
+    padding: 12px 8px;
+    align-items: stretch;
+  }
+
+  .shell[data-section='pos'] .sidebar .nav-label,
+  .shell[data-section='pos'] .sidebar-brand-text,
+  .shell[data-section='pos'] .sidebar .trial-badge-text {
+    display: none;
+  }
+
+  .shell[data-section='pos'] .sidebar .nav-label-short {
+    display: block;
+    width: 100%;
+    max-height: 2.4em;
+    overflow: hidden;
+    font-size: 11.5px;
+    line-height: 1.2;
+    text-align: center;
+    white-space: normal;
+  }
+
+  .shell[data-section='pos'] .sidebar-brand {
+    justify-content: center;
+    padding: 0 0 12px;
+  }
+
+  .shell[data-section='pos'] .sidebar .nav-link {
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    min-height: 64px;
+    padding: 6px 2px;
+  }
+
+  .shell[data-section='pos'] .sidebar-foot,
+  .shell[data-section='pos'] .sidebar .trial-badge {
+    justify-content: center;
+    padding: 6px 2px;
+  }
+
+  .shell[data-section='pos'] .sidebar .trial-badge-short {
+    display: block;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+}
+
+/* ── «Как обычно»: the usual drinks with their options, one tap each ─────────── */
+.pos .pos-usual {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-bottom: var(--space-3);
+}
+
+.pos .pos-usual-title {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* One row: a swipe or the trackpad for more, the fade says there is more. */
+.pos .pos-usual-list {
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+}
+
+.pos .pos-usual-list::-webkit-scrollbar {
+  display: none;
+}
+
+.pos .pos-usual-chip {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-areas: 'name price' 'opts price';
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 2px var(--space-4);
+  min-height: 60px;
+  padding: 8px 16px 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(120deg, oklch(0.7 0.12 var(--hue, var(--pos-hue)) / 0.14), transparent 70%),
+    var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur), transform var(--dur-fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .pos .pos-usual-chip:hover {
+    border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+  }
+}
+
+.pos .pos-usual-chip:active {
+  transform: scale(0.97);
+}
+
+.pos .pos-usual-name {
+  grid-area: name;
+  font-size: 15px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.pos .pos-usual-name::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: oklch(0.7 0.14 var(--hue, var(--pos-hue)));
+  vertical-align: 0.12em;
+}
+
+.pos .pos-usual-opts {
+  grid-area: opts;
+  color: var(--text-2);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.pos .pos-usual-price {
+  grid-area: price;
+  font-size: 18px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pos .pos-usual-chip:active {
+    transform: none;
+  }
+}
 
 /* «Редактировать дизайн» is a setup action: quiet next to the search, loud only while on. */
 .pos .ts-design-toggle:not([aria-pressed='true']) {
