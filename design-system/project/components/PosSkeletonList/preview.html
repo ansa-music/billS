@@ -1,0 +1,24 @@
+<!-- @dsCard group="Касса · сообщения" height=240 width=640 -->
+<!doctype html>
+<html lang="ru" data-surface="pos">
+<head>
+<meta charset="utf-8">
+<title>PosSkeletonList</title>
+<style>
+  body { padding: 16px; }
+
+</style>
+</head>
+<body>
+<script>(function(h,m){h.setAttribute('data-surface','pos');function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{dark:'pos-dark',light:'pos-light'});</script>
+<div id="root" style="display:grid;gap:12px"></div>
+<script>
+var T = window.TS, h = React.createElement;
+function mount(el) { ReactDOM.createRoot(document.getElementById('root')).render(el); }
+mount(h(React.Fragment, null,
+  h(T.PosSkeletonList, { rows: 3 }),
+  h(T.PosLoading, { online: false }),
+  h(T.PosEmpty, null, 'Попыток входа ещё не было')));
+</script>
+</body>
+</html>

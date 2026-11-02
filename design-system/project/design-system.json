@@ -1,0 +1,124 @@
+{
+  "v": 3,
+  "layout": "files",
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-11-02T10:38:05Z"
+  },
+  "title": "TS",
+  "namespace": "TS",
+  "libraries": [
+    {
+      "name": "react",
+      "version": "18.3.1"
+    },
+    {
+      "name": "react-dom",
+      "version": "18.3.1"
+    }
+  ],
+  "sections": {},
+  "groups": [
+    "Logos",
+    "Icons"
+  ],
+  "assetGroups": {
+    "Logos": {
+      "name": "Logos",
+      "tile": "l",
+      "order": [
+        "ts-monogram.svg",
+        "ts-monogram-pos.svg",
+        "ts-app-icon.svg",
+        "ts-app-icon-512.png",
+        "ts-apple-touch-icon.png"
+      ],
+      "files": {
+        "ts-monogram.svg": {
+          "name": "ts-monogram.svg",
+          "blob": "ba1bd0e03f85522ff4cc68fa7abc3267",
+          "size": 495,
+          "type": "image/svg+xml"
+        },
+        "ts-app-icon.svg": {
+          "name": "ts-app-icon.svg",
+          "blob": "5fdde9846d18821c4b2ec959ea2483b2",
+          "size": 864,
+          "type": "image/svg+xml"
+        },
+        "ts-app-icon-512.png": {
+          "name": "ts-app-icon-512.png",
+          "blob": "0bc9f4f2050d595a4311854ac99d90e9",
+          "size": 13380,
+          "type": "image/png"
+        },
+        "ts-apple-touch-icon.png": {
+          "name": "ts-apple-touch-icon.png",
+          "blob": "5da27c719eaaa6b4bc79547fe60e2478",
+          "size": 4263,
+          "type": "image/png"
+        },
+        "ts-monogram-pos.svg": {
+          "name": "ts-monogram-pos.svg",
+          "blob": "d9cc524eca00263b9fad38858339e6c2",
+          "size": 732,
+          "type": "image/svg+xml"
+        }
+      }
+    },
+    "Icons": {
+      "name": "Icons",
+      "tile": "s",
+      "order": [
+        "overview.svg",
+        "venues.svg",
+        "staff.svg",
+        "alerts.svg",
+        "download.svg"
+      ],
+      "files": {
+        "overview.svg": {
+          "name": "overview.svg",
+          "blob": "d15cf83fbfc0b3e0d473d2f805ad5595",
+          "size": 237,
+          "type": "image/svg+xml"
+        },
+        "venues.svg": {
+          "name": "venues.svg",
+          "blob": "dd1d174b60f48047e1c7c093740438c1",
+          "size": 258,
+          "type": "image/svg+xml"
+        },
+        "staff.svg": {
+          "name": "staff.svg",
+          "blob": "a75ea76351bd2a654510861cebd9bd9b",
+          "size": 319,
+          "type": "image/svg+xml"
+        },
+        "alerts.svg": {
+          "name": "alerts.svg",
+          "blob": "7fd6cc423704cff7c1faf9c148abbc28",
+          "size": 248,
+          "type": "image/svg+xml"
+        },
+        "download.svg": {
+          "name": "download.svg",
+          "blob": "922891883df6c744404a2a0ae727c56b",
+          "size": 233,
+          "type": "image/svg+xml"
+        }
+      }
+    }
+  },
+  "blobs": {},
+  "docs": {
+    "readme": "project/README.md",
+    "sections": []
+  },
+  "lastChange": {
+    "by": "ansa-music",
+    "at": "2026-11-02T19:12:27Z",
+    "via": "GitHub · ansa-music/billS@3dd3dbf",
+    "note": "Пересборка по main@3dd3dbf: bundle.css (склад, пробная версия, trial-move.css, кабинет) и bundle.js; токены без изменений"
+  }
+}

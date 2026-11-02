@@ -1,0 +1,24 @@
+<!-- @dsCard group="Касса · раскладка" height=220 width=720 -->
+<!doctype html>
+<html lang="ru" data-surface="pos">
+<head>
+<meta charset="utf-8">
+<title>PosSection</title>
+<style>
+  body { padding: 16px; }
+
+</style>
+</head>
+<body>
+<script>(function(h,m){h.setAttribute('data-surface','pos');function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{dark:'pos-dark',light:'pos-light'});</script>
+<div id="root"></div>
+<script>
+var T = window.TS, h = React.createElement;
+function mount(el) { ReactDOM.createRoot(document.getElementById('root')).render(el); }
+mount(h(T.PosSection, { title: 'Смена №128', aside: h('span', { className: 'tag tag-ok' }, 'открыта') },
+  h('p', { className: 'amount' }, '84 500 ₸'),
+  h('p', { className: 'hint' }, 'нал 31 000 ₸ · карта 47 500 ₸ · QR 6 000 ₸'),
+  h('div', { className: 'row wrap' }, h('button', { type: 'button', className: 'btn btn-narrow' }, 'Внесение'), h('button', { type: 'button', className: 'btn btn-narrow' }, 'Изъятие'), h('button', { type: 'button', className: 'btn btn-primary' }, 'Закрыть смену'))));
+</script>
+</body>
+</html>

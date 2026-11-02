@@ -1,0 +1,33 @@
+<!-- @dsCard group="Бренд" height=112 -->
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>BrandMark</title>
+<style>
+  body { padding: 16px; }
+  .wrap { display: flex; align-items: center; gap: 40px; flex-wrap: wrap; }
+  .brand-mark.s64 { width: 64px; height: 64px; border-radius: 16px; }
+  .brand-mark.s34 { width: 34px; height: 34px; }
+</style>
+</head>
+<body>
+<script>(function(h,m){function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{'pos-dark':'dark','pos-light':'light'});</script>
+<div id="root"></div>
+<script>
+var T = window.TS, h = React.createElement;
+var NOW = Date.UTC(2026, 10, 2, 11, 40), MIN = 60000, DAY = 864e5;
+function S(o) { return Object.assign({ revenue: 0, billed: 0, games: 0, playedSeconds: 0, paid: { cash: 0, card: 0, qr: 0, total: 0 }, refunded: 0, checksPaid: 0, discounts: 0, averageCheck: 0, cancelledGames: 0 }, o); }
+var TODAY = S({ revenue: 8450000, billed: 8600000, games: 14, playedSeconds: 70560, paid: { cash: 3100000, card: 4750000, qr: 600000, total: 8450000 }, checksPaid: 37, averageCheck: 228400 });
+var WEEK = S({ revenue: 51230000, billed: 52000000, games: 96, playedSeconds: 480000, paid: { cash: 18900000, card: 28450000, qr: 4000000, total: 51350000 }, refunded: 120000, checksPaid: 241, averageCheck: 212600, cancelledGames: 2 });
+var MONTH = S({ revenue: 15960000, billed: 16100000, games: 27, playedSeconds: 136000, paid: { cash: 5800000, card: 8960000, qr: 1200000, total: 15960000 }, checksPaid: 71, averageCheck: 224800 });
+var HUB = { id: 'h1', name: 'HUB', lastSeenAt: NOW - MIN, online: true, lastOutboxId: 1, settingsVersion: 3, pendingSettings: false };
+function mount(el) { ReactDOM.createRoot(document.getElementById('root')).render(el); }
+mount(h('div', { className: 'wrap' },
+  h('a', { className: 'brand', href: '#' }, h(T.BrandMark), h('div', null, h('h1', null, 'Кофейня «Зерно»'), h('p', { className: 'muted' }, 'Кабинет TS'))),
+  h(T.BrandMark, { className: 's64' }),
+  h(T.BrandMark),
+  h(T.BrandMark, { className: 's34' })));
+</script>
+</body>
+</html>

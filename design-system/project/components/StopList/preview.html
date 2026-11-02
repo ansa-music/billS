@@ -1,0 +1,16 @@
+<!-- @dsCard group="Кофейня · бариста" height=640 width=900 -->
+<!doctype html>
+<html lang="ru" data-surface="pos" data-business="cafe">
+<head>
+<meta charset="utf-8">
+<title>StopList</title>
+<style>
+  body { padding: 16px; }
+  dialog.modal { position: static; margin: 0 auto; }
+</style>
+</head>
+<body>
+<script>(function(h,m){h.setAttribute('data-surface','pos');h.setAttribute('data-business','cafe');function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{dark:'pos-dark',light:'pos-light'});</script>
+<dialog class="modal modal-wide" open=""><header class="modal-head"><h2>Стоп-лист</h2><button type="button" class="modal-close" aria-label="Закрыть">×</button></header><div class="modal-body"><p class="hint">Нажмите на позицию, которая закончилась: на кассе она пропадёт. Нажмите ещё раз, когда появится.</p><section class="stop-group" aria-label="Кофе"><h3 class="cash-sub">Кофе</h3><ul class="stop-list"><li><button type="button" class="stop-item" aria-pressed="undefined"><span>Эспрессо</span><span class="tag tag-ok">есть</span></button></li><li><button type="button" class="stop-item" aria-pressed="undefined"><span>Американо</span><span class="tag tag-ok">есть</span></button></li><li><button type="button" class="stop-item" aria-pressed="undefined"><span>Капучино</span><span class="tag tag-ok">есть</span></button></li><li><button type="button" class="stop-item" aria-pressed="true"><span>Раф</span><span class="tag tag-danger">нет в наличии</span></button></li></ul></section><section class="stop-group" aria-label="Еда"><h3 class="cash-sub">Еда</h3><ul class="stop-list"><li><button type="button" class="stop-item" aria-pressed="undefined"><span>Круассан</span><span class="tag tag-ok">есть</span></button></li><li><button type="button" class="stop-item" aria-pressed="true"><span>Чизкейк</span><span class="tag tag-danger">нет в наличии</span></button></li><li><button type="button" class="stop-item" aria-pressed="undefined"><span>Печенье</span><span class="tag tag-ok">есть</span></button></li></ul></section></div><footer class="modal-foot"><div class="modal-actions"><button type="button" class="btn btn-primary">Готово</button></div></footer></dialog>
+</body>
+</html>

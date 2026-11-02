@@ -1,0 +1,21 @@
+<!-- @dsCard group="Касса · сообщения" height=420 width=760 -->
+<!doctype html>
+<html lang="ru" data-surface="pos">
+<head>
+<meta charset="utf-8">
+<title>PosConfirm</title>
+<style>
+  body { padding: 16px; }
+
+</style>
+</head>
+<body>
+<script>(function(h,m){h.setAttribute('data-surface','pos');function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{dark:'pos-dark',light:'pos-light'});</script>
+<div id="root"></div>
+<script>
+var T = window.TS, h = React.createElement;
+function mount(el) { ReactDOM.createRoot(document.getElementById('root')).render(el); }
+mount(h(T.PosConfirm, { open: true, title: 'Отозвать ключ?', text: 'Ключ 482… перестанет работать сразу; все входы по нему закроются. Если он нужен, выдайте новый.', confirmLabel: 'Отозвать', danger: true, onConfirm: function () {}, onCancel: function () {} }));
+</script>
+</body>
+</html>

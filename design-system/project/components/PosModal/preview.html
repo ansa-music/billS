@@ -1,0 +1,27 @@
+<!-- @dsCard group="Касса · сообщения" height=560 width=760 -->
+<!doctype html>
+<html lang="ru" data-surface="pos">
+<head>
+<meta charset="utf-8">
+<title>PosModal</title>
+<style>
+  body { padding: 16px; }
+
+</style>
+</head>
+<body>
+<script>(function(h,m){h.setAttribute('data-surface','pos');function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{dark:'pos-dark',light:'pos-light'});</script>
+<div id="root"></div>
+<script>
+var T = window.TS, h = React.createElement;
+function mount(el) { ReactDOM.createRoot(document.getElementById('root')).render(el); }
+mount(h(T.PosModal, { open: true, title: 'Комментарий к заказу 17', onClose: function () {} },
+  h(T.PosField, { label: 'Комментарий', hint: 'Бариста увидит его на карточке заказа' }, h('input', { defaultValue: 'без сахара' })),
+  h('div', { className: 'chips' },
+    h('button', { type: 'button', className: 'chip', 'aria-pressed': 'true' }, 'без сахара'),
+    h('button', { type: 'button', className: 'chip', 'aria-pressed': 'false' }, 'погорячее'),
+    h('button', { type: 'button', className: 'chip', 'aria-pressed': 'false' }, 'в свою кружку')),
+  h('div', { className: 'row wrap modal-actions' }, h('button', { type: 'button', className: 'btn btn-ghost' }, 'Отмена'), h('button', { type: 'button', className: 'btn btn-primary' }, 'Сохранить'))));
+</script>
+</body>
+</html>

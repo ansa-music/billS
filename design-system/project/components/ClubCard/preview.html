@@ -1,0 +1,46 @@
+<!-- @dsCard group="Кабинет · раскладка" height=380 width=1000 -->
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>ClubCard</title>
+<style>
+  body { padding: 16px; }
+
+</style>
+</head>
+<body>
+<script>(function(h,m){function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{'pos-dark':'dark','pos-light':'light'});</script>
+<div id="root" class="clubs"></div>
+<script>
+var T = window.TS, h = React.createElement;
+var NOW = Date.UTC(2026, 10, 2, 11, 40), MIN = 60000, DAY = 864e5;
+function S(o) { return Object.assign({ revenue: 0, billed: 0, games: 0, playedSeconds: 0, paid: { cash: 0, card: 0, qr: 0, total: 0 }, refunded: 0, checksPaid: 0, discounts: 0, averageCheck: 0, cancelledGames: 0 }, o); }
+var TODAY = S({ revenue: 8450000, billed: 8600000, games: 14, playedSeconds: 70560, paid: { cash: 3100000, card: 4750000, qr: 600000, total: 8450000 }, checksPaid: 37, averageCheck: 228400 });
+var WEEK = S({ revenue: 51230000, billed: 52000000, games: 96, playedSeconds: 480000, paid: { cash: 18900000, card: 28450000, qr: 4000000, total: 51350000 }, refunded: 120000, checksPaid: 241, averageCheck: 212600, cancelledGames: 2 });
+var MONTH = S({ revenue: 15960000, billed: 16100000, games: 27, playedSeconds: 136000, paid: { cash: 5800000, card: 8960000, qr: 1200000, total: 15960000 }, checksPaid: 71, averageCheck: 224800 });
+var HUB = { id: 'h1', name: 'HUB', lastSeenAt: NOW - MIN, online: true, lastOutboxId: 1, settingsVersion: 3, pendingSettings: false };
+function mount(el) { ReactDOM.createRoot(document.getElementById('root')).render(el); }
+function Card(p) {
+  return h('a', { className: 'club-card', href: '#', 'data-problem': p.problem ? '' : undefined },
+    h('header', { className: 'club-head' },
+      h('div', null, h('h2', null, p.name), h('p', { className: 'muted' }, '16:40 · время Алматы')),
+      h(T.HubBadge, { hub: p.hub, now: NOW })),
+    h('div', { className: 'stats' },
+      h(T.StatTile, { label: 'Сегодня', stats: p.today, currency: 'KZT', compact: true }),
+      h(T.StatTile, { label: '7 дней', stats: WEEK, currency: 'KZT', compact: true }),
+      h(T.StatTile, { label: 'Месяц', stats: MONTH, currency: 'KZT', compact: true })),
+    p.shift,
+    h('footer', { className: 'club-foot' }, p.foot));
+}
+mount(h(React.Fragment, null,
+  h(Card, { name: 'Пирамида · Центр', hub: HUB, today: TODAY,
+    shift: h('p', { className: 'shift-status', 'data-open': '' }, h('span', { className: 'shift-dot', 'aria-hidden': 'true' }), 'Смена №128 открыта с 10:05, Айгерим'),
+    foot: [h('span', { key: 1 }, '12 столов'), h('span', { key: 2, 'data-live': '' }, 'сейчас идёт 3 игры'), h('span', { key: 3 }, 'тревог нет')] }),
+  h(Card, { name: 'Пирамида · Самал', problem: true, today: S({}),
+    hub: Object.assign({}, HUB, { online: false, lastSeenAt: NOW - 47 * MIN }),
+    shift: h('p', { className: 'shift-status' }, h('span', { className: 'shift-dot', 'aria-hidden': 'true' }), 'Смена закрыта', h('span', { className: 'muted' }, ' · №127, 01.11, 23:58:'), ' ', h(T.Difference, { value: -30000, currency: 'KZT' })),
+    foot: [h('span', { key: 1 }, '8 столов'), h('span', { key: 2 }, 'сейчас игр нет'), h('span', { key: 3, 'data-alert': '' }, '1 тревога')] })));
+</script>
+</body>
+</html>

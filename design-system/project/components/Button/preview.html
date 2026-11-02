@@ -1,0 +1,32 @@
+<!-- @dsCard group="Кабинет · действия" height=230 width=760 -->
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Button</title>
+<style>
+  body { padding: 16px; }
+  .stack { display: grid; gap: 16px; }
+</style>
+</head>
+<body>
+<script>(function(h,m){function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{'pos-dark':'dark','pos-light':'light'});</script>
+<div class="stack">
+  <div class="row wrap">
+    <button type="button" class="btn btn-primary">Начать бесплатно</button>
+    <button type="button" class="btn">Скопировать</button>
+    <button type="button" class="btn btn-small">Выйти</button>
+    <button type="button" class="btn btn-primary" disabled>Получить новый код</button>
+    <button type="button" class="link">Вход для команды TS</button>
+  </div>
+  <div class="row wrap">
+    <a class="btn btn-primary btn-big-text" href="#">Начать бесплатно</a>
+    <p class="login-alt">Уже есть аккаунт? <a class="link-inline" href="#">Войти</a></p>
+  </div>
+  <div class="dl-pair">
+    <a class="btn btn-primary btn-big" href="#"><span>Скачать для Windows</span><small>компьютер кассы</small></a>
+    <a class="btn btn-big" href="#"><span>Скачать для мини-ПК</span><small>образ на флешку</small></a>
+  </div>
+</div>
+</body>
+</html>

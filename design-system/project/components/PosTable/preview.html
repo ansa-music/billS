@@ -1,0 +1,25 @@
+<!-- @dsCard group="Касса · раскладка" height=230 width=860 -->
+<!doctype html>
+<html lang="ru" data-surface="pos">
+<head>
+<meta charset="utf-8">
+<title>PosTable</title>
+<style>
+  body { padding: 16px; }
+  .panel { display: block; }
+</style>
+</head>
+<body>
+<script>(function(h,m){h.setAttribute('data-surface','pos');function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{dark:'pos-dark',light:'pos-light'});</script>
+<section class="panel"><div class="table-wrap">
+  <table class="table">
+    <thead><tr><th>Время</th><th>Результат</th><th>Ключ</th><th>Устройство</th><th>IP</th></tr></thead>
+    <tbody>
+      <tr><td>2 нояб., 16:28</td><td><span class="tag tag-ok">вход</span></td><td>Айгерим <span class="muted">· 6 цифр</span></td><td>Касса у стойки</td><td><code>192.168.1.24</code></td></tr>
+      <tr><td>2 нояб., 16:27</td><td><span class="tag tag-warn">неверный ключ</span></td><td><span class="muted">—</span></td><td>Касса у стойки</td><td><code>192.168.1.24</code></td></tr>
+      <tr data-inactive=""><td>1 нояб., 09:12</td><td><span class="tag tag-danger">сотрудник уволен</span></td><td>Данияр <span class="muted">· 6 цифр</span></td><td>Планшет бариста</td><td><code>192.168.1.31</code></td></tr>
+    </tbody>
+  </table>
+</div></section>
+</body>
+</html>
