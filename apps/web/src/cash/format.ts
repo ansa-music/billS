@@ -1,12 +1,9 @@
 import type { Minor, PaymentMethod } from '@bills/domain';
-import { formatMoney, minorPerMajor } from '@bills/domain';
+import { formatMoney, minorPerMajor, PAYMENT_METHOD_LABEL } from '@bills/domain';
 import { formatClock } from '../format.ts';
 
-export const METHOD_LABEL: Record<PaymentMethod, string> = {
-  CASH: 'Наличные',
-  CARD: 'Карта',
-  QR: 'QR',
-};
+/** «Наличные», «Карта», «QR» — the receipt uses the same words. */
+export const METHOD_LABEL: Record<PaymentMethod, string> = PAYMENT_METHOD_LABEL;
 
 const dayFormatters = new Map<string, Intl.DateTimeFormat>();
 

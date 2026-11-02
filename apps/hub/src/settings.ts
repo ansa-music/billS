@@ -4,6 +4,7 @@ import type {
   ClubSettingsPatch,
   CreateTableRequest,
   CreateTariffRequest,
+  ReceiptSettings,
   ReorderTablesRequest,
   TableAdminView,
   TableKind,
@@ -13,7 +14,7 @@ import type {
   UpdateTableRequest,
   UpdateTariffRequest,
 } from '@bills/domain';
-import { isValidTimeZone, normalizeClubSettings, validateClubSettings, validateTariff } from '@bills/domain';
+import { isValidTimeZone, normalizeClubSettings, receiptSettingsProblems, validateClubSettings, validateTariff } from '@bills/domain';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
 import { afterCommit, all, one, run, transaction } from './db.ts';
@@ -212,6 +213,35 @@ export class SettingsService {
         afterCommit(db, () => events.changed({ kind: 'club' }));
       }
       return loadClub(db);
+    });
+  }
+
+  /**
+   * «Чек» (POST /api/receipt/settings, `receipt.edit`): only the fields of ReceiptSettings —
+   * everything else on a receipt comes from the check. A patch with any problem is refused
+   * as a whole (422 RECEIPT_INVALID) with the same words the form shows.
+   */
+  updateReceipt(input: { patch: Partial<ReceiptSettings>; actor: string }): ReceiptSettings {
+    const { db, clock, events } = this.deps;
+    const now = clock.now();
+    return transaction(db, () => {
+      const club = clubId(db);
+      const current = loadSettings(db, club);
+      const problems = receiptSettingsProblems(input.patch, current.receipt);
+      if (problems.length) throw new HubError(422, 'RECEIPT_INVALID', problems.map((p) => p.message).join('. '));
+      const next = normalizeClubSettings({ receipt: input.patch }, current);
+      if (JSON.stringify(next.receipt) !== JSON.stringify(current.receipt)) {
+        run(db, 'UPDATE clubs SET settings = ? WHERE id = ?', JSON.stringify(next), club);
+        // The journal names what changed; a logo is too big to copy there.
+        const changed = Object.fromEntries(
+          (Object.keys(next.receipt) as Array<keyof ReceiptSettings>)
+            .filter((k) => JSON.stringify(next.receipt[k]) !== JSON.stringify(current.receipt[k]))
+            .map((k) => [k, k === 'logo' ? (next.receipt.logo ? 'загружен' : null) : next.receipt[k]]),
+        );
+        record(db, now, { actor: input.actor, action: 'club.updated', entityType: 'club', entityId: club, data: { settings: { receipt: changed } } });
+        afterCommit(db, () => events.changed({ kind: 'club' }));
+      }
+      return next.receipt;
     });
   }
 

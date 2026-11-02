@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import type { Action, BusinessType, HubState, LicenseStatus, MeResponse, OpenTableRequest, Role } from '@bills/domain';
 import { HubRequestError, UNAUTHORIZED_EVENT, command, fetchJson, fetchState, getAuthToken, hubUrl } from './api.ts';
 import { AUTH_CHANGED_EVENT, actorName, readAuth, writeAuth } from './auth.ts';
+import { setClubPaper } from './cash/print/paper.ts';
 
 /**
  * One live connection to the HUB for the whole app: SSE for change events,
@@ -48,6 +49,8 @@ export function useHubConnection(): HubConnection {
         again.current = false;
         const s = await fetchState();
         setState(s);
+        // Receipts, X/Z and slips print on the club's paper width unless this device picked its own.
+        setClubPaper(s.settings?.receipt?.paper);
         setOffset(s.serverNow - Date.now());
         setOnline(true);
       } while (again.current);

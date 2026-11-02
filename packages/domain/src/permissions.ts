@@ -228,6 +228,11 @@ export const ACTIONS = {
   'tariffs.edit': ADMIN,
   'display.edit': ADMIN, // hall screen look
   'rules.edit': ADMIN,
+  // «Чек»: only what the venue may put on its receipt — name, address, phone, BIN/IIN, logo, header
+  // and footer text, Wi-Fi, Instagram, a QR link, what to show, paper width, copies (receipt.ts).
+  // Amounts, lines, payments, the order number, the date and the non-fiscal note are not settings.
+  // The manager and the administrator: «Директор» and «Управляющий» of a coffee shop.
+  'receipt.edit': ADMIN,
   // Staff
   'staff.view': ADMIN,
   'staff.edit': M, // hire, change roles, issue and revoke keys (a coffee shop's admin too: CAFE_GRANTS)

@@ -401,7 +401,7 @@ function ShiftChecksDialog({ desk, shiftId, onClose }: { desk: Desk; shiftId: st
                       type="button"
                       className="btn btn-small"
                       aria-label={`Печать счёта №${c.number}`}
-                      onClick={() => printReceipt(c, club, names)}
+                      onClick={() => printReceipt(c, desk.state, { names })}
                     >
                       Печать
                     </button>

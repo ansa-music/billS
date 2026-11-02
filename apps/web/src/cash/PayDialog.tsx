@@ -132,7 +132,7 @@ export function PayDialog({ desk, initial, onClose }: { desk: Desk; initial: Che
         onClose={onClose}
         footer={
           <div className="modal-actions">
-            <button type="button" className="btn" onClick={() => printReceipt(done.check, state.club, names)}>
+            <button type="button" className="btn" onClick={() => printReceipt(done.check, state, { names, copies: true })}>
               Печать чека
             </button>
             <button ref={doneRef} type="button" className="btn btn-primary" onClick={onClose}>
@@ -203,7 +203,7 @@ export function PayDialog({ desk, initial, onClose }: { desk: Desk; initial: Che
               type="button"
               className="btn btn-narrow"
               title={open ? 'Напечатать счёт как есть, до оплаты' : undefined}
-              onClick={() => printReceipt(check, state.club, names)}
+              onClick={() => printReceipt(check, state, { names })}
             >
               {open ? 'Предчек' : 'Печать чека'}
             </button>

@@ -25,7 +25,7 @@ import { newKey } from '../api.ts';
 import { toActionError, useDesk } from '../cash/desk.ts';
 import { METHOD_LABEL } from '../cash/format.ts';
 import { Modal } from '../cash/Modal.tsx';
-import { printReceipt } from '../cash/print/Receipt.tsx';
+import { printCounterReceipt } from '../cash/print/Receipt.tsx';
 import { OpenShiftForm } from '../cash/ShiftPanel.tsx';
 import { Icon } from '../icons.tsx';
 import { OfflineBanner } from '../OfflineBanner.tsx';
@@ -441,7 +441,7 @@ export function PosPage() {
         recordHits(d.lines);
         setHitsVersion((v) => v + 1);
         setFlash((f) => (f?.id === id ? { ...f, state: 'ok', res, loyaltyNote: earnedLine(res.loyalty, loyalty, currency) } : f));
-        if (readAutoPrint()) printReceipt(res.check, state.club, undefined, Date.now(), res.order.number);
+        if (readAutoPrint()) printCounterReceipt(res, state);
       })
       .catch((e: unknown) => {
         const message = toActionError(e).message;
@@ -632,7 +632,7 @@ export function PosPage() {
       docked={narrow}
       ms={flashMs}
       onClose={() => setFlash(null)}
-      onPrint={(res) => printReceipt(res.check, state.club, undefined, Date.now(), res.order.number)}
+      onPrint={(res) => printCounterReceipt(res, state)}
     />
   ) : null;
 

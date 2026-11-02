@@ -1,8 +1,11 @@
-/* Receipt-printer forms in #print-root (see printForm.tsx) and the paper switch.
+/* Receipt-printer forms in #print-root (see printForm.tsx), their on-screen preview (.pf-preview)
+   and the paper switch.
 
    The form looks the same on screen and on paper: printForm measures its height on screen
    to size the @page, so everything here is in mm and only the visibility rules are print-only.
-   Plain black on white whatever the theme: a thermal head prints no grey and no backgrounds. */
+   Plain black on white whatever the theme: a thermal head prints no grey and no backgrounds
+   (Chrome drops CSS backgrounds by default too) — lines are borders, never backgrounds, and
+   none is thinner than 0.4 mm (about 3 dots at 203 dpi). */
 
 #print-root {
   /* Laid out (to be measured), never seen on screen. */
@@ -12,10 +15,20 @@
   z-index: -1;
   visibility: hidden;
   pointer-events: none;
-
   box-sizing: border-box;
   width: 80mm;
-  /* 80 mm paper prints 72 mm: about 48 characters. */
+  background: #fff;
+}
+
+#print-root[data-paper='58'] {
+  width: 58mm;
+}
+
+/* One page of the form (a receipt copy). 80 mm paper prints about 72 mm: 48 characters;
+   58 mm paper prints about 48 mm: 32 characters. */
+.pf-page,
+.pf-preview {
+  box-sizing: border-box;
   padding: 2mm 4mm 6mm;
   background: #fff;
   color: #000;
@@ -28,20 +41,34 @@
   overflow-wrap: anywhere;
 }
 
-#print-root[data-paper='58'] {
-  width: 58mm;
-  /* 58 mm paper prints 48 mm: about 32 characters. */
+#print-root[data-paper='58'] .pf-page,
+.pf-preview[data-paper='58'] {
   padding-inline: 5mm;
 }
 
+/* A second copy starts on its own page: the printer cuts between them. */
+.pf-page + .pf-page {
+  break-before: page;
+}
+
+.pf-preview {
+  width: 80mm;
+}
+
+.pf-preview[data-paper='58'] {
+  width: 58mm;
+}
+
 /* Reset at zero specificity: the .pf-* rules below win, page styles stay out. */
-:where(#print-root *) {
+:where(#print-root *, .pf-preview *) {
   margin: 0;
   padding: 0;
   border: 0;
   color: inherit;
   background: none;
   font: inherit;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 .pf-head {
@@ -111,14 +138,98 @@
 .pf-sep {
   height: 0;
   margin: 1.5mm 0;
-  border-top: 0.3mm dashed #000;
+  border-top: 0.4mm dashed #000;
 }
 
 .pf-notice {
   margin-top: 1.5mm;
   padding: 0.8mm 1mm;
-  border: 0.3mm solid #000;
+  border: 0.4mm solid #000;
   font-weight: 700;
+}
+
+/* ── The guest receipt (Receipt.tsx) ───────────────────────────────────────── */
+
+.pf-logo {
+  display: block;
+  max-width: 40mm;
+  max-height: 16mm;
+  margin: 0 auto 1mm;
+  image-rendering: pixelated;
+}
+
+#print-root[data-paper='58'] .pf-logo,
+.pf-preview[data-paper='58'] .pf-logo {
+  max-width: 32mm;
+  max-height: 14mm;
+}
+
+.pf-copy {
+  margin-bottom: 1mm;
+  text-align: center;
+  font-weight: 700;
+}
+
+/* «Заказ 17»: read from a step away when the barista calls it. */
+.pf-order {
+  margin: 1mm 0;
+  text-align: center;
+}
+
+.pf-order-number {
+  font-size: 3.3em;
+  font-weight: 700;
+  line-height: 1.05;
+}
+
+.pf-order-sub {
+  font-size: 1.15em;
+  font-weight: 700;
+}
+
+.pf-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  column-gap: 2mm;
+}
+
+.pf-name {
+  font-weight: 700;
+}
+
+.pf-total {
+  font-size: 1.45em;
+  font-weight: 700;
+}
+
+.pf-thanks {
+  text-align: center;
+  font-weight: 700;
+}
+
+.pf-extra {
+  margin-top: 1mm;
+  text-align: center;
+}
+
+.pf-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 1.5mm;
+}
+
+.pf-qr svg {
+  display: block;
+  width: 22mm;
+  height: 22mm;
+}
+
+#print-root[data-paper='58'] .pf-qr svg,
+.pf-preview[data-paper='58'] .pf-qr svg {
+  width: 20mm;
+  height: 20mm;
 }
 
 @media print {
@@ -147,7 +258,13 @@
   #print-root {
     position: static;
     z-index: auto;
-    visibility: visible;
+  }
+
+  /* Always visible on paper, whatever another page's print rules hide (a blank receipt came
+     from `body * { visibility: hidden }` of the guest QR sheet). */
+  #print-root,
+  #print-root * {
+    visibility: visible !important;
   }
 }
 
@@ -183,4 +300,20 @@
   .paper-opt {
     min-height: 44px;
   }
+}
+
+/* Screen: a receipt shown as it will print («Чек» in «Настройки», «Чек» of a check of the day). */
+
+.receipt-sheet {
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--text, #000) 8%, transparent);
+  overflow-x: auto;
+}
+
+.receipt-sheet .pf-preview {
+  flex: none;
+  box-shadow: 0 1px 6px rgb(0 0 0 / 0.25);
 }
