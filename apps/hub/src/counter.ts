@@ -11,6 +11,7 @@ import type {
 import {
   CANCEL_REASON_MIN,
   canMoveStage,
+  COUNTER_RECALL_MS,
   COUNTER_NUMBER_MAX,
   COUNTER_SERVICES,
   COUNTER_STAGE_LABEL,
@@ -211,7 +212,10 @@ export class CounterService {
     };
   }
 
-  /** The barista moves an order: forward a step, back a step, or straight to ISSUED (canMoveStage). */
+  /**
+   * The barista moves an order: forward a step, back a step, straight to ISSUED, or an issued
+   * order back to READY within COUNTER_RECALL_MS (canMoveStage).
+   */
   stage(input: { orderId: string; stage: CounterStage; actor: string }): CounterOrderView {
     const db = this.#db;
     const now = this.#clock.now();
@@ -223,17 +227,21 @@ export class CounterService {
         throw new HubError(422, 'STAGE_INVALID', 'Неизвестный этап заказа');
       }
       if (order.status === 'CANCELLED') throw new HubError(409, 'ORDER_CANCELLED', `Заказ ${order.counter_number} отменён`);
-      if (!canMoveStage(from, to)) {
+      if (!canMoveStage(from, to, { issuedAt: order.issued_at, now })) {
         const message =
           from === 'ISSUED'
-            ? `Заказ ${order.counter_number} уже выдан`
+            ? to === 'READY'
+              ? `Заказ ${order.counter_number} выдан больше ${Math.round(COUNTER_RECALL_MS / 60_000)} минут назад — вернуть нельзя`
+              : `Заказ ${order.counter_number} уже выдан`
             : from === to
               ? `Заказ ${order.counter_number} уже «${COUNTER_STAGE_LABEL[to]}»`
               : `Заказ ${order.counter_number}: нельзя из «${COUNTER_STAGE_LABEL[from]}» в «${COUNTER_STAGE_LABEL[to]}»`;
         throw new HubError(409, 'STAGE_NOT_ALLOWED', message);
       }
-      // Ready time stays when the order is handed over; going back from READY clears it.
-      const readyAt = to === 'READY' ? now : to === 'ISSUED' ? order.ready_at : null;
+      // Ready time stays when the order is handed over and when it is called back (recall:
+      // «Выдан» by mistake — the time to «Готово» is not measured again); going back from READY clears it.
+      const recalled = from === 'ISSUED';
+      const readyAt = recalled ? (order.ready_at ?? now) : to === 'READY' ? now : to === 'ISSUED' ? order.ready_at : null;
       const issuedAt = to === 'ISSUED' ? now : null;
       run(
         db,
@@ -249,7 +257,14 @@ export class CounterService {
         action: 'counter.stage',
         entityType: 'order',
         entityId: order.id,
-        data: { counterNumber: order.counter_number, from, to, service: order.service, status: order.status },
+        data: {
+          counterNumber: order.counter_number,
+          from,
+          to,
+          service: order.service,
+          status: order.status,
+          ...(recalled ? { recalled: true } : {}),
+        },
       });
       afterCommit(db, () => this.#events.changed({ kind: 'counter' }));
       return this.get(order.id);

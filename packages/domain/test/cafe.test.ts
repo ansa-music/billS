@@ -1,14 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  allDayCounts,
   CafeError,
   can,
   canMoveStage,
+  canRecallOrder,
+  COUNTER_RECALL_MS,
+  counterItemName,
+  isAttentionOption,
   decide,
   defaultChoices,
   nextCounterNumber,
   nextStage,
   normalizeClubSettings,
+  previousStage,
   priceLine,
   validateCounterLines,
   validateOptionGroups,
@@ -115,6 +121,58 @@ test('canMoveStage / nextStage: forward, one step back, straight to issued; issu
   assert.equal(nextStage('NEW'), 'PREPARING');
   assert.equal(nextStage('READY'), 'ISSUED');
   assert.equal(nextStage('ISSUED'), null);
+});
+
+test('recall: an issued order goes back to ready within COUNTER_RECALL_MS, never elsewhere', () => {
+  const issuedAt = 1_000_000;
+  assert.equal(canMoveStage('ISSUED', 'READY', { issuedAt, now: issuedAt }), true);
+  assert.equal(canMoveStage('ISSUED', 'READY', { issuedAt, now: issuedAt + COUNTER_RECALL_MS }), true);
+  assert.equal(canMoveStage('ISSUED', 'READY', { issuedAt, now: issuedAt + COUNTER_RECALL_MS + 1 }), false);
+  assert.equal(canMoveStage('ISSUED', 'PREPARING', { issuedAt, now: issuedAt }), false);
+  assert.equal(canMoveStage('ISSUED', 'NEW', { issuedAt, now: issuedAt }), false);
+  assert.equal(canMoveStage('ISSUED', 'ISSUED', { issuedAt, now: issuedAt }), false);
+  // Without the hand-over time ISSUED stays final.
+  assert.equal(canMoveStage('ISSUED', 'READY', { issuedAt: null, now: issuedAt }), false);
+  assert.equal(canRecallOrder(undefined, issuedAt), false);
+  // A clock behind the hand-over (another device) is not a recall window.
+  assert.equal(canRecallOrder(issuedAt, issuedAt - 1), false);
+  // The other moves do not care about `recall`.
+  assert.equal(canMoveStage('READY', 'PREPARING', { issuedAt: null, now: 0 }), true);
+  assert.equal(previousStage('ISSUED'), 'READY');
+  assert.equal(previousStage('PREPARING'), 'NEW');
+  assert.equal(previousStage('NEW'), null);
+});
+
+test('allDayCounts: new and preparing only, by product, most first, must-not-miss options apart', () => {
+  const item = (title: string, optionNames: string[], qty: number) => ({ title, optionNames, qty });
+  const lines = allDayCounts([
+    { stage: 'NEW', status: 'CLOSED', items: [item('Капучино · L · Овсяное', ['L', 'Овсяное'], 2), item('Круассан', [], 1)] },
+    { stage: 'PREPARING', status: 'OPEN', items: [item('Капучино · M · Обычное', ['M', 'Обычное'], 1), item('Латте · M · Миндальное', ['M', 'Миндальное'], 1)] },
+    { stage: 'NEW', status: 'OPEN', items: [item('Капучино · S · Овсяное', ['S', 'Овсяное'], 1), item('Латте · L · Безлактозное', ['L', 'Безлактозное'], 1)] },
+    { stage: 'READY', status: 'CLOSED', items: [item('Капучино', [], 5)] },
+    { stage: 'ISSUED', status: 'CLOSED', items: [item('Американо', [], 3)] },
+    { stage: 'NEW', status: 'CANCELLED', items: [item('Раф', [], 2)] },
+  ]);
+  assert.deepEqual(lines, [
+    { name: 'Капучино', qty: 4, attention: [{ option: 'Овсяное', qty: 3 }] },
+    {
+      name: 'Латте',
+      qty: 2,
+      attention: [
+        { option: 'Безлактозное', qty: 1 },
+        { option: 'Миндальное', qty: 1 },
+      ],
+    },
+    { name: 'Круассан', qty: 1, attention: [] },
+  ]);
+  assert.deepEqual(allDayCounts([]), []);
+});
+
+test('isAttentionOption / counterItemName', () => {
+  for (const name of ['Овсяное', 'Миндальное', 'Безлактозное', 'Кокосовое', 'Декаф', 'Без сахара']) assert.equal(isAttentionOption(name), true, name);
+  for (const name of ['Обычное', 'L', 'Карамель', 'Доп. шот эспрессо']) assert.equal(isAttentionOption(name), false, name);
+  assert.equal(counterItemName({ title: 'Капучино · L · Овсяное', optionNames: ['L', 'Овсяное'] }), 'Капучино');
+  assert.equal(counterItemName({ title: 'Чай · Зелёный', optionNames: [] }), 'Чай · Зелёный');
 });
 
 test('club settings: business type defaults to billiards, cafe is kept, garbage ignored', () => {
