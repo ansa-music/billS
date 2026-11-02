@@ -15,6 +15,7 @@
  */
 import type { LinkControl, LinkDeviceInfo, LinkFailure, LinkFrame, LinkInput, LinkKeys, LinkMachine } from '@bills/domain';
 import {
+  cloudFromHeaders,
   controlAad,
   deriveLinkKeys,
   deriveSessionKey,
@@ -340,7 +341,12 @@ class Device implements Injector {
       this.#book.add(
         frame,
         Date.now(),
-        (res) => resolve({ statusCode: res.s, headers: res.h, body: res.b }),
+        (res) => {
+          // The café moved to the cloud cash desk: the cash desk says so on every answer (boot.ts) — show the way there.
+          const cloud = cloudFromHeaders(res.h);
+          if (cloud) updateLinkView({ inCloud: cloud });
+          resolve({ statusCode: res.s, headers: res.h, body: res.b });
+        },
         // Rejects like a lost network: the screens show «нет связи» and api.ts retries keyed commands with the same key.
         (why) => reject(new TypeError(FAILURE_TEXT[why])),
       );

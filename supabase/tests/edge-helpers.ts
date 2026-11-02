@@ -45,7 +45,7 @@ export function recordingSender(channel: string, sent: Array<PushMessage & { cha
 /** Supabase-shaped database (PGlite) with the demo seed and an EdgeContext over it. */
 export async function edgeTest(
   t: { after(fn: () => Promise<void>): void },
-  options: { sender?: PushSender; env?: Record<string, string>; telegramFetch?: TelegramFetch } = {},
+  options: { sender?: PushSender; env?: Record<string, string>; telegramFetch?: TelegramFetch; cloudHubFetch?: typeof fetch } = {},
 ): Promise<EdgeTest> {
   const s = await createSupabaseDb();
   t.after(() => s.close());
@@ -61,7 +61,13 @@ export async function edgeTest(
   const ctx = edgeContext(
     s.db,
     { NOTIFY_SECRET, ...options.env },
-    { now: () => clock.now, log: (m) => log.push(m), sender, ...(options.telegramFetch ? { telegramFetch: options.telegramFetch } : {}) },
+    {
+      now: () => clock.now,
+      log: (m) => log.push(m),
+      sender,
+      ...(options.telegramFetch ? { telegramFetch: options.telegramFetch } : {}),
+      ...(options.cloudHubFetch ? { cloudHubFetch: options.cloudHubFetch } : {}),
+    },
   );
   return {
     s,

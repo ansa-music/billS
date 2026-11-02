@@ -6,12 +6,14 @@
  * only). Times are timestamptz in the table, ms in the API.
  */
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import type { PlatformMe, TrialStartResponse, TrialStats, TrialStatus, TrialTerms, TrialView } from '@bills/domain';
+import type { PlatformMe, TrialCloudView, TrialPaidView, TrialPayment, TrialStartResponse, TrialStats, TrialStatus, TrialTerms, TrialView } from '@bills/domain';
 import {
   cleanTrialStats,
+  cloudCafeUrl,
+  TRIAL_CLOUD_MOVE,
+  TRIAL_IN_CLOUD_MESSAGE,
   isTrialInstallId,
   isValidTimeZone,
-  legacyTrialTerms,
   TRIAL_DEFAULT_DAYS,
   TRIAL_EXTEND_MAX_DAYS,
   TRIAL_MESSAGE_MAX,
@@ -21,16 +23,22 @@ import {
   TRIAL_RELOAD_MESSAGE,
   TRIAL_RELOAD_TOKEN,
   TRIAL_SNAPSHOT_MAX_BYTES,
-  TRIAL_TERMS_VERSION,
   TRIAL_TIMEZONE_MAX,
   TRIAL_VENUE_MAX,
   trialDayEnd,
   trialDuplicates,
   trialEndDate,
+  trialPaidEndsAt,
+  trialPaidUntil,
+  paidAmountOf,
+  paidNoteOf,
+  TRIAL_PAID_MAX_DAYS,
+  TRIAL_PAID_NOTE_MAX,
   trialRejectMessage,
   trialStartedAt,
   trialStatus,
   trialTerms,
+  trialTermsForVersion,
   trialTimeZone,
   trialWaiting,
   validateTrialStats,
@@ -56,6 +64,7 @@ const trialNotFound = (): CloudError => new CloudError(404, 'TRIAL_NOT_FOUND', '
 const badToken = (): CloudError => new CloudError(401, 'UNAUTHORIZED', 'Ключ пробной версии не подходит');
 const conflict = (code: string, message: string): CloudError => new CloudError(409, code, message);
 const stillRequest = (): CloudError => conflict('TRIAL_NOT_APPROVED', 'Это заявка: сначала подтвердите её (или сделайте постоянной)');
+const paidTerm = (): CloudError => conflict('TRIAL_PAID', 'Эта кофейня купила TS: срок меняют кнопкой «Продлить оплату»');
 
 interface TrialRow {
   id: string;
@@ -72,13 +81,88 @@ interface TrialRow {
   requested_at: number | string | null;
   decided_at: number | string | null;
   owner_message: string | null;
+  with_menu: boolean | null;
+  cloud_code: string | null;
+  cloud_at: number | string | null;
+  cloud_origin: string | null;
+  cloud_busy_at: number | string | null;
+  cloud_terms_error: string | null;
+  cloud_terms_at: number | string | null;
+  paid_until: string | null;
+  paid_at: number | string | null;
+  paid_amount: number | string | null;
+  paid_note: string | null;
+  paid_reminded_at: number | string | null;
 }
 
 const VIEW_COLUMNS = `id::text AS id, venue, manager_name, timezone, status, ${ms('started_at')} AS started_at, ${ms('ends_at')} AS ends_at,
   ${ms('last_seen_at')} AS last_seen_at, stats, ${ms('snapshot_at')} AS snapshot_at, snapshot_bytes,
-  ${ms('requested_at')} AS requested_at, ${ms('decided_at')} AS decided_at, owner_message`;
+  ${ms('requested_at')} AS requested_at, ${ms('decided_at')} AS decided_at, owner_message,
+  with_menu, cloud_code, ${ms('cloud_at')} AS cloud_at, cloud_origin, ${ms('cloud_busy_at')} AS cloud_busy_at,
+  cloud_terms_error, ${ms('cloud_terms_at')} AS cloud_terms_at,
+  paid_until, ${ms('paid_at')} AS paid_at, paid_amount, paid_note, ${ms('paid_reminded_at')} AS paid_reminded_at`;
 
 const num = (v: number | string | null): number | null => (v === null ? null : Number(v));
+
+/** The trial's café in the cloud cash desk (packages/domain/src/cloud-cafe.ts); the address is added by withCloudUrl. */
+function cloudViewOf(r: TrialRow): TrialCloudView | null {
+  if (!r.cloud_code) return null;
+  return {
+    code: r.cloud_code,
+    url: null,
+    at: Number(r.cloud_at ?? 0),
+    origin: r.cloud_origin === 'new' ? 'new' : 'move',
+    termsError: r.cloud_terms_error,
+    termsSyncedAt: num(r.cloud_terms_at),
+  };
+}
+
+/** The view with its cloud café's address: `{CLOUD_HUB_URL}/#/cafe/<code>` (none while CLOUD_HUB_URL is not set). */
+export function withCloudUrl<T extends Pick<TrialView, 'cloud'>>(view: T, cloudBase: string | null): T {
+  if (!view.cloud) return view;
+  return { ...view, cloud: { ...view.cloud, url: cloudBase ? cloudCafeUrl(cloudBase, view.cloud.code) : null } };
+}
+
+/** A move into the cloud or a creation there is talking to the Worker right now (TRIAL_CLOUD_MOVE.busyMs at most). */
+export function cloudBusy(busyAt: number | string | null | undefined, now: number): boolean {
+  return busyAt !== null && busyAt !== undefined && now - Number(busyAt) < TRIAL_CLOUD_MOVE.busyMs;
+}
+
+export const cloudBusyError = (): CloudError =>
+  new CloudError(409, 'CLOUD_BUSY', 'Кофейню прямо сейчас переводят в облачную кассу. Подождите минуту и обновите список.');
+
+/** «Купили» (packages/domain/src/trial-paid.ts): the term, the latest amount and note; the history is added by withPayments. */
+function paidViewOf(r: TrialRow): TrialPaidView | null {
+  if (r.paid_at === null || !r.paid_until) return null;
+  return {
+    until: r.paid_until,
+    since: Number(r.paid_at),
+    amount: num(r.paid_amount),
+    note: r.paid_note,
+    payments: [],
+    remindedAt: num(r.paid_reminded_at),
+  };
+}
+
+/** The payment history of the views that bought TS (newest first), in one query. */
+async function withPayments(db: SqlDriver, views: TrialView[]): Promise<TrialView[]> {
+  const paid = views.filter((v) => v.paid);
+  if (!paid.length) return views;
+  // One view: its own rows; the list: every payment (a short table — the cafés that bought TS).
+  const one = paid.length === 1 ? paid[0]!.id : null;
+  const rows = await db.all<{ trial_id: string; at: number | string; paid_until: string; amount: number | string | null; note: string | null; by_name: string }>(
+    `SELECT trial_id::text AS trial_id, ${ms('at')} AS at, paid_until, amount, note, by_name FROM trial_payments
+      ${one ? 'WHERE trial_id = ?::uuid ' : ''}ORDER BY at DESC, id`,
+    one ? [one] : [],
+  );
+  const byTrial = new Map<string, TrialPayment[]>();
+  for (const r of rows) {
+    const list = byTrial.get(r.trial_id) ?? [];
+    list.push({ at: Number(r.at), until: r.paid_until, amount: num(r.amount), note: r.note, by: r.by_name });
+    byTrial.set(r.trial_id, list);
+  }
+  return views.map((v) => (v.paid ? { ...v, paid: { ...v.paid, payments: byTrial.get(v.id) ?? [] } } : v));
+}
 
 function viewOf(r: TrialRow, now: number): TrialView {
   const endsAt = Number(r.ends_at);
@@ -98,17 +182,51 @@ function viewOf(r: TrialRow, now: number): TrialView {
     decidedAt: num(r.decided_at),
     ownerMessage: r.owner_message,
     duplicateOf: null,
+    cloud: cloudViewOf(r),
+    paid: paidViewOf(r),
   };
 }
 
 const termsOfRow = (r: TrialRow, now: number): TrialTerms =>
   trialTerms({ status: r.status, endsAt: Number(r.ends_at), ownerMessage: r.owner_message }, now);
 
-async function trialRow(db: SqlDriver, id: string): Promise<TrialRow> {
+async function trialRow(db: SqlDriver, id: string, lock = false): Promise<TrialRow> {
   if (!UUID_RE.test(id)) throw trialNotFound();
-  const rows = await db.all<TrialRow>(`SELECT ${VIEW_COLUMNS} FROM trials WHERE id = ?::uuid`, [id]);
+  const rows = await db.all<TrialRow>(`SELECT ${VIEW_COLUMNS} FROM trials WHERE id = ?::uuid${lock ? ' FOR UPDATE' : ''}`, [id]);
   if (!rows[0]) throw trialNotFound();
   return rows[0];
+}
+
+/** What apps/cloud/src/cloud-cafe.ts needs of one trial (the row locked when `lock`, inside a transaction). */
+export interface TrialCloudFacts {
+  view: TrialView;
+  /** A move into the cloud or a creation there is under way. */
+  busy: boolean;
+  /** «Заполнить меню примером» of the request; null for requests from before it was sent. */
+  withMenu: boolean | null;
+  /** The trial's own terms (never the page's «ended, in the cloud»). */
+  terms: TrialTerms;
+  snapshotWantedAt: number | null;
+  cloudWantedAt: number | null;
+  tokenHash: string;
+}
+
+export async function trialCloudFacts(db: SqlDriver, now: number, id: string, lock = false): Promise<TrialCloudFacts> {
+  const r = await trialRow(db, id, lock);
+  const extra = await db.all<{ token_hash: string; wanted: number | string | null; cloud_wanted: number | string | null }>(
+    `SELECT token_hash, ${ms('snapshot_wanted_at')} AS wanted, ${ms('cloud_wanted_at')} AS cloud_wanted FROM trials WHERE id = ?::uuid`,
+    [r.id],
+  );
+  const x = extra[0]!;
+  return {
+    view: (await withPayments(db, [viewOf(r, now)]))[0]!,
+    busy: cloudBusy(r.cloud_busy_at, now),
+    withMenu: r.with_menu,
+    terms: termsOfRow(r, now),
+    snapshotWantedAt: num(x.wanted),
+    cloudWantedAt: num(x.cloud_wanted),
+    tokenHash: x.token_hash,
+  };
 }
 
 /** Counts an attempt under `key`; 429 past `perHour` attempts within the last hour. */
@@ -161,6 +279,8 @@ export async function startTrial(db: SqlDriver, now: number, raw: unknown, ip: s
   // An unknown zone is not worth refusing the start over: the trial's days are then Almaty's.
   const zone = optionalText(raw.timezone, TRIAL_TIMEZONE_MAX, 'timezone');
   const timezone = zone && isValidTimeZone(zone) ? zone : null;
+  // «Заполнить меню примером»: a request approved straight into the cloud gets the sample menu when it asked for it.
+  const withMenu = typeof raw.withMenu === 'boolean' ? raw.withMenu : null;
   if (trialStartedAt(raw.startedAt, now) === null) throw invalid('STARTED_AT_INVALID', 'startedAt: время начала пробного периода в мс');
 
   if (raw.installId === undefined || raw.installId === null) {
@@ -181,10 +301,10 @@ export async function startTrial(db: SqlDriver, now: number, raw: unknown, ip: s
   // Placeholders until the approval: the term starts then.
   const endsAt = now + TRIAL_DEFAULT_DAYS * DAY_MS;
   const added = await db.run(
-    `INSERT INTO trials (id, venue, manager_name, timezone, token_hash, status, started_at, ends_at, last_seen_at, created_ip, install_hash, requested_at)
-     VALUES (?::uuid, ?, ?, ?, ?, 'pending', ?::timestamptz, ?::timestamptz, ?::timestamptz, ?, ?, ?::timestamptz)
+    `INSERT INTO trials (id, venue, manager_name, timezone, token_hash, status, started_at, ends_at, last_seen_at, created_ip, install_hash, requested_at, with_menu)
+     VALUES (?::uuid, ?, ?, ?, ?, 'pending', ?::timestamptz, ?::timestamptz, ?::timestamptz, ?, ?, ?::timestamptz, ?)
      ON CONFLICT (install_hash) WHERE install_hash IS NOT NULL DO NOTHING`,
-    [id, venue, managerName, timezone, sha256(token), iso(now), iso(endsAt), iso(now), ip, hash, iso(now)],
+    [id, venue, managerName, timezone, sha256(token), iso(now), iso(endsAt), iso(now), ip, hash, iso(now), withMenu],
   );
   if (added === 0) {
     // The same browser's start that raced this one stored it first.
@@ -219,10 +339,30 @@ async function authorizedTrial(db: SqlDriver, id: unknown, token: string | null)
   return row;
 }
 
-/** The terms for this page: in full for a current one (`v: 2`), in the old three words for an older one. */
-function termsFor(row: TrialRow, now: number, version: unknown): TrialTerms {
-  const terms = termsOfRow(row, now);
-  return Number(version) === TRIAL_TERMS_VERSION ? terms : legacyTrialTerms(terms, now);
+/**
+ * The terms for this page: in full for a current one (`v: 2`), in the old three words for an older one. A trial in
+ * the cloud cash desk is 'ended' here — this browser takes no orders — with where the café went (`cloud`; the
+ * director's key once for a request approved into the cloud): an old page without the cloud code still turns
+ * read-only and shows the message.
+ */
+function termsFor(row: TrialRow, now: number, version: unknown, cloudBase: string | null, managerKey: string | null = null): TrialTerms {
+  if (row.cloud_code) {
+    return {
+      status: 'ended',
+      endsAt: Number(row.ends_at),
+      message: TRIAL_IN_CLOUD_MESSAGE,
+      cloud: { code: row.cloud_code, url: cloudBase ? cloudCafeUrl(cloudBase, row.cloud_code) : null, ...(managerKey ? { managerKey } : {}) },
+    };
+  }
+  // «Купили»: a page from before 'paid' is told 'active' with the same end (trialTermsForVersion).
+  return trialTermsForVersion(termsOfRow(row, now), version, now);
+}
+
+/** The director's key of a request approved into the cloud, while its page has not said it kept it (7 days at most). */
+async function pendingCloudKey(db: SqlDriver, now: number, row: TrialRow): Promise<string | null> {
+  if (!row.cloud_code || row.cloud_origin !== 'new' || now - Number(row.cloud_at ?? 0) > TRIAL_CLOUD_MOVE.keyKeepMs) return null;
+  const rows = await db.all<{ cloud_key: string | null }>('SELECT cloud_key FROM trials WHERE id = ?::uuid', [row.id]);
+  return rows[0]?.cloud_key ?? null;
 }
 
 /** Decoded size of a snapshot; 422 when it is not base64, 413 when it is too big. */
@@ -237,12 +377,20 @@ function snapshotSize(v: unknown): number {
   return bytes;
 }
 
-/** POST /trial/report: stores the counters (and the snapshot, when given); answers the terms (`v: 2` → all of them). */
-export async function reportTrial(db: SqlDriver, now: number, token: string | null, raw: unknown): Promise<TrialTerms> {
+/**
+ * POST /trial/report: stores the counters (and the snapshot, when given); answers the terms (`v: 2` → all of them).
+ * A trial in the cloud cash desk stores nothing more (an old page of a request approved into the cloud still
+ * reports its empty browser café): the answer only says where the café went.
+ */
+export async function reportTrial(db: SqlDriver, now: number, token: string | null, raw: unknown, cloudBase: string | null = null): Promise<TrialTerms> {
   const body = isObject(raw) ? raw : {};
   const row = await authorizedTrial(db, body.id, token);
   if (!isObject(raw)) throw new CloudError(400, 'BAD_REQUEST', 'Нужны id и stats');
   await countAttempt(db, now, `report:${row.id}`, TRIAL_RATE.reportsPerTrialHour, 'Слишком частые отчёты пробной версии. Попробуйте позже');
+  if (row.cloud_code) {
+    await db.run('UPDATE trials SET last_seen_at = ?::timestamptz WHERE id = ?::uuid', [iso(now), row.id]);
+    return termsFor(row, now, raw.v, cloudBase, await pendingCloudKey(db, now, row));
+  }
   const problems = validateTrialStats(raw.stats);
   if (problems.length) throw invalid('STATS_INVALID', problems.slice(0, 5).join('; '));
   const stats = JSON.stringify(cleanTrialStats(raw.stats as TrialStats));
@@ -256,17 +404,24 @@ export async function reportTrial(db: SqlDriver, now: number, token: string | nu
   } else {
     await db.run('UPDATE trials SET last_seen_at = ?::timestamptz, stats = ?::jsonb WHERE id = ?::uuid', [iso(now), stats, row.id]);
   }
-  return termsFor(row, now, raw.v);
+  return termsFor(row, now, raw.v, cloudBase);
 }
 
 /**
  * GET /trial/terms?id=&v=2: the trial's status and end (a sign of life: last_seen_at is updated). A waiting
  * page asks it every half a minute; without `v=2` the answer is in the old words (legacyTrialTerms).
  */
-export async function trialTermsOf(db: SqlDriver, now: number, token: string | null, id: string | null, version: string | null = null): Promise<TrialTerms> {
+export async function trialTermsOf(
+  db: SqlDriver,
+  now: number,
+  token: string | null,
+  id: string | null,
+  version: string | null = null,
+  cloudBase: string | null = null,
+): Promise<TrialTerms> {
   const row = await authorizedTrial(db, id, token);
   await db.run('UPDATE trials SET last_seen_at = ?::timestamptz WHERE id = ?::uuid', [iso(now), row.id]);
-  return termsFor(row, now, version);
+  return termsFor(row, now, version, cloudBase, await pendingCloudKey(db, now, row));
 }
 
 // ---------------------------------------------------------------------------
@@ -290,11 +445,16 @@ async function allTrials(db: SqlDriver, now: number): Promise<TrialView[]> {
       createdAt: Number(r.requested_at ?? r.started_at),
     })),
   );
-  return views.map((v) => ({ ...v, duplicateOf: repeats.get(v.id) ?? null }));
+  return withPayments(
+    db,
+    views.map((v) => ({ ...v, duplicateOf: repeats.get(v.id) ?? null })),
+  );
 }
 
 export async function listTrials(db: SqlDriver, now: number, me: PlatformMe): Promise<{ trials: TrialView[] }> {
   requirePlatformAction(me, 'platform.view');
+  // A director's key of a request approved into the cloud that its page never fetched is not kept for ever.
+  await db.run('UPDATE trials SET cloud_key = NULL WHERE cloud_key IS NOT NULL AND cloud_at < ?::timestamptz', [iso(now - TRIAL_CLOUD_MOVE.keyKeepMs)]);
   return { trials: await allTrials(db, now) };
 }
 
@@ -308,9 +468,11 @@ export async function trialWithDuplicate(db: SqlDriver, now: number, id: string)
 /** Changes one trial in a transaction and answers its new view; `change` throws to refuse. */
 async function changeTrial(db: SqlDriver, now: number, id: string, change: (row: TrialRow, tx: SqlDriver) => Promise<void>): Promise<TrialView> {
   return db.transaction(async (tx) => {
-    const row = await trialRow(tx, id);
+    const row = await trialRow(tx, id, true);
+    // Not while it is being moved into the cloud: the cloud café takes the terms the move finds.
+    if (cloudBusy(row.cloud_busy_at, now)) throw cloudBusyError();
     await change(row, tx);
-    return viewOf(await trialRow(tx, row.id), now);
+    return (await withPayments(tx, [viewOf(await trialRow(tx, row.id), now)]))[0]!;
   });
 }
 
@@ -367,6 +529,7 @@ export async function extendTrial(db: SqlDriver, now: number, me: PlatformMe, id
   }
   return changeTrial(db, now, id, async (row, tx) => {
     if (trialWaiting(row.status)) throw stillRequest();
+    if (row.status === 'paid') throw paidTerm();
     const base = row.status === 'permanent' ? now : Math.max(Number(row.ends_at), now);
     await tx.run(`UPDATE trials SET status = 'active', ends_at = ?::timestamptz WHERE id = ?::uuid`, [iso(base + days * DAY_MS), row.id]);
   });
@@ -382,12 +545,43 @@ export async function setTrialEndDate(db: SqlDriver, now: number, me: PlatformMe
   const date = isObject(raw) ? raw.date : undefined;
   return changeTrial(db, now, id, async (row, tx) => {
     if (trialWaiting(row.status)) throw stillRequest();
+    if (row.status === 'paid') throw paidTerm();
     const zone = trialTimeZone(row.timezone);
     const day = trialEndDate(date, now, zone);
     if (day === null) {
       throw invalid('DATE_INVALID', `Дата окончания: с сегодняшнего дня и не дальше чем на ${TRIAL_EXTEND_MAX_DAYS} дней вперёд`);
     }
     await tx.run(`UPDATE trials SET status = 'active', ends_at = ?::timestamptz WHERE id = ?::uuid`, [iso(trialDayEnd(day, zone)), row.id]);
+  });
+}
+
+/**
+ * «Купили» / «Продлить оплату» { until: YYYY-MM-DD, amount?, note? } (packages/domain/src/trial-paid.ts): any approved
+ * trial (or a paid café again) runs as a paying client through that day of its zone — status 'paid', endsAt the day's
+ * last millisecond. The amount (minor units) and the note are internal; every payment goes to the history with who
+ * entered it, and the «скоро конец оплаты» reminder is due again for the new term.
+ */
+export async function markTrialPaid(db: SqlDriver, now: number, me: PlatformMe, id: string, raw: unknown): Promise<TrialView> {
+  requirePlatformAction(me, 'clients.edit');
+  const body = isObject(raw) ? raw : {};
+  const amount = paidAmountOf(body.amount);
+  if (amount === undefined) throw invalid('AMOUNT_INVALID', 'Сумма: целое число тиынов больше нуля (или пусто)');
+  const note = paidNoteOf(body.note);
+  if (note === undefined) throw invalid('NOTE_INVALID', `Заметка: текст до ${TRIAL_PAID_NOTE_MAX} символов`);
+  return changeTrial(db, now, id, async (row, tx) => {
+    if (trialWaiting(row.status)) throw conflict('TRIAL_NOT_APPROVED', 'Это заявка: сначала подтвердите её');
+    const zone = trialTimeZone(row.timezone);
+    const until = trialPaidUntil(body.until, now, zone);
+    if (until === null) throw invalid('DATE_INVALID', `«Оплачено до»: с сегодняшнего дня и не дальше чем на ${TRIAL_PAID_MAX_DAYS} дней вперёд`);
+    await tx.run(
+      `UPDATE trials SET status = 'paid', ends_at = ?::timestamptz, paid_until = ?, paid_at = COALESCE(paid_at, ?::timestamptz),
+         paid_amount = ?, paid_note = ?, paid_reminded_at = NULL, owner_message = NULL WHERE id = ?::uuid`,
+      [iso(trialPaidEndsAt(until, zone)), until, iso(now), amount, note, row.id],
+    );
+    await tx.run(
+      'INSERT INTO trial_payments (id, trial_id, at, paid_until, amount, note, by_id, by_name) VALUES (?::uuid, ?::uuid, ?::timestamptz, ?, ?, ?, ?, ?)',
+      [randomUUID(), row.id, iso(now), until, amount, note, me.id, me.name],
+    );
   });
 }
 
@@ -414,6 +608,10 @@ export async function deleteTrial(db: SqlDriver, now: number, me: PlatformMe, id
     const row = await trialRow(tx, id);
     const status = trialStatus({ status: row.status, endsAt: Number(row.ends_at) }, now);
     if (!DELETABLE.has(status)) throw conflict('TRIAL_RUNNING', 'Пробная версия идёт: сначала завершите её, потом удаляйте');
+    // The row is the platform's only link to the café in the cloud cash desk.
+    if (row.cloud_code) throw conflict('TRIAL_IN_CLOUD', 'Эта кофейня в облачной кассе: запись хранит ссылку на неё, удалить её нельзя');
+    // A café that bought TS: the row keeps its payment history.
+    if (row.paid_at !== null) throw conflict('TRIAL_PAID', 'Эта кофейня купила TS: запись хранит историю оплат, удалить её нельзя');
     await tx.run('DELETE FROM trials WHERE id = ?::uuid', [row.id]);
     return { deleted: row.id, venue: row.venue };
   });

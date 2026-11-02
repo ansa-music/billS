@@ -3,6 +3,8 @@ import { notifyTrialRequest } from '../platform-notify.ts';
 import { reportTrial, startTrial, trialTermsOf, trialWithDuplicate } from '../trial.ts';
 import { createWatchLink, revokeWatchLinks, watchLinksStatus, watchSnapshot, watchState, withWatching } from '../trial-watch.ts';
 import { finishMove, movedError, moveState, regenerateCafeCode, startMove, withMove } from '../trial-move.ts';
+import { trialCloudSeen } from '../cloud-cafe.ts';
+import { withCodes } from '../trial-codes.ts';
 import type { EdgeContext } from './context.ts';
 import type { EdgeRequest } from './http.ts';
 import { bearerToken, errorResponse, json, notFound, readJson, readOptionalJson, routeOf } from './http.ts';
@@ -39,6 +41,15 @@ import { clientIp } from './signup.ts';
  *   GET  /trial/move          (Bearer ticket)      → TrialMoveState (401 MOVE_TICKET_INVALID, 410 MOVE_EXPIRED)
  *   POST /trial/move/finish   {acceptOlder?} (Bearer ticket) → TrialMoveFinish
  *                             (409 MOVE_SUPERSEDED / MOVE_NOT_FRESH, 404 SNAPSHOT_NOT_FOUND)
+ *
+ * «Облачная касса» (apps/cloud/src/cloud-cafe.ts): a trial in the cloud cash desk answers report/terms with status
+ * 'ended' and `cloud` {code, url, managerKey? (a request approved into the cloud, until its page saved it)}; a token
+ * retired by the move gets 410 TRIAL_MOVED with `error.cloud`; GET /trial/watch carries `cloud` too.
+ *   POST /trial/cloud/seen    {id} (Bearer trial)  → {ok: true} (the page saved the director's key; the token retires)
+ *
+ * The café's codes for the platform owner (apps/cloud/src/trial-codes.ts): the report's body may carry `codes`
+ * (the café code, the director's working code — only when they change), its answer `directorKeyNext` (a new director
+ * code from TS to install). Codes are never logged.
  */
 export const TRIAL_CORS: Readonly<Record<string, string>> = {
   'Access-Control-Allow-Origin': '*',
@@ -75,12 +86,15 @@ export async function handleTrial(req: EdgeRequest, ctx: EdgeContext): Promise<R
     if (m === 'POST' && clean === '/trial/report') {
       const token = bearerToken(req);
       const body = await readJson(req, REPORT_BODY_LIMIT);
-      const terms = await reportTrial(ctx.db, ctx.now(), token, body).catch(rethrowMoved(ctx, token, body));
-      return json(200, await withMove(ctx.db, ctx.now(), body, await withWatching(ctx.db, ctx.now(), body, terms)), headers);
+      const terms = await reportTrial(ctx.db, ctx.now(), token, body, ctx.cloudHubUrl).catch(rethrowMoved(ctx, token, body));
+      const now = ctx.now();
+      return json(200, await withCodes(ctx.db, now, body, await withMove(ctx.db, now, body, await withWatching(ctx.db, now, body, terms))), headers);
     }
     if (m === 'GET' && clean === '/trial/terms') {
       const token = bearerToken(req);
-      const terms = await trialTermsOf(ctx.db, ctx.now(), token, query.get('id'), query.get('v')).catch(rethrowMoved(ctx, token, { id: query.get('id') }));
+      const terms = await trialTermsOf(ctx.db, ctx.now(), token, query.get('id'), query.get('v'), ctx.cloudHubUrl).catch(
+        rethrowMoved(ctx, token, { id: query.get('id') }),
+      );
       return json(200, terms, headers);
     }
     if (m === 'POST' && clean === '/trial/watch/links') {
@@ -93,10 +107,17 @@ export async function handleTrial(req: EdgeRequest, ctx: EdgeContext): Promise<R
       return json(200, await revokeWatchLinks(ctx.db, bearerToken(req), await readJson(req)), headers);
     }
     if (m === 'GET' && clean === '/trial/watch') {
-      return json(200, await watchState(ctx.db, ctx.now(), bearerToken(req), clientIp(req)), headers);
+      return json(200, await watchState(ctx.db, ctx.now(), bearerToken(req), clientIp(req), ctx.cloudHubUrl), headers);
     }
     if (m === 'GET' && clean === '/trial/watch/snapshot') {
       return json(200, await watchSnapshot(ctx.db, ctx.now(), bearerToken(req), clientIp(req)), headers);
+    }
+    if (m === 'POST' && clean === '/trial/cloud/seen') {
+      const token = bearerToken(req);
+      const body = await readJson(req);
+      const res = await trialCloudSeen(ctx.db, ctx.now(), token, body).catch(rethrowMoved(ctx, token, body));
+      ctx.log(`trial: страница заявки ${String((body as { id?: unknown }).id)} сохранила ключ директора облачной кассы`);
+      return json(200, res, headers);
     }
     const move = await moveRoute(req, clean, m, ctx);
     if (move) return json(move.status, move.body, headers);
@@ -109,7 +130,7 @@ export async function handleTrial(req: EdgeRequest, ctx: EdgeContext): Promise<R
 /** A refused report or terms call of a cash desk that was moved away: 410 TRIAL_MOVED instead of 401. */
 function rethrowMoved(ctx: EdgeContext, token: string | null, body: unknown): (e: unknown) => Promise<never> {
   return async (e) => {
-    throw await movedError(ctx.db, e, token, typeof body === 'object' && body !== null ? (body as { id?: unknown }).id : undefined);
+    throw await movedError(ctx.db, e, token, typeof body === 'object' && body !== null ? (body as { id?: unknown }).id : undefined, ctx.cloudHubUrl);
   };
 }
 

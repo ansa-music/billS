@@ -140,9 +140,9 @@ function fromBase64(text: string): Uint8Array {
 // ---------------------------------------------------------------------------
 // The cash desk
 
-/** What the cash desk's licence should be: a desk that was moved away is read-only (as if ended). */
+/** What the cash desk's licence should be: a desk that was moved away (or to the cloud) is read-only (as if ended). */
 export function movedLicenseView(info: TrialInfo): TrialInfo {
-  return info.movedAway !== undefined ? { ...info, status: 'ended' } : info;
+  return info.movedAway !== undefined || info.cloud ? { ...info, status: 'ended' } : info;
 }
 
 /** This computer is no longer the cash desk (another one took it over). */
@@ -162,6 +162,11 @@ export interface DeskMoveDeps {
   unsynced(): boolean;
   /** This computer is no longer the cash desk: lock it read-only. */
   onMoved(): void;
+  /**
+   * The signal said this token was retired: was it a move to another computer ('moved': lock as such) or to the
+   * TS cloud ('cloud': the caller already keeps the café's link and locks)? Without it: 'moved'.
+   */
+  whyMoved?(): Promise<'moved' | 'cloud'>;
 }
 
 export interface DeskMove {
@@ -173,6 +178,8 @@ export interface DeskMove {
   onAnswer(body: unknown): void;
   /** A refused call: true when it said «Касса перенесена» (and the desk is now locked). */
   onError(err: unknown): boolean;
+  /** The café moved to the TS cloud: no more reports, no signal (trial-cloud.ts keeps the link and locks). */
+  stop(): void;
 }
 
 /** What the trial details call on the running cash desk («Перенести кассу…», «Сменить код»). */
@@ -198,9 +205,14 @@ export function isMovedError(err: unknown): boolean {
 /** The cash desk's side of moving (trial-cloud.ts starts it with the cloud link). */
 export function deskMove(deps: DeskMoveDeps): DeskMove {
   const { info } = deps;
-  let stopped = trialMovedAway(info);
+  let stopped = trialMovedAway(info) || Boolean(info.cloud);
   let lastForced = 0;
   let signalTimer: ReturnType<typeof setInterval> | undefined;
+
+  const stop = () => {
+    stopped = true;
+    clearInterval(signalTimer);
+  };
 
   const moved = () => {
     if (stopped) return;
@@ -237,7 +249,11 @@ export function deskMove(deps: DeskMoveDeps): DeskMove {
       const s: unknown = await res.json();
       if (!isDeskSignal(s)) return;
       if (s === 'snapshot') sendFresh();
-      else if (s === 'moved') moved();
+      else if (s === 'moved') {
+        const why = deps.whyMoved ? await deps.whyMoved().catch(() => 'moved' as const) : 'moved';
+        if (why === 'cloud') stop();
+        else moved();
+      }
     } catch {
       // Off line: the next signal or report will tell.
     }
@@ -277,6 +293,7 @@ export function deskMove(deps: DeskMoveDeps): DeskMove {
       moved();
       return true;
     },
+    stop,
   };
 }
 

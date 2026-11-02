@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import type { IngredientUnit, IngredientView, SuppliesView, SupplyLineInput, SupplyView } from '@bills/domain';
+import { useEffect, useMemo, useState } from 'react';
+import type { IngredientUnit, IngredientView, Minor, SuppliesView, SupplyLineInput, SupplyView } from '@bills/domain';
 import { bigUnitOf, formatMoney, INGREDIENT_UNITS } from '@bills/domain';
 import { fetchJson } from '../api.ts';
 import { FormError, Modal } from '../cash/Modal.tsx';
@@ -8,6 +8,7 @@ import { Icon } from '../icons.tsx';
 import { parseMajor, toMajorText } from '../pages/bar/money.tsx';
 import { formatDateTime } from '../ui.tsx';
 import { useHub, useLive } from '../useHub.tsx';
+import type { SupplyDraft } from './BuyList.tsx';
 import { QtyInput } from './QtyInput.tsx';
 import { byName, matches, packOf, qtyInput, qtyLabel, typedQty } from './stock.ts';
 
@@ -18,13 +19,27 @@ interface Line {
   /** A known ingredient, or null with `fresh`: created with the delivery. */
   ingredientId: string | null;
   fresh: { name: string; unit: IngredientUnit } | null;
+  /** A line of an ingredient deleted since the delivery: shown as it was, it cannot change. */
+  kept: { name: string; unit: IngredientUnit } | null;
   quantity: string;
   /** Base units per typed unit: 1000 when typed in кг or л. */
   factor: number;
   amount: string;
+  /** Rough sum from «Докупить на неделю», shown as the placeholder of the sum. */
+  approx?: Minor | null;
 }
 
 let nextKey = 1;
+
+/** Lines of «Докупить на неделю» for a new delivery: the amounts in кг, л or штуки, no sums yet. */
+function draftLines(draft: SupplyDraft | null | undefined, ingredients: readonly IngredientView[]): Line[] {
+  return (draft ?? []).flatMap((d) => {
+    const ing = ingredients.find((i) => i.id === d.ingredientId && !i.isArchived);
+    if (!ing) return [];
+    const typed = qtyInput(d.quantity, ing.unit);
+    return [{ key: nextKey++, ingredientId: ing.id, fresh: null, kept: null, quantity: typed.text, factor: typed.factor, amount: '', approx: d.approx }];
+  });
+}
 
 const UNIT_WORD: Record<IngredientUnit, string> = { г: 'кг / г', мл: 'л / мл', шт: 'штуки' };
 const DELETE_REASONS = ['Ввели дважды', 'Не та поставка', 'Ошибка в накладной'];
@@ -34,7 +49,26 @@ const DELETE_REASONS = ['Ввели дважды', 'Не та поставка',
  * not on the stock yet is created right here), and the deliveries so far — each may be corrected
  * or deleted by the director or the administrator, or by whoever entered it within 30 minutes.
  */
-export function SuppliesTab({ ingredients, run, busy, notify }: { ingredients: IngredientView[]; run: Run; busy: boolean; notify: (m: string) => void }) {
+export function SuppliesTab({
+  ingredients,
+  run,
+  busy,
+  notify,
+  draft,
+  onDraftUsed,
+}: {
+  ingredients: IngredientView[];
+  run: Run;
+  busy: boolean;
+  notify: (m: string) => void;
+  /** «Создать поставку» from «Докупить на неделю»: the first new-delivery form starts with these lines. */
+  draft?: SupplyDraft | null;
+  onDraftUsed?: () => void;
+}) {
+  const [startLines] = useState(draft ?? null);
+  useEffect(() => {
+    if (draft) onDraftUsed?.();
+  }, [draft, onDraftUsed]);
   const { state, version, serverNow } = useHub();
   const currency = state.club.currency;
   const tz = state.club.timezone;
@@ -55,6 +89,7 @@ export function SuppliesTab({ ingredients, run, busy, notify }: { ingredients: I
       <SupplyForm
         key={`${editing?.id ?? 'new'}:${formKey}`}
         editing={editing}
+        draft={!editing && formKey === 0 ? startLines : null}
         ingredients={ingredients}
         suppliers={suppliers}
         currency={currency}
@@ -163,6 +198,7 @@ export function SuppliesTab({ ingredients, run, busy, notify }: { ingredients: I
 
 function SupplyForm({
   editing,
+  draft,
   ingredients,
   suppliers,
   currency,
@@ -173,6 +209,7 @@ function SupplyForm({
   onCancel,
 }: {
   editing: SupplyView | null;
+  draft: SupplyDraft | null;
   ingredients: IngredientView[];
   suppliers: string[];
   currency: string;
@@ -185,17 +222,19 @@ function SupplyForm({
   const [supplier, setSupplier] = useState(editing?.supplier ?? '');
   const [note, setNote] = useState(editing?.note ?? '');
   const [lines, setLines] = useState<Line[]>(() =>
-    (editing?.lines ?? []).map((l) => {
+    (editing?.lines ?? []).map((l): Line => {
       const typed = qtyInput(l.quantity, l.unit);
       return {
         key: nextKey++,
         ingredientId: l.ingredientId,
         fresh: null,
+        // Not on the stock any more (archived ones are): deleted since the delivery.
+        kept: ingredients.some((i) => i.id === l.ingredientId) ? null : { name: l.name, unit: l.unit },
         quantity: typed.text,
         factor: typed.factor,
         amount: l.amount ? toMajorText(l.amount, currency) : '',
       };
-    }),
+    }).concat(editing ? [] : draftLines(draft, ingredients)),
   );
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -211,11 +250,11 @@ function SupplyForm({
 
   const add = (ingredientId: string) => {
     const ing = byId.get(ingredientId);
-    setLines((ls) => [...ls, { key: nextKey++, ingredientId, fresh: null, quantity: '', factor: ing ? bigUnitOf(ing.unit).factor : 1, amount: '' }]);
+    setLines((ls) => [...ls, { key: nextKey++, ingredientId, fresh: null, kept: null, quantity: '', factor: ing ? bigUnitOf(ing.unit).factor : 1, amount: '' }]);
     setQuery('');
   };
   const addFresh = (unit: IngredientUnit) => {
-    setLines((ls) => [...ls, { key: nextKey++, ingredientId: null, fresh: { name: q, unit }, quantity: '', factor: bigUnitOf(unit).factor, amount: '' }]);
+    setLines((ls) => [...ls, { key: nextKey++, ingredientId: null, fresh: { name: q, unit }, kept: null, quantity: '', factor: bigUnitOf(unit).factor, amount: '' }]);
     setQuery('');
   };
   const patch = (key: number, p: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...p } : l)));
@@ -308,19 +347,23 @@ function SupplyForm({
         <ul className="stock-lines">
           {parsed.map((l, idx) => {
             const ing = l.ingredientId ? byId.get(l.ingredientId) : undefined;
-            const unit = ing?.unit ?? l.fresh?.unit ?? 'шт';
+            const unit = ing?.unit ?? l.kept?.unit ?? l.fresh?.unit ?? 'шт';
+            const name = ing?.name ?? l.kept?.name ?? l.fresh?.name ?? '';
             const pack = packOf(unit);
             const perPack = l.qty && l.sum ? Math.round((l.sum / l.qty) * pack.size) : null;
             return (
               <li key={l.key} className="stock-line">
                 <div className="stock-line-head">
                   <span className="stock-line-name">
-                    {idx + 1}. {ing?.name ?? l.fresh?.name ?? '—'}
+                    {idx + 1}. {name || '—'}
                     {l.fresh && <span className="tag tag-ok">новое</span>}
+                    {l.kept && <span className="tag tag-muted">удалено</span>}
                   </span>
-                  <button type="button" className="btn btn-small" aria-label="Убрать строку" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}>
-                    <Icon name="trash" size={16} />
-                  </button>
+                  {!l.kept && (
+                    <button type="button" className="btn btn-small" aria-label="Убрать строку" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}>
+                      <Icon name="trash" size={16} />
+                    </button>
+                  )}
                 </div>
                 <div className="stock-line-fields">
                   <label className="field">
@@ -329,16 +372,24 @@ function SupplyForm({
                       value={l.quantity}
                       factor={l.factor}
                       unit={unit}
-                      label={`Количество: ${ing?.name ?? l.fresh?.name ?? ''}`}
+                      label={`Количество: ${name}`}
+                      disabled={l.kept !== null}
                       invalid={l.quantity.trim() !== '' && l.qty === null}
                       onChange={(text, factor) => patch(l.key, { quantity: text, factor })}
                     />
                   </label>
                   <label className="field">
                     <span>Сумма, {currency}</span>
-                    <input inputMode="decimal" value={l.amount} onChange={(e) => patch(l.key, { amount: e.target.value })} placeholder="0" />
+                    <input
+                      inputMode="decimal"
+                      value={l.amount}
+                      disabled={l.kept !== null}
+                      onChange={(e) => patch(l.key, { amount: e.target.value })}
+                      placeholder={l.approx != null ? `≈ ${formatMoney(l.approx, currency)}` : '0'}
+                    />
                   </label>
                 </div>
+                {l.kept && <span className="hint">Это сырьё удалено — строка остаётся как была.</span>}
                 {(perPack !== null || (l.qty !== null && l.factor > 1)) && (
                   <span className="hint">
                     {l.qty !== null && l.factor > 1 ? `= ${l.qty.toLocaleString('ru-RU')} ${unit}` : ''}
@@ -397,6 +448,8 @@ function DeleteSupplyDialog({
   const below = [...taken]
     .map(([id, q]) => ({ ing: byId.get(id), after: Math.round(((byId.get(id)?.quantity ?? 0) - q) * 1000) / 1000 }))
     .filter((x) => x.ing && x.after < 0);
+  // Raw material deleted since (archived ones are still listed): its stock went off when it was deleted.
+  const gone = supply.lines.some((l) => !byId.has(l.ingredientId));
   return (
     <Modal
       title="Удалить поставку?"
@@ -424,11 +477,12 @@ function DeleteSupplyDialog({
           {supply.lines.map((l, i) => (
             <li key={i}>
               <span>{l.name}</span>
-              <span className="stock-minus">−{qtyLabel(l.quantity, l.unit)}</span>
+              {byId.has(l.ingredientId) ? <span className="stock-minus">−{qtyLabel(l.quantity, l.unit)}</span> : <span className="muted">удалено</span>}
               <span className="money">{formatMoney(l.amount, currency)}</span>
             </li>
           ))}
         </ul>
+        {gone && <p className="hint">Удалённое сырьё не трогаем: его остаток списали, когда его удаляли.</p>}
         {below.length > 0 && (
           <div className="warn-note">
             Часть уже ушла в продажи — остаток станет минусом:{' '}

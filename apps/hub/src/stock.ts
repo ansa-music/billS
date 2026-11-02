@@ -35,6 +35,7 @@ import {
   costWithout,
   daysLeftOf,
   fromMilli,
+  INGREDIENT_DELETED_REASON,
   INGREDIENT_NAME_MAX,
   isIngredientUnit,
   isQuantity,
@@ -81,6 +82,8 @@ interface IngredientRow {
   min_level: number | null;
   is_archived: number;
   is_sample: number;
+  /** Deleted for good while it had history (migration 022): the row stays for that history. */
+  deleted_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -119,7 +122,7 @@ export interface StockViewer {
 /** Internal calls (tests, the sample) see and may change everything. */
 const ANY: StockViewer = { id: null, mayEditStock: true };
 
-interface RecipeRow {
+export interface RecipeRow {
   id: number;
   product_id: string;
   choice_id: string | null;
@@ -184,7 +187,7 @@ function recipeRows(db: Db, productId: string): RecipeRow[] {
   return all<RecipeRow>(db, 'SELECT * FROM recipe_items WHERE product_id = ? ORDER BY sort_order, id', productId);
 }
 
-function toRecipe(rows: readonly RecipeRow[]): Recipe {
+export function toRecipe(rows: readonly RecipeRow[]): Recipe {
   const items = rows
     .filter((r) => r.mode === 'base')
     .map((r) => ({ ingredientId: r.ingredient_id, quantity: fromMilli(r.quantity) }));
@@ -242,14 +245,17 @@ export function consumeForOrder(db: Db, orderId: string, lines: readonly Consume
 
 /**
  * A cancelled order gives back what its sale took (from the movement log, not today's
- * recipe). A second call for the same order does nothing.
+ * recipe). A second call for the same order does nothing. An ingredient deleted since gets
+ * nothing back: its stock went off when it was deleted, and it stays at zero.
  */
 export function returnForOrder(db: Db, orderId: string, now: number, actor: string = SYSTEM): void {
   if (one(db, "SELECT id FROM stock_movements WHERE order_id = ? AND kind = 'return' LIMIT 1", orderId)) return;
   const taken = all<{ ingredient_id: string; product_id: string | null; q: number; c: number | null }>(
     db,
-    `SELECT ingredient_id, product_id, SUM(quantity) AS q, SUM(cost) AS c FROM stock_movements
-     WHERE order_id = ? AND kind = 'sale' GROUP BY ingredient_id, product_id ORDER BY MIN(id)`,
+    `SELECT m.ingredient_id, m.product_id, SUM(m.quantity) AS q, SUM(m.cost) AS c
+     FROM stock_movements m JOIN ingredients i ON i.id = m.ingredient_id
+     WHERE m.order_id = ? AND m.kind = 'sale' AND i.deleted_at IS NULL
+     GROUP BY m.ingredient_id, m.product_id ORDER BY MIN(m.id)`,
     orderId,
   );
   for (const t of taken) {
@@ -334,11 +340,14 @@ export class StockService {
 
   // ── Ingredients ─────────────────────────────────────────────────────────
 
-  /** Every ingredient, archived ones included, by name; with «хватит на N дней» from the last two weeks of sales. */
+  /**
+   * Every ingredient, archived ones included, deleted ones never, by name; with «хватит на N дней»
+   * from the last two weeks of sales.
+   */
   ingredients(): IngredientsView {
     const db = this.#db;
     const now = this.#clock.now();
-    const rows = all<IngredientRow>(db, 'SELECT * FROM ingredients');
+    const rows = all<IngredientRow>(db, 'SELECT * FROM ingredients WHERE deleted_at IS NULL');
     const since = now - STOCK_USAGE_DAYS * DAY;
     const used = new Map(
       all<{ ingredient_id: string; used: number }>(
@@ -397,12 +406,13 @@ export class StockService {
   }
 
   /**
-   * What «Удалить» will do with an ingredient: delete it (nothing ever happened to it) or archive
-   * it (it has history, which keeps its name), and which recipes use it.
+   * What «Удалить» will do with an ingredient, active or archived: delete it completely (nothing
+   * ever happened to it) or for good with its history kept, how much goes off with it, and which
+   * recipes use it.
    */
   removal(id: string): IngredientRemovalView {
     const db = this.#db;
-    const ing = this.#row(id);
+    const ing = this.#live(id);
     const n = (sql: string) => one<{ n: number }>(db, sql, id)?.n ?? 0;
     const history = {
       movements: n('SELECT COUNT(*) AS n FROM stock_movements WHERE ingredient_id = ?'),
@@ -415,16 +425,19 @@ export class StockService {
       unit: ing.unit,
       quantity: fromMilli(ing.quantity),
       recipes: this.#recipesUsing(ing.id),
-      outcome: history.movements + history.supplies + history.counts > 0 ? 'archive' : 'delete',
+      outcome: history.movements + history.supplies + history.counts > 0 ? 'history' : 'delete',
       history,
     };
   }
 
   /**
-   * «Удалить»: an ingredient nothing happened to is deleted; one with history is archived — gone
-   * from lists and pickers, its name kept by the history. One that recipes use is refused (409,
-   * naming them) unless `fromRecipes`: then it leaves those recipes too (its base lines, the option
-   * lines that take it and the swaps that replace it).
+   * «Удалить», active or archived: an ingredient nothing happened to is deleted outright. One with
+   * history is deleted for good, the row kept for that history (`deleted_at`, like a deleted staff
+   * member): gone from the levels, the archive, pickers and the sample, no way back, its name free
+   * again; what is on hand goes off as «Сырьё удалено» (`writeoff`; below zero — `adjust` up to
+   * zero), so the totals stay honest. One that recipes use is refused (409, naming them) unless
+   * `fromRecipes`: then it leaves those recipes too (its base lines, the option lines that take it
+   * and the swaps that replace it). «В архив» is the way to hide one for a while.
    */
   removeIngredient(input: { id: string; fromRecipes?: boolean; actor: string }): RemoveIngredientResponse {
     const db = this.#db;
@@ -443,18 +456,34 @@ export class StockService {
         run(db, 'DELETE FROM recipe_items WHERE ingredient_id = ? OR replaces_id = ?', plan.ingredientId, plan.ingredientId);
         for (const r of plan.recipes) run(db, 'UPDATE recipe_items SET updated_at = ? WHERE product_id = ?', now, r.productId);
       }
-      if (plan.outcome === 'delete') run(db, 'DELETE FROM ingredients WHERE id = ?', plan.ingredientId);
-      else run(db, 'UPDATE ingredients SET is_archived = 1, updated_at = ? WHERE id = ?', now, plan.ingredientId);
-      const outcome = plan.outcome === 'delete' ? 'deleted' : 'archived';
+      const historyKept = plan.outcome === 'history';
+      let cost: number | null = null;
+      if (!historyKept) {
+        run(db, 'DELETE FROM ingredients WHERE id = ?', plan.ingredientId);
+      } else {
+        const ing = this.#row(plan.ingredientId);
+        if (ing.quantity !== 0) {
+          cost = costOf(fromMilli(-ing.quantity), ing.cost_per_unit);
+          move(db, now, {
+            ingredientId: ing.id,
+            deltaMilli: -ing.quantity,
+            kind: ing.quantity > 0 ? 'writeoff' : 'adjust',
+            actor: input.actor,
+            reason: INGREDIENT_DELETED_REASON,
+          });
+        }
+        run(db, 'UPDATE ingredients SET deleted_at = ?, is_archived = 1, is_sample = 0, updated_at = ? WHERE id = ?', now, now, ing.id);
+      }
+      const quantity = historyKept ? plan.quantity : 0;
       record(db, now, {
         actor: input.actor,
         action: 'stock.ingredient_removed',
         entityType: 'ingredient',
         entityId: plan.ingredientId,
-        data: { name: plan.name, unit: plan.unit, outcome, recipes, quantity: plan.quantity },
+        data: { name: plan.name, unit: plan.unit, outcome: 'deleted', historyKept, recipes, quantity, cost },
       });
       this.#changed();
-      return { outcome, recipes };
+      return { historyKept, recipes, quantity };
     });
   }
 
@@ -466,7 +495,7 @@ export class StockService {
     const db = this.#db;
     const now = this.#clock.now();
     return transaction(db, () => {
-      const ing = this.#row(input.id);
+      const ing = this.#live(input.id);
       if (ing.is_archived) throw new HubError(422, 'INGREDIENT_ARCHIVED', `«${ing.name}» в архиве`);
       const target = checkQty(input.quantity, false, 'Остаток');
       const reason = cleanText(input.reason, STOCK_NOTE_MAX, 'REASON_REQUIRED', 'причину', true)!;
@@ -506,7 +535,7 @@ export class StockService {
       all<{ product_id: string }>(db, 'SELECT product_id FROM recipe_items GROUP BY product_id HAVING MIN(is_sample) = 1').map((r) => r.product_id),
     );
     const names = this.#productNames();
-    const ingredients = all<IngredientRow>(db, 'SELECT * FROM ingredients WHERE is_sample = 1 AND is_archived = 0')
+    const ingredients = all<IngredientRow>(db, 'SELECT * FROM ingredients WHERE is_sample = 1 AND is_archived = 0 AND deleted_at IS NULL')
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
       .map((ing) => {
         const own = this.#recipesUsing(ing.id).filter((r) => !sampleProducts.has(r.productId));
@@ -586,7 +615,7 @@ export class StockService {
     const db = this.#db;
     const now = this.#clock.now();
     return transaction(db, () => {
-      const current = this.#row(input.id);
+      const current = this.#live(input.id);
       const name =
         input.name === undefined ? current.name : cleanText(input.name, INGREDIENT_NAME_MAX, 'NAME_REQUIRED', 'название сырья', true)!;
       const unit = input.unit === undefined ? current.unit : checkUnit(input.unit);
@@ -672,7 +701,7 @@ export class StockService {
     return transaction(db, () => {
       const product = this.#product(input.productId);
       const recipe: Recipe = { items: input.items ?? [], options: input.options ?? [] };
-      const ingredientIds = new Set(all<{ id: string }>(db, 'SELECT id FROM ingredients').map((r) => r.id));
+      const ingredientIds = new Set(all<{ id: string }>(db, 'SELECT id FROM ingredients WHERE deleted_at IS NULL').map((r) => r.id));
       const problems = validateRecipe(recipe, { ingredientIds, choiceIds: optionChoiceIds(product.options) });
       if (problems.length) throw new HubError(422, 'RECIPE_INVALID', problems.join('; '));
       run(db, 'DELETE FROM recipe_items WHERE product_id = ?', product.id);
@@ -824,6 +853,7 @@ export class StockService {
    * `supply_undo` movement per line, at the line's amount — and the price goes back to what it was
    * (see #costWithoutLine). If part of it was used already, the level goes below zero: sales are
    * never undone, and the level shows what is really missing. The delivery stays in the list, marked.
+   * A line of an ingredient deleted since takes nothing: its stock went off when it was deleted.
    */
   deleteSupply(input: { id: string; reason?: string | undefined; actor: string; viewer?: StockViewer }): SupplyView {
     const db = this.#db;
@@ -838,6 +868,10 @@ export class StockService {
       // Last line first: two lines of the same ingredient give their prices back in turn.
       for (const line of [...lines].reverse()) {
         const ing = this.#row(line.ingredient_id);
+        if (ing.deleted_at !== null) {
+          audit.unshift({ ingredientId: ing.id, name: ing.name, quantity: fromMilli(line.quantity), amount: line.amount, deleted: true });
+          continue;
+        }
         const cost = this.#costWithoutLine(supply, line, ing.quantity, ing.cost_per_unit);
         run(db, 'UPDATE ingredients SET cost_per_unit = ? WHERE id = ?', cost, ing.id);
         const balance = move(db, now, {
@@ -875,6 +909,7 @@ export class StockService {
    * «Исправить поставку»: the delivery gets the corrected lines; only what differs moves, per
    * ingredient (`supply_fix`: the wrong item goes back, the right one comes in, a quantity or a sum
    * is put right), and each changed price is worked out again without the old lines and with the new.
+   * The lines of an ingredient deleted since stay as they were: changing them is refused.
    */
   updateSupply(input: CreateSupplyRequest & { id: string; actor: string; viewer?: StockViewer }): SupplyView {
     const db = this.#db;
@@ -890,6 +925,12 @@ export class StockService {
         old.map((l) => ({ ingredientId: l.ingredient_id, quantity: fromMilli(l.quantity), amount: l.amount })),
         checked.map((l) => ({ ingredientId: l.ing.id, quantity: fromMilli(l.milli), amount: l.amount })),
       );
+      for (const c of changes) {
+        const ing = this.#row(c.ingredientId);
+        if (ing.deleted_at !== null) {
+          throw new HubError(422, 'INGREDIENT_DELETED', `«${ing.name}» удалено — его строку в поставке не изменить, оставьте её как была`);
+        }
+      }
       const text = `Поставка от ${this.#day(supply.at)} «${supplier}» исправлена`;
       const changed = new Set(changes.map((c) => c.ingredientId));
       // The price each new line found: for a changed ingredient, worked out below; else kept as it was.
@@ -1035,7 +1076,7 @@ export class StockService {
       if (lines.length === 0) throw new HubError(422, 'COUNT_EMPTY', 'Введите хотя бы одно посчитанное количество');
       const seen = new Set<string>();
       const checked = lines.map((l, i) => {
-        const ing = this.#row(l.ingredientId);
+        const ing = this.#live(l.ingredientId);
         if (seen.has(ing.id)) throw new HubError(422, 'COUNT_REPEATED', `«${ing.name}» указано дважды`);
         seen.add(ing.id);
         return { ing, counted: checkQty(l.counted, false, `Строка ${i + 1}, посчитано`) };
@@ -1085,7 +1126,7 @@ export class StockService {
     const db = this.#db;
     const now = this.#clock.now();
     return transaction(db, () => {
-      const ing = this.#row(input.ingredientId);
+      const ing = this.#live(input.ingredientId);
       const milli = checkQty(input.quantity, true, 'Количество');
       const reason = cleanText(input.reason, STOCK_NOTE_MAX, 'REASON_REQUIRED', 'причину', true)!;
       if (reason.length < WRITE_OFF_REASON_MIN) throw new HubError(422, 'REASON_REQUIRED', 'Укажите причину списания');
@@ -1167,9 +1208,17 @@ export class StockService {
     afterCommit(this.#db, () => this.#events.changed({ kind: 'stock' }));
   }
 
+  /** Any ingredient row, deleted ones too (the history and old deliveries refer to them). */
   #row(id: string): IngredientRow {
     const row = one<IngredientRow>(this.#db, 'SELECT * FROM ingredients WHERE id = ?', id);
     if (!row) throw new HubError(404, 'INGREDIENT_NOT_FOUND', 'Сырьё не найдено');
+    return row;
+  }
+
+  /** An ingredient a command may act on: a deleted one reads as not found, by its name. */
+  #live(id: string): IngredientRow {
+    const row = this.#row(id);
+    if (row.deleted_at !== null) throw new HubError(404, 'INGREDIENT_NOT_FOUND', `Сырьё «${row.name}» удалено`);
     return row;
   }
 
@@ -1223,16 +1272,16 @@ export class StockService {
   }
 
   /**
-   * Lines of a delivery as typed: a known ingredient (not archived) or a new one created on the spot
-   * (`newIngredient`; an active one of that name is used instead of a twin), a quantity above 0 and
-   * the line's sum. Inside the delivery's transaction: a refused delivery creates nothing.
+   * Lines of a delivery as typed: a known ingredient (not archived or deleted) or a new one created
+   * on the spot (`newIngredient`; an active one of that name is used instead of a twin), a quantity
+   * above 0 and the line's sum. Inside the delivery's transaction: a refused delivery creates nothing.
    */
   #supplyLines(
     raw: readonly SupplyLineInput[] | undefined,
     actor: string,
     now: number,
-    /** A correction keeps the lines of an ingredient archived since the delivery. */
-    archivedOk: ReadonlySet<string> = new Set(),
+    /** A correction keeps the lines of an ingredient archived or deleted since the delivery. */
+    keptOk: ReadonlySet<string> = new Set(),
   ): Array<{ ing: IngredientRow; milli: number; amount: number }> {
     const lines = Array.isArray(raw) ? raw : [];
     if (lines.length === 0) throw new HubError(422, 'SUPPLY_EMPTY', 'Добавьте хотя бы одну строку');
@@ -1241,7 +1290,8 @@ export class StockService {
       let ing: IngredientRow;
       if (typeof l.ingredientId === 'string' && l.ingredientId) {
         ing = this.#row(l.ingredientId);
-        if (ing.is_archived && !archivedOk.has(ing.id)) throw new HubError(422, 'INGREDIENT_ARCHIVED', `Строка ${i + 1}: «${ing.name}» в архиве`);
+        if (ing.deleted_at !== null && !keptOk.has(ing.id)) throw new HubError(422, 'INGREDIENT_DELETED', `Строка ${i + 1}: «${ing.name}» удалено`);
+        if (ing.is_archived && !keptOk.has(ing.id)) throw new HubError(422, 'INGREDIENT_ARCHIVED', `Строка ${i + 1}: «${ing.name}» в архиве`);
       } else if (l.newIngredient && typeof l.newIngredient === 'object') {
         ing = this.#findOrCreate(l.newIngredient, actor, now, i);
       } else {
@@ -1259,7 +1309,7 @@ export class StockService {
     const name = cleanText(raw.name, INGREDIENT_NAME_MAX, 'NAME_REQUIRED', `название сырья в строке ${index + 1}`, true)!;
     const unit = checkUnit(raw.unit);
     const wanted = name.toLocaleLowerCase('ru');
-    const existing = all<IngredientRow>(this.#db, 'SELECT * FROM ingredients WHERE is_archived = 0').find(
+    const existing = all<IngredientRow>(this.#db, 'SELECT * FROM ingredients WHERE is_archived = 0 AND deleted_at IS NULL').find(
       (r) => r.name.toLocaleLowerCase('ru') === wanted,
     );
     if (existing) {
@@ -1351,7 +1401,7 @@ export class StockService {
 
   #assertNameFree(name: string, exceptId: string | null): void {
     const wanted = name.toLocaleLowerCase('ru');
-    const clash = all<{ id: string; name: string }>(this.#db, 'SELECT id, name FROM ingredients WHERE is_archived = 0').find(
+    const clash = all<{ id: string; name: string }>(this.#db, 'SELECT id, name FROM ingredients WHERE is_archived = 0 AND deleted_at IS NULL').find(
       (r) => r.id !== exceptId && r.name.toLocaleLowerCase('ru') === wanted,
     );
     if (clash) throw new HubError(409, 'INGREDIENT_EXISTS', `Сырьё «${name}» уже есть`);

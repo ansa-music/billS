@@ -1,6 +1,7 @@
 import { CloudError } from '../errors.ts';
 import { runWatchdogs } from '../push.ts';
 import { runDailySummaries } from '../telegram.ts';
+import { runPaidReminders } from '../trial-paid.ts';
 import type { EdgeContext } from './context.ts';
 import { reportPushConfigured } from './context.ts';
 import type { EdgeRequest } from './http.ts';
@@ -9,7 +10,8 @@ import { errorResponse, json, notFound, routeOf } from './http.ts';
 /**
  * Edge Function `notify` (verify_jwt = false): the cloud's watchdogs (HUB silent,
  * shift left open) plus a retry of anything still PENDING in push_queue, and — with the Telegram
- * bot configured — the evening summary of the day (21:00 club time, once per chat and day).
+ * bot configured — the evening summary of the day (21:00 club time, once per chat and day), and «Купили»: the platform
+ * owner is told a week before a café's paid term ends (apps/cloud/src/trial-paid.ts).
  * Called by pg_cron every 5 minutes (supabase/migrations/*_cron.sql) with `x-ts-cron: <NOTIFY_SECRET>`.
  */
 
@@ -43,8 +45,14 @@ export async function handleNotify(req: EdgeRequest, ctx: EdgeContext): Promise<
         ctx.log(`Telegram: сводка дня не разослана: ${(e as Error).message}`);
       }
     }
+    let paidReminders = 0;
+    try {
+      paidReminders = await runPaidReminders({ db: ctx.db, sender: ctx.sender, telegram: ctx.telegram, cabinetUrl: ctx.cabinetUrl, log: ctx.log }, now);
+    } catch (e) {
+      ctx.log(`Купили: напоминания не разосланы: ${(e as Error).message}`);
+    }
     await reportPushConfigured(ctx);
-    return json(200, { ok: true, now, queued, ...flushed, summaries, pushEnabled: ctx.push.enabled });
+    return json(200, { ok: true, now, queued, ...flushed, summaries, paidReminders, pushEnabled: ctx.push.enabled });
   } catch (e) {
     return errorResponse(e, ctx.log);
   }

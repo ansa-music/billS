@@ -2,12 +2,22 @@ import type { FastifyInstance } from 'fastify';
 import type {
   CreateTableRequest,
   CreateTariffRequest,
+  ReceiptSettings,
   ReorderTablesRequest,
   UpdateClubRequest,
   UpdateTableRequest,
   UpdateTariffRequest,
 } from '@bills/domain';
-import { BUSINESS_TYPES, CARD_SIZES, FREE_TABLE_RULES, THEMES, WAITER_VIEWS } from '@bills/domain';
+import {
+  BUSINESS_TYPES,
+  CARD_SIZES,
+  FREE_TABLE_RULES,
+  RECEIPT_COPIES,
+  RECEIPT_LIMITS,
+  RECEIPT_PAPERS,
+  THEMES,
+  WAITER_VIEWS,
+} from '@bills/domain';
 import type { Hub } from '../../hub.ts';
 import { clubId, loadSettings } from '../../views.ts';
 import { guard, runCommand } from '../command.ts';
@@ -51,6 +61,32 @@ const settingsPatchSchema = {
       additionalProperties: false,
       properties: { type: { type: 'string', enum: [...BUSINESS_TYPES] } },
     },
+  },
+} as const;
+
+// «Чек»: exactly the fields the venue may change (receipt.ts). Lengths and characters are checked
+// precisely by receiptSettingsProblems; the schema only keeps garbage and unknown keys out.
+const receiptText = nullableText(400);
+const receiptSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    title: receiptText,
+    address: receiptText,
+    phone: receiptText,
+    taxId: receiptText,
+    logo: nullableText(RECEIPT_LIMITS.logo + 100),
+    header: receiptText,
+    footer: receiptText,
+    wifiName: receiptText,
+    wifiPassword: receiptText,
+    instagram: receiptText,
+    qrUrl: nullableText(RECEIPT_LIMITS.qrUrl + 100),
+    showCashier: { type: 'boolean' },
+    showGuest: { type: 'boolean' },
+    showService: { type: 'boolean' },
+    paper: { type: 'string', enum: [...RECEIPT_PAPERS] },
+    copies: { type: 'integer', enum: [...RECEIPT_COPIES] },
   },
 } as const;
 
@@ -117,6 +153,12 @@ export function registerSettingsRoutes(app: FastifyInstance, hub: Hub): void {
     const action = hasClubFields ? 'club.edit' : 'display.edit';
     return runCommand(req, reply, hub, (actor) => ({ status: 200, body: hub.settings.updateClub({ ...req.body, actor }) }), action);
   });
+
+  // «Настройки» → «Чек»: the manager and the administrator («Директор», «Управляющий» of a coffee shop).
+  // POST /api/club cannot touch `settings.receipt` (its schema has no such key).
+  app.post<{ Body: Partial<ReceiptSettings> }>('/api/receipt/settings', { schema: { body: receiptSchema } }, async (req, reply) =>
+    runCommand(req, reply, hub, (actor) => ({ status: 200, body: hub.settings.updateReceipt({ patch: req.body ?? {}, actor }) }), 'receipt.edit'),
+  );
 
   app.post<{ Body: CreateTableRequest }>(
     '/api/tables',

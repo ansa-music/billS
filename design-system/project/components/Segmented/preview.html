@@ -1,0 +1,27 @@
+<!-- @dsCard group="Кабинет · формы" height=130 width=640 -->
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Segmented</title>
+<style>
+  body { padding: 16px; }
+  .stack { display: grid; gap: 14px; max-width: 560px; }
+</style>
+</head>
+<body>
+<script>(function(h,m){function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{'pos-dark':'dark','pos-light':'light'});</script>
+<div class="stack">
+  <div class="seg" role="tablist" aria-label="Способ входа">
+    <button type="button" role="tab" aria-selected="true">Почта и пароль</button>
+    <button type="button" role="tab" aria-selected="false">Ссылка на почту</button>
+  </div>
+  <div class="seg seg-wrap" role="radiogroup" aria-label="Срок лицензии">
+    <button type="button" role="radio" aria-selected="false">Пробная, 3 дня</button>
+    <button type="button" role="radio" aria-selected="false">Пробная, 7 дней</button>
+    <button type="button" role="radio" aria-selected="true">Месяцы</button>
+    <button type="button" role="radio" aria-selected="false">До даты</button>
+  </div>
+</div>
+</body>
+</html>

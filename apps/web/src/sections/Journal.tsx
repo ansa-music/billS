@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { GuestRequestKind, HubState, JournalCategory, JournalEntry, TableKind } from '@bills/domain';
-import { formatMoney, GUEST_REQUEST_KINDS, guestRequestSummary, isRole, rolesLabel } from '@bills/domain';
+import { formatMoney, formatStock, GUEST_REQUEST_KINDS, guestRequestSummary, isIngredientUnit, isRole, rolesLabel } from '@bills/domain';
 import type { BusinessType, Role } from '@bills/domain';
 import { fetchJournal } from '../api.ts';
 import { businessOf } from '../cafe/cafe.ts';
@@ -188,21 +188,35 @@ function describe(e: JournalEntry, state: HubState): Described {
         icon: 'orders',
         cat: 'bar',
       };
-    case 'stock.ingredient_removed':
-      return {
-        title: `Склад: сырьё «${str(d.name)}» ${d.outcome === 'deleted' ? 'удалено' : 'убрано в архив'}`,
-        detail: Array.isArray(d.recipes) && d.recipes.length ? `убрано из состава: ${(d.recipes as unknown[]).map(str).join(', ')}` : undefined,
-        icon: 'orders',
-        cat: 'bar',
-      };
+    case 'stock.ingredient_removed': {
+      // Before deletion for good existed, an ingredient with history went to the archive instead.
+      if (d.outcome === 'archived') {
+        return {
+          title: `Склад: сырьё «${str(d.name)}» убрано в архив`,
+          detail: Array.isArray(d.recipes) && d.recipes.length ? `убрано из состава: ${(d.recipes as unknown[]).map(str).join(', ')}` : undefined,
+          icon: 'orders',
+          cat: 'bar',
+        };
+      }
+      const left = d.historyKept === true ? num(d.quantity) : 0;
+      const qty = (q: number) => (isIngredientUnit(d.unit) ? formatStock(q, d.unit) : `${q.toLocaleString('ru-RU')} ${str(d.unit)}`);
+      const parts = [
+        left > 0 ? `списано ${qty(left)}` : left < 0 ? `минус ${qty(-left)} обнулён` : '',
+        Array.isArray(d.recipes) && d.recipes.length ? `убрано из состава: ${(d.recipes as unknown[]).map(str).join(', ')}` : '',
+      ].filter(Boolean);
+      return { title: `Сырьё удалено: ${str(d.name)}`, detail: parts.length ? parts.join(' · ') : undefined, icon: 'orders', cat: 'bar', bad: left > 0 };
+    }
     case 'stock.sample_removed':
       return { title: 'Склад: пример от TS убран', icon: 'orders', cat: 'bar' };
     case 'stock.recipe_set':
       return { title: `Склад: состав «${str(d.name)}» изменён`, icon: 'orders', cat: 'bar' };
     case 'stock.ingredient_created':
       return { title: `Склад: новое сырьё «${str(d.name)}»`, detail: d.via === 'supply' ? 'из поставки' : undefined, icon: 'orders', cat: 'bar' };
-    case 'stock.ingredient_updated':
-      return { title: `Склад: сырьё «${str(d.name)}» изменено`, icon: 'orders', cat: 'bar' };
+    case 'stock.ingredient_updated': {
+      const was = (d.was as Record<string, unknown> | undefined)?.isArchived;
+      const how = d.isArchived === true && was === false ? 'убрано в архив' : d.isArchived === false && was === true ? 'возвращено из архива' : 'изменено';
+      return { title: `Склад: сырьё «${str(d.name)}» ${how}`, icon: 'orders', cat: 'bar' };
+    }
     // Club settings and staff
     case 'club.updated':
       return { title: 'Настройки изменены', detail: fieldsOf(d), icon: 'settings', cat: 'club' };
@@ -409,6 +423,9 @@ export function JournalSection({ params }: { params: URLSearchParams }) {
   const hub = useHub();
   const { state } = hub;
   const tz = state.club.timezone;
+  // A coffee shop has no tables, games or lamps: those filters would always be empty there.
+  const cafe = hub.business === 'cafe';
+  const filters = cafe ? FILTERS.filter((f) => f.value !== 'games' && f.value !== 'lamps').map((f) => (f.value === 'bar' ? { ...f, label: 'Заказы и склад' } : f)) : FILTERS;
   const tableId = params.get('table') ?? '';
   const [filter, setFilter] = useState<Filter>('all');
   /** «Все» hides routine system records (startup checks, sync); this shows them. */
@@ -461,13 +478,14 @@ export function JournalSection({ params }: { params: URLSearchParams }) {
   return (
     <div className="page">
       <p className="page-lead">
-        Всё, что происходит в заведении: кто открыл и остановил стол, оплаты, смены, свет и тревоги. Записи не удаляются и не
-        меняются.
+        {cafe
+          ? 'Всё, что происходит в кофейне: заказы и их отмены, оплаты, смены, склад и сотрудники. Записи не удаляются и не меняются.'
+          : 'Всё, что происходит в заведении: кто открыл и остановил стол, оплаты, смены, свет и тревоги. Записи не удаляются и не меняются.'}
       </p>
       <SectionCard
         title="Журнал действий"
         actions={
-          <select
+          cafe ? undefined : <select
             className="select"
             aria-label="Стол"
             value={tableId}
@@ -483,7 +501,7 @@ export function JournalSection({ params }: { params: URLSearchParams }) {
         }
       >
         <div className="chips" role="group" aria-label="Что показывать">
-          {FILTERS.map((f) => (
+          {filters.map((f) => (
             <button key={f.value} type="button" className="filter-chip" aria-pressed={f.value === filter} onClick={() => setFilter(f.value)}>
               {f.label}
             </button>

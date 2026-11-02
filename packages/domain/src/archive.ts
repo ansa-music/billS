@@ -35,6 +35,8 @@ export interface ArchiveEntry {
   number: number | null;
   /** The check the order or refund belongs to, when known. */
   checkNumber: number | null;
+  /** That check's id: «Чек» reprints it. Absent from Z reports saved before it was added. */
+  checkId?: string | null;
   amount: Minor;
   /** Who cancelled, refunded or voided it. */
   by: string | null;

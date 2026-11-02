@@ -1,6 +1,6 @@
 import type { CancelledSummary } from './archive.ts';
 import type { DiscountKind, PaymentMethod } from './billing.ts';
-import type { BusinessType, ProductOptionGroup } from './cafe.ts';
+import type { BusinessType, CounterService, ProductOptionGroup } from './cafe.ts';
 import type { SyncStatus } from './cloud.ts';
 import type { Minor } from './money.ts';
 import type { PauseSpan } from './pause.ts';
@@ -183,6 +183,17 @@ export interface CheckItemView {
   startedAt: number | null;
   stoppedAt: number | null;
   playedSeconds: number | null;
+  /** ORDER lines: names of the chosen options («L», «Овсяное»), also part of `title`; absent from an older HUB. */
+  optionNames?: string[];
+}
+
+/** A coffee shop counter order on the check: its number of the day, «здесь / с собой» and the guest. */
+export interface CheckCounterOrderView {
+  id: string;
+  number: number;
+  service: CounterService;
+  guestName: string | null;
+  status: OrderStatus;
 }
 
 export interface CheckPaymentView {
@@ -234,6 +245,10 @@ export interface CheckView {
   closedAt: number | null;
   /** HUB time of the last change: a screen holding two copies keeps the newer one. */
   updatedAt: number;
+  /** Counter orders on this check (coffee shop), oldest first; absent from an older HUB. */
+  counter?: CheckCounterOrderView[];
+  /** The main role of each person named on the check (payments, createdBy) when the HUB knows them: the receipt's «Бариста: …». */
+  actorRoles?: Record<string, Role>;
 }
 
 export type ShiftStatus = 'OPEN' | 'CLOSED';

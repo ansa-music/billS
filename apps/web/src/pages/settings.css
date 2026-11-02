@@ -296,3 +296,96 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* «Чек»: the form and, beside it, the receipt as it prints */
+
+.receipt-settings {
+  display: grid;
+  gap: var(--space-5);
+  align-items: start;
+}
+
+@media (min-width: 1000px) {
+  .receipt-settings {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .receipt-side {
+    position: sticky;
+    top: var(--space-4);
+  }
+}
+
+.receipt-h {
+  margin: var(--space-3) 0 0;
+  font-size: var(--fs-base);
+  color: var(--text);
+}
+
+.receipt-h:first-child {
+  margin-top: 0;
+}
+
+.receipt-flags {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.receipt-flags .check {
+  min-height: 36px;
+}
+
+.receipt-logo-thumb {
+  max-width: 160px;
+  max-height: 48px;
+  padding: 4px;
+  border-radius: 6px;
+  background: #fff;
+  image-rendering: pixelated;
+}
+
+.receipt-side {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.receipt-side-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.receipt-side > .btn {
+  justify-self: start;
+}
+
+.receipt-help {
+  font-size: var(--fs-md);
+  color: var(--text-2);
+}
+
+.receipt-help summary {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.receipt-help ol {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 44ch;
+  margin: var(--space-2) 0 0;
+  padding-left: 20px;
+}
+
+.receipt-help code {
+  font-size: 0.95em;
+  overflow-wrap: anywhere;
+}

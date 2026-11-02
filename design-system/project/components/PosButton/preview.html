@@ -1,0 +1,33 @@
+<!-- @dsCard group="Касса · действия" height=210 width=820 -->
+<!doctype html>
+<html lang="ru" data-surface="pos">
+<head>
+<meta charset="utf-8">
+<title>PosButton</title>
+<style>
+  body { padding: 16px; }
+  .stack { display: grid; gap: 14px; }
+</style>
+</head>
+<body>
+<script>(function(h,m){h.setAttribute('data-surface','pos');function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{dark:'pos-dark',light:'pos-light'});</script>
+<div class="stack">
+  <div class="row wrap">
+    <button type="button" class="btn btn-primary">Оплатить 2 950 ₸</button>
+    <button type="button" class="btn btn-narrow">Отложить</button>
+    <button type="button" class="btn btn-ghost">Отмена</button>
+  </div>
+  <div class="row wrap">
+    <button type="button" class="btn btn-outline-danger">Отменить заказ</button>
+    <button type="button" class="btn btn-danger">Отозвать</button>
+    <button type="button" class="btn btn-warn btn-narrow">Ручной режим</button>
+  </div>
+  <div class="row wrap">
+    <button type="button" class="btn btn-small">Обновить</button>
+    <button type="button" class="btn btn-primary btn-large btn-narrow">Закрыть смену</button>
+    <button type="button" class="btn btn-narrow" disabled>Сделать новый</button>
+    <button type="button" class="link">Вход поддержки</button>
+  </div>
+</div>
+</body>
+</html>

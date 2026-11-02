@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { BrandMark } from '../BrandMark.tsx';
 import { forgetLink, isLinkMode, linkViewState, linkViewVersion, retryLink, subscribeLinkView } from '../demo-hub/link-mode.ts';
 import { useLocation } from '../router.tsx';
+import { CloudMovedScreen } from './TrialCloud.tsx';
 import '../onboarding/onboarding.css';
 import './trial.css';
 
@@ -116,11 +117,26 @@ export function LinkRevokedScreen() {
   );
 }
 
-/** The app while the link works; the «отключено» screen once the cash desk switched the device off. */
+/**
+ * The app while the link works; the «отключено» screen once the cash desk switched the device off; «Касса
+ * переехала в облако» once the cash desk's answers say the café is in the cloud cash desk (the device opens it there).
+ */
 export function LinkGate({ children }: { children: ReactNode }) {
   const v = useLinkView();
   const { path } = useLocation();
   if (v.status === 'revoked') return <LinkRevokedScreen />;
+  if (v.inCloud) {
+    return (
+      <CloudMovedScreen
+        cloud={v.inCloud}
+        extra={
+          <button type="button" className="btn btn-ghost" onClick={confirmForget}>
+            Отключить это устройство
+          </button>
+        }
+      />
+    );
+  }
   return (
     <>
       {children}

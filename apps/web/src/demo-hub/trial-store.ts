@@ -6,8 +6,8 @@
  * without pulling in the HUB.
  */
 
-import type { TrialStatus } from '@bills/domain';
-import { isTrialStatus, trialPageOver, trialWaiting } from '@bills/domain';
+import type { TrialCloudRecord, TrialReportCodes, TrialStatus } from '@bills/domain';
+import { isTrialStatus, trialPageFull, trialPageOver, trialWaiting } from '@bills/domain';
 import type { StoredLinkDevice } from './link-control.ts';
 
 const DB_NAME = 'ts-trial';
@@ -72,6 +72,26 @@ export interface TrialInfo {
   movedIn?: number;
   movedAway?: number;
   movedUnsynced?: boolean;
+  /** «Заполнить меню примером» on the welcome form: sent with the request (a café approved into the cloud gets the menu too). */
+  withMenu?: boolean;
+  /**
+   * «Облачная касса» (trial-cloud.ts): the café now lives in the TS cloud — its code and link, and for a request
+   * approved straight into the cloud the director's key. From then on this browser never calls the cloud again,
+   * is read-only, and never opens its own café (TrialCloud.tsx stands in front).
+   */
+  cloud?: TrialCloudRecord;
+  /**
+   * The codes for the platform owner (trial-director.ts, packages/domain/src/trial-codes.ts): what the cloud last
+   * accepted (only changes are reported); keys the page saw issued to the director in «Сотрудники» (newest first,
+   * to adopt when the known one stops working; never sent anywhere); no known director's code works any more;
+   * TS's new code that could not be installed here (reported once).
+   */
+  codesReported?: TrialReportCodes;
+  directorKeysSeen?: string[];
+  directorKeyStale?: boolean;
+  directorKeyRefused?: string;
+  /** «Купили»: the café has bought TS (status 'paid' came); after the paid day it says «Оплаченный срок закончился». */
+  everPaid?: boolean;
 }
 
 export interface TrialRecord extends TrialInfo {
@@ -172,9 +192,19 @@ export function trialOver(info: TrialTermsInfo, now = Date.now()): boolean {
   return trialPageOver(info, now, TRIAL_DAYS);
 }
 
+/** The café moved to the cloud cash desk (or a request was approved straight into it): this browser only shows the way there. */
+export function trialInCloud(info: Pick<TrialInfo, 'cloud'> | null | undefined): boolean {
+  return Boolean(info?.cloud);
+}
+
 /** TS made it the full version: no end date, no countdown. */
 export function trialPermanent(info: Pick<TrialInfo, 'status'>): boolean {
   return info.status === 'permanent';
+}
+
+/** The full version as the café sees it: permanent, or bought («Купили») and the paid day has not passed. */
+export function trialFull(info: TrialTermsInfo, now = Date.now()): boolean {
+  return trialPageFull(info, now);
 }
 
 /** The request waits for TS (or TS turned it down): the welcome screens stand in front of the cash desk. */
@@ -184,7 +214,7 @@ export function trialAwaiting(info: Pick<TrialInfo, 'status'>): boolean {
 
 /** Whole days left, rounded up; 0 once the trial is over, while it is a request, and for a permanent one. */
 export function daysLeft(info: TrialTermsInfo, now = Date.now()): number {
-  if (trialOver(info, now) || trialAwaiting(info) || trialPermanent(info)) return 0;
+  if (trialOver(info, now) || trialAwaiting(info) || trialFull(info, now)) return 0;
   return Math.max(0, Math.ceil((trialEndsAt(info) - now) / DAY_MS));
 }
 
@@ -217,6 +247,18 @@ export function setTrialCheckNow(fn: (() => Promise<unknown>) | null): void {
 }
 export function trialCheckNow(): Promise<unknown> {
   return checkNowHook ? checkNowHook() : Promise.resolve(null);
+}
+
+let persistHook: ((patch: Partial<TrialInfo>) => Promise<void>) | null = null;
+/** boot.ts: how a screen changes the running trial and writes it to IndexedDB (TrialCloud.tsx: «Я записал(а) код»). */
+export function setTrialPersist(fn: ((patch: Partial<TrialInfo>) => Promise<void>) | null): void {
+  persistHook = fn;
+}
+/** Changes the running trial and saves it (only in memory when the trial is not running here). */
+export function persistTrial(patch: Partial<TrialInfo>): Promise<void> {
+  if (persistHook) return persistHook(patch);
+  updateCurrentTrial(patch);
+  return Promise.resolve();
 }
 
 export function trialEndsAt(info: Pick<TrialInfo, 'startedAt' | 'endsAt'>): number {

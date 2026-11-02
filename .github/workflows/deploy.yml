@@ -138,7 +138,9 @@ jobs:
           TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
         run: |
           args=()
-          for name in VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_SUBJECT NOTIFY_SECRET TS_CABINET_URL LICENSE_SIGNING_KEY LICENSE_KEY_ID TELEGRAM_BOT_TOKEN TELEGRAM_BOT_USERNAME TELEGRAM_WEBHOOK_SECRET; do
+          # CLOUD_HUB_URL / CLOUD_HUB_ADMIN_TOKEN («Облачная касса») come from the cloud-hub step before this one (job env);
+          # without them the cabinet says «Облачная касса ещё не подключена».
+          for name in VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_SUBJECT NOTIFY_SECRET TS_CABINET_URL LICENSE_SIGNING_KEY LICENSE_KEY_ID TELEGRAM_BOT_TOKEN TELEGRAM_BOT_USERNAME TELEGRAM_WEBHOOK_SECRET CLOUD_HUB_URL CLOUD_HUB_ADMIN_TOKEN; do
             if [ -n "${!name}" ]; then args+=("$name=${!name}"); fi
           done
           if [ ${#args[@]} -gt 0 ]; then supabase secrets set --project-ref "$SUPABASE_PROJECT_REF" "${args[@]}"; else echo "секретов для функций нет — push выключен"; fi

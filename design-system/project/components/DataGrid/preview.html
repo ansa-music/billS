@@ -1,0 +1,42 @@
+<!-- @dsCard group="Кабинет · данные" height=230 width=1100 -->
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>DataGrid</title>
+<style>
+  body { padding: 16px; }
+  .panel { display: block; }
+</style>
+</head>
+<body>
+<script>(function(h,m){function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{'pos-dark':'dark','pos-light':'light'});</script>
+<div id="root"></div>
+<script>
+var T = window.TS, h = React.createElement;
+var NOW = Date.UTC(2026, 10, 2, 11, 40), MIN = 60000, DAY = 864e5;
+function S(o) { return Object.assign({ revenue: 0, billed: 0, games: 0, playedSeconds: 0, paid: { cash: 0, card: 0, qr: 0, total: 0 }, refunded: 0, checksPaid: 0, discounts: 0, averageCheck: 0, cancelledGames: 0 }, o); }
+var TODAY = S({ revenue: 8450000, billed: 8600000, games: 14, playedSeconds: 70560, paid: { cash: 3100000, card: 4750000, qr: 600000, total: 8450000 }, checksPaid: 37, averageCheck: 228400 });
+var WEEK = S({ revenue: 51230000, billed: 52000000, games: 96, playedSeconds: 480000, paid: { cash: 18900000, card: 28450000, qr: 4000000, total: 51350000 }, refunded: 120000, checksPaid: 241, averageCheck: 212600, cancelledGames: 2 });
+var MONTH = S({ revenue: 15960000, billed: 16100000, games: 27, playedSeconds: 136000, paid: { cash: 5800000, card: 8960000, qr: 1200000, total: 15960000 }, checksPaid: 71, averageCheck: 224800 });
+var HUB = { id: 'h1', name: 'HUB', lastSeenAt: NOW - MIN, online: true, lastOutboxId: 1, settingsVersion: 3, pendingSettings: false };
+function mount(el) { ReactDOM.createRoot(document.getElementById('root')).render(el); }
+function M(v) { return h('span', { className: 'tnum' }, v); }
+function Row(p) {
+  return h('tr', { 'data-open': p.open ? '' : undefined, 'data-mismatch': p.mismatch ? '' : undefined },
+    h('td', { className: 'num' }, p.n), h('td', null, p.when), h('td', null, p.who),
+    h('td', { className: 'num' }, M(p.sum)), h('td', null, h(T.MethodSplit, { totals: p.split, currency: 'KZT' })),
+    h('td', { className: 'num' }, p.exp), h('td', { className: 'num' }, p.got),
+    h('td', { className: 'num' }, h(T.Difference, { value: p.diff, currency: 'KZT' })));
+}
+var NB = '\u00a0';
+mount(h('section', { className: 'panel' }, h('div', { className: 'grid-wrap' },
+  h('table', { className: 'grid shifts-grid' },
+    h('thead', null, h('tr', null, h('th', { className: 'num' }, '№'), h('th', null, 'Открыта → закрыта'), h('th', null, 'Кассир'), h('th', { className: 'num' }, 'Итог'), h('th', null, 'Нал / карта / QR'), h('th', { className: 'num' }, 'Ожидалось'), h('th', { className: 'num' }, 'Посчитано'), h('th', { className: 'num' }, 'Расхождение'))),
+    h('tbody', null,
+      h(Row, { open: true, n: 128, when: '02.11, 10:05 → —', who: 'Айгерим', sum: '84' + NB + '500' + NB + '₸', split: TODAY.paid, exp: '—', got: '—', diff: null }),
+      h(Row, { mismatch: true, n: 127, when: '01.11, 10:02 → 23:58', who: 'Данияр', sum: '96' + NB + '200' + NB + '₸', split: { cash: 3600000, card: 5420000, qr: 600000, total: 9620000 }, exp: '41' + NB + '000' + NB + '₸', got: '40' + NB + '700' + NB + '₸', diff: -30000 }),
+      h(Row, { n: 126, when: '31.10, 10:00 → 23:55', who: 'Айгерим', sum: '88' + NB + '900' + NB + '₸', split: { cash: 3250000, card: 5240000, qr: 400000, total: 8890000 }, exp: '38' + NB + '500' + NB + '₸', got: '38' + NB + '500' + NB + '₸', diff: 0 }))))));
+</script>
+</body>
+</html>

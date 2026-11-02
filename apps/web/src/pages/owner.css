@@ -265,3 +265,22 @@
     max-width: 150px;
   }
 }
+
+/* «Прибыль сегодня» on a coffee shop's «Выручка» */
+
+.owner-profit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  align-items: baseline;
+}
+
+.owner-profit-main {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.owner-profit-main[data-negative] {
+  color: var(--danger);
+}

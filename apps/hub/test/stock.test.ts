@@ -386,12 +386,12 @@ test('a delivery adds stock, keeps the invoice amounts and averages the cost', a
     422,
     'AMOUNT_INVALID',
   );
-  // The 0,4 cup is in the size options of the sample recipes: removing it takes it out of them too.
+  // The 0,4 cup is in the size options of the sample recipes: deleting it takes it out of them too.
   await send(hub, `/api/stock/ingredients/${cups.id}/remove`, { fromRecipes: true });
   assertError(
     await send(hub, '/api/stock/supplies', { supplier: 'Ферма', lines: [{ ingredientId: cups.id, quantity: 1, amount: 1 }] }),
     422,
-    'INGREDIENT_ARCHIVED',
+    'INGREDIENT_DELETED',
   );
   assert.equal((await ingredient(hub, 'Молоко 3,2%')).quantity, 24000);
   assert.equal(one<{ n: number }>(hub.db, 'SELECT COUNT(*) AS n FROM supplies')!.n, 1);
@@ -540,6 +540,8 @@ test('permissions: a barista receives deliveries; recipes, counts and write-offs
     assert.deepEqual(await who.post('/api/stock/counts', { lines: [{ ingredientId: milk.id, counted: 1 }] }), { status: 403, code: 'FORBIDDEN' }, name);
     assert.deepEqual(await who.post('/api/stock/writeoffs', { ingredientId: milk.id, quantity: 1, reason: 'Пролили' }), { status: 403, code: 'FORBIDDEN' }, name);
     assert.deepEqual(await who.post('/api/stock/ingredients', { name: 'Сливки', unit: 'мл' }), { status: 403, code: 'FORBIDDEN' }, name);
+    assert.equal(await who.get(`/api/stock/ingredients/${milk.id}/removal`), 403, name);
+    assert.deepEqual(await who.post(`/api/stock/ingredients/${milk.id}/remove`, { fromRecipes: true }), { status: 403, code: 'FORBIDDEN' }, name);
   }
 
   const admin = as(await tokenOf('Асель Управляющая'));
@@ -548,6 +550,13 @@ test('permissions: a barista receives deliveries; recipes, counts and write-offs
   assert.equal((await admin.post('/api/stock/writeoffs', { ingredientId: milk.id, quantity: 100, reason: 'Скисло' })).status, 201);
   assert.equal((await admin.post(`/api/stock/recipes/${latte.id}`, { items: [{ ingredientId: milk.id, quantity: 180 }] })).status, 200);
   assert.equal((await admin.post('/api/stock/ingredients', { name: 'Сливки', unit: 'мл' })).status, 201);
+  // «Удалить» — the director and the administrator.
+  const sugar = hub.hub.stock.ingredients().ingredients.find((i) => i.name === 'Сахар')!;
+  const syrup = hub.hub.stock.ingredients().ingredients.find((i) => i.name === 'Сироп ореховый')!;
+  assert.equal(await admin.get(`/api/stock/ingredients/${sugar.id}/removal`), 200);
+  assert.equal((await admin.post(`/api/stock/ingredients/${sugar.id}/remove`, { fromRecipes: true })).status, 200);
+  const director = as(await tokenOf('Марат Директор'));
+  assert.equal((await director.post(`/api/stock/ingredients/${syrup.id}/remove`, { fromRecipes: true })).status, 200);
 
   // Who did it is the signed-in person, in the movement log and the journal.
   const supplies = all<{ created_by: string }>(hub.db, 'SELECT created_by FROM supplies ORDER BY at, rowid');

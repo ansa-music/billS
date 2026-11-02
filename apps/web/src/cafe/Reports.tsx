@@ -5,17 +5,72 @@ import { METHOD_LABEL } from '../cash/format.ts';
 import { EmptyState, SectionCard, StatTile } from '../components.tsx';
 import { formatSpan } from '../format.ts';
 import { InsightsPanel } from '../insights/InsightsPanel.tsx';
-import { hrefFor } from '../router.tsx';
+import { hrefFor, navigate, useLocation } from '../router.tsx';
 import { useHub, useLive } from '../useHub.tsx';
 import { COUNTER_POLL_MS, fetchCounterOrders, productNameOf, usePolling } from './cafe.ts';
+import { ProfitSection } from './ProfitReport.tsx';
+import { PeriodPicker, periodLabel, usePeriod } from './ReportPeriod.tsx';
+import { SalesSection } from './SalesReport.tsx';
 import './cafe.css';
+import './reports.css';
+
+type ReportTab = 'shift' | 'sales' | 'profit';
+
+const REPORT_TABS: Array<{ id: ReportTab; label: string; short?: string }> = [
+  { id: 'shift', label: 'Смена' },
+  { id: 'sales', label: 'Что продаётся' },
+  { id: 'profit', label: 'Себестоимость и прибыль', short: 'Прибыль' },
+];
 
 /**
- * #/stats in a coffee shop («Отчёты»): money of the open shift (X report) and
- * how the counter is doing — orders, average time to «Готово», what sells.
- * Day and month revenue across shifts is in «Кабинет управляющего».
+ * #/stats in a coffee shop («Отчёты», stats.view): the open shift (X report, the counter now),
+ * «Что продаётся» and «Себестоимость и прибыль» for a period — today, 7 or 30 days, any dates.
+ * Day and month revenue across shifts is on «Выручка».
  */
 export function CafeReports() {
+  const { query } = useLocation();
+  const wanted = query.get('tab');
+  const tab = REPORT_TABS.find((t) => t.id === wanted)?.id ?? 'shift';
+  const period = usePeriod();
+  const label = periodLabel(period.period, period.today);
+  return (
+    <div className="page">
+      <nav className="report-tabs" aria-label="Отчёты">
+        {REPORT_TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className="report-tab-btn"
+            aria-current={t.id === tab ? 'page' : undefined}
+            onClick={() => navigate('/stats', t.id === 'shift' ? undefined : { tab: t.id })}
+          >
+            {t.short ? (
+              <>
+                <span className="report-tab-long">{t.label}</span>
+                <span className="report-tab-short" aria-hidden="true">
+                  {t.short}
+                </span>
+              </>
+            ) : (
+              t.label
+            )}
+          </button>
+        ))}
+      </nav>
+      {tab === 'shift' ? (
+        <ShiftReportTab />
+      ) : (
+        <>
+          <PeriodPicker {...period} />
+          {tab === 'sales' ? <SalesSection period={period.period} label={label} /> : <ProfitSection period={period.period} label={label} />}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** «Смена»: money of the open shift (X report) and how the counter is doing — orders, time to «Готово», what is ordered. */
+function ShiftReportTab() {
   const hub = useHub();
   const { state } = hub;
   const { currency } = state.club;
@@ -39,7 +94,7 @@ export function CafeReports() {
   const topMax = topList[0]?.[1] ?? 1;
 
   return (
-    <div className="page">
+    <>
       <div className="stat-row">
         <StatTile
           label="Выручка смены"
@@ -97,7 +152,7 @@ export function CafeReports() {
             X- и Z-отчёт, внесение и изъятие — в разделе <a href={hrefFor('/checks')}>«Счета»</a>
             {hub.can('reports.view') && (
               <>
-                ; выручка за неделю и месяц — в <a href={hrefFor('/owner')}>«Кабинете»</a>
+                ; выручка за неделю и месяц — на странице <a href={hrefFor('/owner')}>«Выручка»</a>
               </>
             )}
             .
@@ -122,6 +177,6 @@ export function CafeReports() {
           )}
         </SectionCard>
       </div>
-    </div>
+    </>
   );
 }

@@ -7,6 +7,7 @@ import { Link } from '../router.tsx';
 import { Empty, Loading, Page, Section, Toast, formatDateTime, localDate, useToast } from '../ui.tsx';
 import { useCommands, useHub, useServerNow } from '../useHub.tsx';
 import { businessOf } from '../cafe/cafe.ts';
+import { useProfit } from '../cafe/ProfitReport.tsx';
 import { InsightsPanel } from '../insights/InsightsPanel.tsx';
 import { OccupancyChart, RevenueChart, TopTablesChart, plural } from './owner/Charts.tsx';
 import { CABINET_URL } from './settings/LicenseSection.tsx';
@@ -27,7 +28,7 @@ const QUICK_LINKS: QuickLink[] = [
   { to: '/journal', label: 'Журнал действий', action: 'audit.view' },
   { to: '/bar', label: 'Бар и меню', action: 'catalog.edit', billiards: true },
   { to: '/bar', label: 'Меню', action: 'catalog.edit', cafe: true },
-  { to: '/stats', label: 'Отчёты за смену', action: 'reports.view', cafe: true },
+  { to: '/stats', label: 'Отчёты: смена, продажи, прибыль', action: 'reports.view', cafe: true },
   { to: '/apps', label: 'Приложение на телефон и кассу', action: 'reports.view' },
 ];
 
@@ -156,6 +157,8 @@ export function OwnerPage() {
             <Stat label="Открытых тревог" value={String(summary.openAlerts)} note={summary.openAlerts > 0 ? 'нужно внимание' : 'всё спокойно'} tone={summary.openAlerts > 0 ? 'danger' : undefined} />
           </div>
 
+          {cafe && can('stats.view') && <ProfitCard date={summary.date} isToday={isToday} currency={currency} />}
+
           {cafe ? (
             <Section title="Выручка за 14 дней" aside={<span className="muted">{formatDay(summary.revenueByDay[0]?.date ?? summary.date)} — {formatDay(summary.date)}</span>}>
               <RevenueChart points={summary.revenueByDay} currency={currency} withGames={false} />
@@ -236,6 +239,36 @@ export function OwnerPage() {
 
       <Toast message={toast} onClose={clear} />
     </Page>
+  );
+}
+
+/** «Прибыль» of a coffee shop for the day: revenue minus what the drinks took off the stock by their recipes. */
+function ProfitCard({ date, isToday, currency }: { date: string; isToday: boolean; currency: string }) {
+  const { data, error } = useProfit({ from: date, to: date });
+  const money = (a: number) => formatMoney(a, currency);
+  return (
+    <Section
+      title={isToday ? 'Прибыль сегодня' : `Прибыль за ${formatDay(date)}`}
+      aside={
+        <Link to="/stats" query={{ tab: 'profit' }}>
+          Подробнее
+        </Link>
+      }
+    >
+      {!data ? (
+        <p className="muted">{error ? `Не удалось посчитать: ${error}` : 'Считаем…'}</p>
+      ) : (
+        <div className="owner-profit">
+          <span className="owner-profit-main" data-negative={data.profit < 0 || undefined}>
+            {money(data.profit)}
+          </span>
+          <span className="muted">{data.margin === null ? 'продаж не было' : `маржа ${data.margin}%`}</span>
+          <span className="muted">себестоимость {money(data.cost)}</span>
+          {data.losses.total !== 0 && <span className="muted">потери {money(data.losses.total)}</span>}
+          {data.productsWithoutRecipe > 0 && <span className="tag tag-warn">без состава: {data.productsWithoutRecipe}</span>}
+        </div>
+      )}
+    </Section>
   );
 }
 

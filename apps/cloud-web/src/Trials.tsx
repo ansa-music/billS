@@ -1,14 +1,17 @@
 /**
  * «Пробные версии» of the platform cabinet: browser trials of coffee shops. New requests come first with
- * «Подтвердить» / «Отклонить»; each trial can be watched, extended, dated, ended, made permanent, downloaded
- * or deleted; «Уведомления о заявках» (Telegram, this device) at the bottom.
+ * «Подтвердить» / «Подтвердить в облаке» / «Отклонить»; each trial can be watched, extended, dated, ended, made
+ * permanent, moved to the cloud cash desk, marked «Купили», downloaded or deleted; the platform owner sees its codes.
+ * The cafés that bought TS are listed in «Клиенты → Купили» (BoughtSection). «Уведомления о заявках» at the bottom.
  */
 import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { trialZoneCity } from '@bills/domain';
+import type { CloudHubStatus, TrialCloudApproved } from '@bills/domain';
+import { CLOUD_HUB_NOT_CONFIGURED_MESSAGE, trialZoneCity } from '@bills/domain';
 import {
   CloudRequestError,
   approveTrial,
+  approveTrialInCloud,
   deleteTrial,
   endTrial,
   extendTrial,
@@ -24,7 +27,10 @@ import { usePoll } from './hooks.ts';
 import { describeCabinetError } from './license-form.ts';
 import { Section, loadingText } from './shared.tsx';
 import { TrialAlerts } from './TrialAlerts.tsx';
-import type { TrialStats, TrialView } from './trials.ts';
+import { CloudApprovedNotice, CloudSection } from './TrialCloud.tsx';
+import { TrialCodesSection } from './TrialCodes.tsx';
+import { PaidForm, PaidHistory } from './TrialPaid.tsx';
+import type { TrialsList, TrialStats, TrialView } from './trials.ts';
 import {
   DEFAULT_TRIAL_URL,
   EXTEND_MAX_DAYS,
@@ -32,6 +38,7 @@ import {
   REJECT_MESSAGE_MAX,
   TRIAL_STATUS_LABEL,
   bytesText,
+  canBuy,
   canChangeTerm,
   canDeleteTrial,
   daysText,
@@ -49,9 +56,13 @@ import {
   parseEndDate,
   parseExtendDays,
   parseRejectMessage,
+  paidAmountText,
+  paidSoon,
   pendingCount,
   requestSeenText,
+  sortBought,
   sortTrials,
+  splitTrials,
   trialBackup,
   trialBackupFileName,
   trialDate,
@@ -61,9 +72,11 @@ import {
   trialTone,
 } from './trials.ts';
 
+const NO_CLOUD_HUB: CloudHubStatus = { configured: false, url: null };
+
 /** The list, polled every minute: Platform.tsx owns it so the tab shows how many requests wait. */
 export function useTrialsPoll(enabled: boolean) {
-  const load = useCallback(() => (enabled ? listTrials() : Promise.resolve([] as TrialView[])), [enabled]);
+  const load = useCallback((): Promise<TrialsList> => (enabled ? listTrials() : Promise.resolve({ trials: [], cloudHub: NO_CLOUD_HUB })), [enabled]);
   return usePoll(load, 60_000);
 }
 
@@ -76,14 +89,31 @@ function trialUrl(): string {
 }
 
 function TrialChip({ trial, now }: { trial: TrialView; now: number }) {
+  const status = effectiveStatus(trial, now);
   return (
-    <span className="lic-chip" data-tone={trialTone(trial, now)}>
-      {TRIAL_STATUS_LABEL[effectiveStatus(trial, now)]}
-    </span>
+    <>
+      <span className="lic-chip" data-tone={trialTone(trial, now)}>
+        {status === 'expired' && trial.paid ? 'Оплата закончилась' : TRIAL_STATUS_LABEL[status]}
+      </span>
+      {trial.cloud && (
+        <span className="lic-chip" data-tone={trial.cloud.termsError ? 'warn' : 'ok'} title={trial.cloud.termsError ?? undefined}>
+          В облаке
+        </span>
+      )}
+    </>
   );
 }
 
 function LastSeen({ trial, now }: { trial: TrialView; now: number }) {
+  // A café moved into the cloud: its browser cash desk no longer works, the cloud café is not watched from here.
+  if (trial.cloud && trial.cloud.origin === 'move') {
+    return (
+      <span className="trial-seen">
+        <span className="trial-seen-dot" aria-hidden="true" />
+        работает в облачной кассе
+      </span>
+    );
+  }
   return (
     <span className="trial-seen" data-live={isWorkingNow(trial.lastSeenAt, now) || undefined}>
       <span className="trial-seen-dot" aria-hidden="true" />
@@ -111,15 +141,19 @@ function RequestCard({
   now,
   editable,
   selected,
+  cloudHub,
   onOpen,
   onChanged,
+  onCloudApproved,
 }: {
   trial: TrialView;
   now: number;
   editable: boolean;
   selected: boolean;
+  cloudHub: CloudHubStatus;
   onOpen: () => void;
   onChanged: (t: TrialView) => void;
+  onCloudApproved: (res: TrialCloudApproved<TrialView>) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [rejecting, setRejecting] = useState(false);
@@ -162,6 +196,7 @@ function RequestCard({
           <LastSeen trial={trial} now={now} />
         </span>
         <DuplicateLine trial={trial} />
+        {editable && !cloudHub.configured && <span className="muted trial-line">«Подтвердить в облаке»: {CLOUD_HUB_NOT_CONFIGURED_MESSAGE.toLowerCase()}</span>}
         {error && (
           <span className="form-error" role="alert">
             {error}
@@ -194,6 +229,21 @@ function RequestCard({
               <>
                 <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void act(() => approveTrial(trial.id))}>
                   {busy ? 'Подтверждаем…' : 'Подтвердить'}
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy || !cloudHub.configured}
+                  title={cloudHub.configured ? undefined : CLOUD_HUB_NOT_CONFIGURED_MESSAGE}
+                  onClick={() =>
+                    void act(async () => {
+                      const res = await approveTrialInCloud(trial.id);
+                      onCloudApproved(res);
+                      return res.trial;
+                    })
+                  }
+                >
+                  Подтвердить в облаке
                 </button>
                 <button type="button" className="btn" disabled={busy} onClick={() => setRejecting(true)}>
                   Отклонить
@@ -301,20 +351,27 @@ function downloadText(fileName: string, text: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
-function TrialDetail({
+export function TrialDetail({
   trial,
   now,
   editable,
+  owner,
+  cloudHub,
   onChanged,
   onDeleted,
   onClose,
+  onCloudApproved,
 }: {
   trial: TrialView;
   now: number;
   editable: boolean;
+  /** The platform owner: «Коды для входа». */
+  owner: boolean;
+  cloudHub: CloudHubStatus;
   onChanged: (t: TrialView) => void;
   onDeleted: (id: string) => void;
   onClose: () => void;
+  onCloudApproved: (res: TrialCloudApproved<TrialView>) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -325,12 +382,13 @@ function TrialDetail({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [rejectMessage, setRejectMessage] = useState('');
+  const [paying, setPaying] = useState(false);
   const s = trial.stats;
   const status = effectiveStatus(trial, now);
   const endRange = endDateRange(now, trial.timezone);
   const termEditable = canChangeTerm(trial);
   const dup = duplicateText(trial.duplicateOf, trial.timezone);
-  const confirming = confirmEnd || confirmDelete || rejecting;
+  const confirming = confirmEnd || confirmDelete || rejecting || paying;
   // After «Продлить» (or a poll that brings another end) the picker shows the new last day.
   useEffect(() => setEndDate(endDateDefault(trial, Date.now())), [trial.endsAt, trial.timezone]);
 
@@ -399,6 +457,15 @@ function TrialDetail({
     });
   }
 
+  function approveInCloud() {
+    void act(async () => {
+      const res = await approveTrialInCloud(trial.id);
+      onChanged(res.trial);
+      onCloudApproved(res);
+      return null;
+    });
+  }
+
   function reject(e: FormEvent) {
     e.preventDefault();
     const message = parseRejectMessage(rejectMessage);
@@ -456,7 +523,7 @@ function TrialDetail({
     >
       <dl className="facts">
         <div>
-          <dt>{status === 'permanent' ? 'Версия' : isRequest(trial) || status === 'rejected' ? 'Заявка' : 'Пробный период'}</dt>
+          <dt>{status === 'permanent' ? 'Версия' : trial.paid ? 'Статус' : isRequest(trial) || status === 'rejected' ? 'Заявка' : 'Пробный период'}</dt>
           <dd className="lic-line">
             <TrialChip trial={trial} now={now} />
             <span className="muted">{trialTermText(trial, now)}</span>
@@ -466,6 +533,17 @@ function TrialDetail({
           <div>
             <dt>Повтор?</dt>
             <dd className="trial-dup">⚠ {dup}</dd>
+          </div>
+        )}
+        {trial.paid && (
+          <div>
+            <dt>Оплата (видит только TS)</dt>
+            <dd>
+              {paidAmountText(trial.paid.amount)}
+              {trial.paid.note ? <span className="muted"> · {trial.paid.note}</span> : null}
+              <span className="muted"> · купили {trialDate(trial.paid.since, trial.timezone)}</span>
+              {paidSoon(trial, now) && <span className="trial-badge"> скоро конец оплаты</span>}
+            </dd>
           </div>
         )}
         <div>
@@ -499,6 +577,8 @@ function TrialDetail({
           <dd>
             {status === 'permanent'
               ? 'без срока — постоянная'
+              : status === 'paid' || (status === 'expired' && trial.paid)
+                ? trialTermText(trial, now)
               : isRequest(trial) || status === 'rejected'
                 ? `через ${daysText(14)} после подтверждения`
                 : status === 'ended'
@@ -579,9 +659,9 @@ function TrialDetail({
 
       {editable && confirmEnd && (
         <div className="sub-panel">
-          <h3>{status === 'permanent' ? 'Завершить постоянную версию?' : 'Завершить пробный период досрочно?'}</h3>
+          <h3>{status === 'permanent' ? 'Завершить постоянную версию?' : status === 'paid' ? 'Завершить оплаченную версию сейчас?' : 'Завершить пробный период досрочно?'}</h3>
           <p className="hint">
-            {status === 'permanent' ? 'Касса' : 'Пробная версия'} «{trial.venue}» перейдёт в режим «только чтение» сейчас. Данные клиента останутся — их можно
+            {status === 'permanent' || status === 'paid' ? 'Касса' : 'Пробная версия'} «{trial.venue}» перейдёт в режим «только чтение» сейчас. Данные клиента останутся — их можно
             скачать кнопкой «Скачать копию данных».
           </p>
           <div className="row wrap">
@@ -614,6 +694,19 @@ function TrialDetail({
         </div>
       )}
 
+      {editable && paying && (
+        <PaidForm
+          trial={trial}
+          onCancel={() => setPaying(false)}
+          onDone={(next, text) => {
+            setPaying(false);
+            setError(null);
+            setDone(text);
+            onChanged(next);
+          }}
+        />
+      )}
+
       {editable && rejecting && (
         <form className="sub-panel trial-reject" onSubmit={reject} noValidate>
           <h3>Отклонить заявку «{trial.venue}»?</h3>
@@ -640,10 +733,19 @@ function TrialDetail({
 
       {editable && !confirming && (
         <div className="trial-actions">
-          {!termEditable && (
+          {(isRequest(trial) || status === 'rejected') && (
             <div className="row wrap">
               <button type="button" className="btn btn-primary" disabled={busy} onClick={approve}>
                 {status === 'rejected' ? 'Всё-таки подтвердить' : 'Подтвердить'}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy || !cloudHub.configured}
+                title={cloudHub.configured ? undefined : CLOUD_HUB_NOT_CONFIGURED_MESSAGE}
+                onClick={approveInCloud}
+              >
+                Подтвердить в облаке
               </button>
               {isRequest(trial) && (
                 <button type="button" className="btn" disabled={busy} onClick={() => setRejecting(true)}>
@@ -696,6 +798,11 @@ function TrialDetail({
             </form>
           )}
           <div className="row wrap">
+            {canBuy(trial) && (
+              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => setPaying(true)}>
+                {status === 'paid' || (status === 'expired' && trial.paid) ? 'Продлить оплату' : 'Купили'}
+              </button>
+            )}
             {status !== 'permanent' && (
               <button type="button" className="btn" disabled={busy} onClick={makePermanent}>
                 Сделать постоянной
@@ -706,9 +813,9 @@ function TrialDetail({
                 Скачать копию данных
               </button>
             )}
-            {(status === 'active' || status === 'permanent') && (
+            {(status === 'active' || status === 'permanent' || status === 'paid') && (
               <button type="button" className="btn btn-danger" disabled={busy} onClick={() => setConfirmEnd(true)}>
-                {status === 'permanent' ? 'Завершить' : 'Завершить досрочно'}
+                {status === 'active' ? 'Завершить досрочно' : 'Завершить'}
               </button>
             )}
             {canDeleteTrial(trial, now) && (
@@ -727,9 +834,14 @@ function TrialDetail({
           </button>
         </div>
       )}
-      <p className="hint">
-        Чтобы посмотреть кассу клиента: откройте пробную версию в режиме инкогнито → «Восстановить из копии» → этот файл.
-      </p>
+      {trial.paid && <PaidHistory trial={trial} />}
+      {!isRequest(trial) && status !== 'rejected' && <CloudSection trial={trial} editable={editable} cloudHub={cloudHub} now={now} onChanged={onChanged} />}
+      {owner && !isRequest(trial) && status !== 'rejected' && <TrialCodesSection trial={trial} onChanged={onChanged} />}
+      {!trial.cloud && (
+        <p className="hint">
+          Чтобы посмотреть кассу клиента: откройте пробную версию в режиме инкогнито → «Восстановить из копии» → этот файл (только просмотр).
+        </p>
+      )}
     </Section>
   );
 }
@@ -750,52 +862,75 @@ function TrialsEmpty() {
   );
 }
 
-/**
- * The «Пробные версии» tab: new requests first (with «Подтвердить» / «Отклонить» on the card), then the
- * trials, refreshed every minute (Platform.tsx polls, so the tab can show how many requests wait); the
- * opened trial above them; where the requests are announced (Telegram, this device) at the bottom.
- */
-export function TrialsSection({ editable, poll }: { editable: boolean; poll: TrialsPoll }) {
-  const { data, error, reload } = poll;
-  const [selected, setSelected] = useState<string | null>(null);
+/** The cloud's answers shown at once (an action, before the next poll brings the same), the deleted ones hidden. */
+function useTrialOverrides(data: TrialsList | null | undefined) {
   const [overrides, setOverrides] = useState<Record<string, TrialView>>({});
   const [deleted, setDeleted] = useState<ReadonlySet<string>>(new Set());
-  // An action shows the cloud's answer at once; the next poll brings the same and drops it.
   useEffect(() => {
     setOverrides({});
     setDeleted(new Set());
   }, [data]);
-  const now = Date.now();
+  const list = (data?.trials ?? []).filter((t) => !deleted.has(t.id)).map((t) => overrides[t.id] ?? t);
+  return {
+    list,
+    changed: (t: TrialView) => setOverrides((o) => ({ ...o, [t.id]: t })),
+    deleted: (id: string) => setDeleted((d) => new Set(d).add(id)),
+  };
+}
 
-  const trials = sortTrials((data ?? []).filter((t) => !deleted.has(t.id)).map((t) => overrides[t.id] ?? t));
-  const requests = trials.filter(isRequest);
-  const others = trials.filter((t) => !isRequest(t));
+/**
+ * The «Пробные версии» tab: new requests first (with «Подтвердить» / «Подтвердить в облаке» / «Отклонить» on the
+ * card), then the trials (the cafés that bought TS are in «Клиенты → Купили»), refreshed every minute (Platform.tsx
+ * polls, so the tab can show how many requests wait); the opened trial above them; where the requests are announced
+ * (Telegram, this device) at the bottom.
+ */
+export function TrialsSection({ editable, owner, poll }: { editable: boolean; owner: boolean; poll: TrialsPoll }) {
+  const { data, error, reload } = poll;
+  const [selected, setSelected] = useState<string | null>(null);
+  const [approvedCloud, setApprovedCloud] = useState<TrialCloudApproved<TrialView> | null>(null);
+  const shown = useTrialOverrides(data);
+  const now = Date.now();
+  const cloudHub = data?.cloudHub ?? NO_CLOUD_HUB;
+
+  const trials = sortTrials(shown.list);
+  const { requests, trials: others } = splitTrials(trials);
   const current = trials.find((t) => t.id === selected) ?? null;
   const working = others.filter((t) => isWorkingNow(t.lastSeenAt, now)).length;
   const changed = (t: TrialView) => {
-    setOverrides((o) => ({ ...o, [t.id]: t }));
+    shown.changed(t);
     void reload();
   };
   const open = (id: string) => {
     setSelected(id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+  const cloudApproved = (res: TrialCloudApproved<TrialView>) => {
+    shown.changed(res.trial);
+    setApprovedCloud(res);
+    setSelected(res.trial.id);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    void reload();
+  };
 
   return (
     <>
+      {approvedCloud && <CloudApprovedNotice result={approvedCloud} onDone={() => setApprovedCloud(null)} />}
       {current && (
         <TrialDetail
           key={current.id}
           trial={current}
           now={now}
           editable={editable}
+          owner={owner}
+          cloudHub={cloudHub}
           onChanged={changed}
           onDeleted={(id) => {
-            setDeleted((d) => new Set(d).add(id));
+            shown.deleted(id);
             setSelected(null);
             void reload();
           }}
           onClose={() => setSelected(null)}
+          onCloudApproved={cloudApproved}
         />
       )}
       {requests.length > 0 && (
@@ -807,10 +942,23 @@ export function TrialsSection({ editable, poll }: { editable: boolean; poll: Tri
             </span>
           }
         >
-          <p className="hint">Касса кофейни ждёт ответа: после «Подтвердить» она откроется сама, пробный период — 14 дней с этой минуты.</p>
+          <p className="hint">
+            Касса кофейни ждёт ответа: после «Подтвердить» она откроется сама в браузере, пробный период — 14 дней с этой минуты.
+            «Подтвердить в облаке» — касса сразу в облаке: работает на любом телефоне и компьютере.
+          </p>
           <ul className="trial-list">
             {requests.map((t) => (
-              <RequestCard key={t.id} trial={t} now={now} editable={editable} selected={t.id === selected} onOpen={() => open(t.id)} onChanged={changed} />
+              <RequestCard
+                key={t.id}
+                trial={t}
+                now={now}
+                editable={editable}
+                selected={t.id === selected}
+                cloudHub={cloudHub}
+                onOpen={() => open(t.id)}
+                onChanged={changed}
+                onCloudApproved={cloudApproved}
+              />
             ))}
           </ul>
         </Section>
@@ -828,7 +976,7 @@ export function TrialsSection({ editable, poll }: { editable: boolean; poll: Tri
           trials.length === 0 ? (
             <TrialsEmpty />
           ) : others.length === 0 ? (
-            <p className="empty">Пока только заявки — подтвердите их выше.</p>
+            <p className="empty">{requests.length ? 'Пока только заявки — подтвердите их выше.' : 'Все пробные версии купили — они в «Клиенты → Купили».'}</p>
           ) : (
             <ul className="trial-list">
               {others.map((t) => (
@@ -841,6 +989,102 @@ export function TrialsSection({ editable, poll }: { editable: boolean; poll: Tri
         )}
       </Section>
       <TrialAlerts />
+    </>
+  );
+}
+
+/**
+ * «Клиенты → Купили»: the coffee shops that bought TS («Купили» in a trial's details) — paid until, days left, the
+ * agreed sum and note, last activity, «скоро конец оплаты»; «Подробнее» opens the same details as on «Пробные версии».
+ */
+export function BoughtSection({ editable, owner, poll }: { editable: boolean; owner: boolean; poll: TrialsPoll }) {
+  const { data, reload } = poll;
+  const [selected, setSelected] = useState<string | null>(null);
+  const shown = useTrialOverrides(data);
+  const now = Date.now();
+  const bought = sortBought(splitTrials(shown.list).bought, now);
+  if (!data || bought.length === 0) return null;
+  const current = bought.find((t) => t.id === selected) ?? null;
+  const soon = bought.filter((t) => paidSoon(t, now)).length;
+  const changed = (t: TrialView) => {
+    shown.changed(t);
+    void reload();
+  };
+  return (
+    <>
+      {current && (
+        <TrialDetail
+          key={current.id}
+          trial={current}
+          now={now}
+          editable={editable}
+          owner={owner}
+          cloudHub={data.cloudHub}
+          onChanged={changed}
+          onDeleted={() => {
+            setSelected(null);
+            void reload();
+          }}
+          onClose={() => setSelected(null)}
+          onCloudApproved={() => void reload()}
+        />
+      )}
+      <Section
+        title="Купили"
+        aside={
+          <span className="panel-aside">
+            {soon > 0 && <span className="trial-badge">скоро конец оплаты: {soon}</span>}
+            <span className="panel-total">{bought.length}</span>
+          </span>
+        }
+      >
+        <p className="hint">Кофейни, которые купили TS. Сумму и заметку видит только TS; кофейня видит «Полная версия» без срока.</p>
+        <div className="grid-wrap">
+          <table className="grid bought-grid">
+            <thead>
+              <tr>
+                <th>Кофейня</th>
+                <th>Оплачено до</th>
+                <th>Сумма</th>
+                <th>Заметка</th>
+                <th>Последняя связь</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {bought.map((t) => (
+                <tr key={t.id} aria-current={t.id === selected || undefined}>
+                  <td>
+                    <strong>{t.venue || 'Без названия'}</strong>
+                    <div className="muted">{whoText(t)}</div>
+                  </td>
+                  <td>
+                    <TrialChip trial={t} now={now} /> <span>{trialTermText(t, now)}</span>
+                    {paidSoon(t, now) && <div className="trial-badge">скоро конец оплаты</div>}
+                  </td>
+                  <td>{paidAmountText(t.paid?.amount)}</td>
+                  <td>{t.paid?.note ?? <span className="muted">—</span>}</td>
+                  <td>
+                    <LastSeen trial={t} now={now} />
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn btn-small"
+                      onClick={() => {
+                        setSelected(t.id);
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                    >
+                      Подробнее
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Section>
     </>
   );
 }

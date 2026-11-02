@@ -1,0 +1,65 @@
+<!-- @dsCard height=288 -->
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>TS</title>
+<style>
+  html, body { margin: 0; height: 100%; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-sans); overflow: hidden; }
+  .cover { position: relative; height: 288px; overflow: hidden; }
+  .art { position: absolute; top: 0; left: 480px; width: 480px; height: 288px; overflow: hidden; }
+  .art svg { display: block; width: 480px; height: 288px; }
+  .felt { fill: var(--felt); }
+  .lamp { fill: var(--lamp); }
+  .ink { fill: var(--text); }
+  .acc { fill: var(--accent); }
+  .cut { fill: var(--bg); }
+  .slab { rx: var(--radius); }
+  .blk { rx: var(--radius-md); }
+  .pill { rx: var(--radius); }
+  .ball { r: var(--radius-sm); }
+  .words { position: absolute; left: var(--space-28px); bottom: var(--space-28px); max-width: 440px; }
+  .name { margin: 0; font-size: 120px; line-height: .9; font-weight: 800; letter-spacing: -0.035em; color: var(--text); }
+  .tag { margin: var(--space-2) 0 0 6px; font-size: 14px; line-height: 20px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="cover">
+<div class="art" aria-hidden="true">
+<svg viewBox="0 0 480 288" width="480" height="288">
+<!--
+  blocks      felt 304×200 (the table, largest) · lamp pill 128×32 hung over its centre · ink (text) 160×192 bled off the top and right · accent 96×80 under it — ≈36% of 960×288; danger stays out (a state, not identity)
+  arrangement one wide felt slab with satellites: the lamp above it, the ink slab and the accent block stacked at the right edge, bottoms on one line space-4 above the edge
+  pattern     discs, from «сукно, лампа над столом» (the palette is a billiard hall): a 15-ball rack cut out of the felt in bg, the cue ball lit in lamp
+  scales      slab corners radius (16), accent radius-md (12), pill rx radius (half of 32), balls r radius-sm (10) at a space-5 (24) pitch, gaps space-4 (16)
+-->
+<rect class="felt slab" x="16" y="72" width="304" height="200" rx="16"/>
+<rect class="lamp pill" x="104" y="24" width="128" height="32" rx="16"/>
+<rect class="ink slab" x="336" y="-16" width="160" height="192" rx="16"/>
+<rect class="acc blk" x="336" y="192" width="96" height="80" rx="12"/>
+<circle class="lamp ball" cx="64" cy="172" r="10"/>
+<circle class="cut ball" cx="144" cy="172" r="10"/>
+<circle class="cut ball" cx="168" cy="160" r="10"/>
+<circle class="cut ball" cx="168" cy="184" r="10"/>
+<circle class="cut ball" cx="192" cy="148" r="10"/>
+<circle class="cut ball" cx="192" cy="172" r="10"/>
+<circle class="cut ball" cx="192" cy="196" r="10"/>
+<circle class="cut ball" cx="216" cy="136" r="10"/>
+<circle class="cut ball" cx="216" cy="160" r="10"/>
+<circle class="cut ball" cx="216" cy="184" r="10"/>
+<circle class="cut ball" cx="216" cy="208" r="10"/>
+<circle class="cut ball" cx="240" cy="124" r="10"/>
+<circle class="cut ball" cx="240" cy="148" r="10"/>
+<circle class="cut ball" cx="240" cy="172" r="10"/>
+<circle class="cut ball" cx="240" cy="196" r="10"/>
+<circle class="cut ball" cx="240" cy="220" r="10"/>
+</svg>
+</div>
+<div class="words">
+<h1 class="name">TS</h1>
+<p class="tag">Касса и учёт для заведения</p>
+</div>
+</div>
+</body>
+</html>

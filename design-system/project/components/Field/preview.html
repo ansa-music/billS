@@ -1,0 +1,29 @@
+<!-- @dsCard group="Кабинет · формы" height=300 width=760 -->
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Field</title>
+<style>
+  body { padding: 16px; }
+  form { display: grid; gap: 12px; max-width: 640px; }
+</style>
+</head>
+<body>
+<script>(function(h,m){function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{'pos-dark':'dark','pos-light':'light'});</script>
+<form onsubmit="return false">
+  <fieldset class="lic-fieldset">
+    <legend>Лимиты</legend>
+    <div class="row wrap">
+      <label class="field"><span>Макс. филиалов</span><input type="number" min="1" value="2"></label>
+      <label class="field"><span>Макс. столов в филиале</span><input type="number" min="1" placeholder="без ограничения"></label>
+      <label class="field"><span>Город</span><select><option>Алматы</option><option>Астана</option><option>Шымкент</option></select></label>
+    </div>
+    <label class="check"><input type="checkbox" checked> от конца текущего срока</label>
+    <p class="hint">Новый срок начнётся после окончания текущего.</p>
+  </fieldset>
+  <label class="field grow"><span>Почта</span><input type="email"></label>
+  <ul class="form-errors"><li>Укажите почту — на неё будет вход</li><li>Пароль слишком простой. Возьмите не меньше 8 символов: буквы и цифры.</li></ul>
+</form>
+</body>
+</html>

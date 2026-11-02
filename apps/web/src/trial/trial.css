@@ -483,3 +483,77 @@
 .trial-watch-note {
   color: var(--text-2);
 }
+
+/* «Облачная касса» (TrialCloud.tsx): the café moved to the cloud cash desk, or a request approved straight into it. */
+.trial-cloud-card {
+  display: grid;
+  gap: 14px;
+}
+
+.trial-cloud-card p {
+  margin: 0;
+}
+
+.trial-cloud-open {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.trial-cloud-url {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.trial-cloud-code-line {
+  display: grid;
+  gap: 4px;
+}
+
+.trial-cloud-code {
+  font-size: clamp(1.75rem, 8vw, 2.5rem);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.trial-cloud-key {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.trial-cloud-key .trial-key {
+  justify-self: stretch;
+}
+
+.trial-cloud-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.trial-cloud-actions > .btn {
+  flex: 0 0 auto;
+}
+
+.trial-cloud-banner-code {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+}
+
+.trial-cloud-state {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}

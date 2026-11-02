@@ -1,0 +1,31 @@
+<!-- @dsCard group="Кабинет · данные" height=250 width=960 -->
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>HourChart</title>
+<style>
+  body { padding: 16px; }
+
+</style>
+</head>
+<body>
+<script>(function(h,m){function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{'pos-dark':'dark','pos-light':'light'});</script>
+<figure class="chart">
+  <div class="hours" id="hours" role="img" aria-label="Загрузка столов по часам за 7 дней"></div>
+  <figcaption class="muted">Пиковые часы: 20:00, 21:00 · занятость считается от всех столов клуба</figcaption>
+</figure>
+<script>
+var load = [22, 14, 8, 3, 0, 0, 0, 0, 0, 0, 4, 9, 14, 18, 22, 27, 35, 44, 56, 68, 82, 86, 64, 40];
+var peak = [20, 21];
+var root = document.getElementById('hours');
+load.forEach(function (v, hr) {
+  var el = document.createElement('div');
+  el.className = 'hour';
+  if (peak.indexOf(hr) >= 0) el.setAttribute('data-peak', '');
+  el.innerHTML = '<div class="hour-track"><div class="hour-bar" style="height:' + (v / 86 * 100).toFixed(1) + '%"></div></div><span class="hour-label">' + (hr % 3 === 0 ? hr : '') + '</span>';
+  root.appendChild(el);
+});
+</script>
+</body>
+</html>

@@ -1,19 +1,20 @@
 import type {
   CounterService,
   CreateCounterOrderRequest,
+  CreateCounterOrderResponse,
   Minor,
   PaymentMethod,
   PricedLine,
   ProductOptionGroup,
   ProductView,
 } from '@bills/domain';
-import { minorPerMajor, ORDER_NOTE_MAX, priceLine } from '@bills/domain';
+import { defaultChoices, minorPerMajor, ORDER_NOTE_MAX, priceLine } from '@bills/domain';
 import { optionsOf } from './cafe.ts';
 
 /**
  * Pure rules of the counter screen («Касса»): the order being taken, how it
- * becomes one HUB request, search with layout typos, round cash sums, «Хиты»
- * and parked orders kept on this device. No React here.
+ * becomes one HUB request, search with layout typos, round cash sums, «Хиты»,
+ * «Как обычно» and parked orders kept on this device. No React here.
  */
 
 // ── The order being taken ───────────────────────────────────────────────────
@@ -110,6 +111,29 @@ export function buildRequest(
   };
 }
 
+/** What the counter shows right after «Оплатить»: at once, before the HUB answers. */
+export interface Flash {
+  id: string;
+  state: 'sending' | 'ok' | 'failed';
+  method: PaymentMethod | null;
+  total: Minor;
+  change: Minor;
+  /** Split: the part paid by card or QR after the cash. */
+  rest: { method: PaymentMethod; amount: Minor } | null;
+  service: CounterService;
+  guestName: string;
+  /**
+   * Where the money was taken: `step` — the full-screen payment step, whose screen turns into the
+   * big «Заказ 17 · Сдача 450 ₸»; `panel` — a one-tap button or key in the order column, whose
+   * card shows over that column.
+   */
+  where: 'step' | 'panel';
+  res?: CreateCounterOrderResponse;
+  error?: string;
+  /** «Гостю начислено 45 ₸ бонусами» after the HUB confirmed. */
+  loyaltyNote?: string | null;
+}
+
 /** Payment parts for a method: cash may be more than due (change), card and QR exactly due. */
 export function paymentParts(
   total: Minor,
@@ -144,6 +168,9 @@ export function quickTenders(total: Minor, currency: string, count = 4): Minor[]
   }
   return [...out].sort((a, b) => a - b).slice(0, count);
 }
+
+/** A digit (or «00») typed into the cash the guest hands over: no leading zeros, at most 9 digits. */
+export const typeDigit = (typed: string, key: string) => (typed + key).replace(/^0+(?=\d)/, '').slice(0, 9);
 
 // ── Search ──────────────────────────────────────────────────────────────────
 
@@ -288,6 +315,77 @@ export function topProducts(products: readonly ProductView[], limit = 12, now = 
     }
   }
   return out;
+}
+
+// ── «Как обычно»: drinks with their options, the way this counter sells them now ──
+
+const USUAL_KEY = 'bills.cafe.usual.v1';
+const USUAL_KEEP = 60;
+/** Offered once it was sold twice within about four days (the half-life applied); one sale never is. */
+const USUAL_MIN = 1.5;
+
+/** Morning, afternoon, evening: the latte at 9 is not the tea at 18. */
+const daypart = (now: number) => {
+  const h = new Date(now).getHours();
+  return h < 12 ? 0 : h < 17 ? 1 : 2;
+};
+
+/** n: all day, d: by daypart; both halve with HALF_LIFE_MS since t. */
+type Usual = Record<string, { p: string; c: string[]; n: number; d: [number, number, number]; t: number }>;
+
+const usualKey = (productId: string, choices: readonly string[]) => `${productId}|${[...choices].sort().join(',')}`;
+
+/** After a paid order: every line with its options counts for «Как обычно». */
+export function recordUsual(lines: readonly Pick<Line, 'productId' | 'choices' | 'qty'>[], now = Date.now()): void {
+  const usual = read<Usual>(USUAL_KEY, {});
+  const part = daypart(now);
+  for (const l of lines) {
+    if (l.choices.length === 0) continue;
+    const key = usualKey(l.productId, l.choices);
+    const old = usual[key];
+    const k = old ? 0.5 ** ((now - old.t) / HALF_LIFE_MS) : 0;
+    const d: [number, number, number] = old ? [old.d[0] * k, old.d[1] * k, old.d[2] * k] : [0, 0, 0];
+    d[part] += l.qty;
+    usual[key] = { p: l.productId, c: [...l.choices], n: (old ? old.n * k : 0) + l.qty, d, t: now };
+  }
+  const kept = Object.entries(usual)
+    .sort(([, a], [, b]) => b.n * 0.5 ** ((now - b.t) / HALF_LIFE_MS) - a.n * 0.5 ** ((now - a.t) / HALF_LIFE_MS))
+    .slice(0, USUAL_KEEP);
+  write(USUAL_KEY, Object.fromEntries(kept));
+}
+
+export interface UsualPick {
+  product: ProductView;
+  choices: string[];
+  /** «M · Овсяное» */
+  options: string;
+  price: Minor;
+}
+
+/**
+ * «Как обычно»: the drinks this counter sold most lately with options that differ from
+ * the product's defaults (a plain cappuccino is one tap on its tile already), the current
+ * daypart counting double. Products gone from the menu or options that no longer fit are skipped.
+ */
+export function topUsual(products: readonly ProductView[], limit = 6, now = Date.now()): UsualPick[] {
+  const usual = read<Usual>(USUAL_KEY, {});
+  const byId = new Map(products.map((p) => [p.id, p]));
+  const part = daypart(now);
+  const out: { pick: UsualPick; score: number }[] = [];
+  for (const u of Object.values(usual)) {
+    const product = byId.get(u.p);
+    if (!product) continue;
+    const k = 0.5 ** ((now - u.t) / HALF_LIFE_MS);
+    if (u.n * k < USUAL_MIN) continue;
+    if (sameChoices(u.c, defaultChoices(optionsOf(product)))) continue;
+    const { priced } = tryPrice(product, u.c);
+    if (!priced) continue;
+    out.push({ pick: { product, choices: u.c, options: priced.optionNames.join(' · '), price: priced.unitPrice }, score: (u.n + 2 * u.d[part]) * k });
+  }
+  return out
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((x) => x.pick);
 }
 
 /** A parked order: the guest went for a card, the queue moves on. */

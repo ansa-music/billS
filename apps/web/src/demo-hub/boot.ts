@@ -10,7 +10,7 @@
  */
 import initSqlJs from 'sql.js';
 import wasmUrl from 'sql.js/dist/sql-wasm-browser.wasm?url';
-import { DEMO_KEYS, trialPageLicense, trialWithoutReloadLink } from '@bills/domain';
+import { cloudHeaders, DEMO_KEYS, trialPageLicense, trialWithoutReloadLink } from '@bills/domain';
 import { systemClock } from '@ts-hub/clock.ts';
 import { openDb } from '@ts-hub/db.ts';
 import { buildApp } from '@ts-hub/http/app.ts';
@@ -25,13 +25,14 @@ import { provideSqlJs } from './shims/sqlite.ts';
 import { clearSnapshot, loadSnapshot, nextResetAt, resetDemo, saveSnapshot } from './storage.ts';
 import { setupTrialClub, trialKey } from '@ts-hub/trial.ts';
 import type { TrialInfo, TrialRecord } from './trial-store.ts';
-import { loadTrial, newInstallId, saveTrial, setCurrentTrial, setTrialCheckNow, TRIAL_DAYS, updateCurrentTrial } from './trial-store.ts';
+import { loadTrial, newInstallId, saveTrial, setCurrentTrial, setTrialCheckNow, setTrialPersist, TRIAL_DAYS, updateCurrentTrial } from './trial-store.ts';
 import type { TrialTerms } from './trial-cloud.ts';
 import { startTrialCloud, TRIAL_CLOUD_URL } from './trial-cloud.ts';
 import { setWatchSoonHook } from './trial-watch.ts';
 import { installEventSource, installFetch } from './page-api.ts';
 import { installTrialLinkHost } from './link-host.ts';
 import { movedLicenseView, registerTrialSaverHalt } from './trial-move.ts';
+import { trialDirector } from './trial-director.ts';
 
 // watch-hub.ts and older callers import the page stand-ins from here.
 export { installEventSource, installFetch };
@@ -177,8 +178,9 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
       managerName: fresh?.managerName.trim() || 'Директор',
       managerKey: trialKey(),
       // With the TS cloud a new trial is a request until TS approves it; the installId is saved with the
-      // first save below, before trial-cloud.ts sends it.
-      ...(TRIAL_CLOUD_URL ? { status: 'pending' as const, installId: newInstallId() } : {}),
+      // first save below, before trial-cloud.ts sends it. The menu choice goes with the request: a request
+      // approved straight into the cloud cash desk gets the sample menu there too.
+      ...(TRIAL_CLOUD_URL ? { status: 'pending' as const, installId: newInstallId(), withMenu: fresh?.withMenu ?? true } : {}),
     };
   }
   setCurrentTrial(info);
@@ -215,12 +217,34 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
   }
   const saver = keepTrialSaved(db, hub, info);
   registerTrialSaverHalt(saver.halt);
-  installFetch(app, saver.changed);
+  const persist = (patch: Partial<TrialInfo>) => {
+    updateCurrentTrial(patch);
+    return saver.saveNow();
+  };
+  setTrialPersist(persist);
+  // The director's code for the platform owner (trial-director.ts): which code works now, TS's new one.
+  const director = trialDirector({ db, hub, info, persist });
+  hub.events.on('changed', (e) => {
+    if (e.kind === 'staff') director.check();
+  });
+  // Every request of this tab and of the linked devices: a key issued to the director is remembered.
+  const injector = {
+    inject: async (req: Parameters<typeof app.inject>[0]) => {
+      const res = await app.inject(req);
+      director.noted(req, res);
+      return res;
+    },
+  };
+  installFetch(injector, saver.changed);
   installEventSource(hub);
   // «Подключить устройство»: phones and tablets of the staff work through this tab's HUB (link-host.ts).
   if (!info.localOnly) {
     installTrialLinkHost({
-      inject: (req) => app.inject(req),
+      // The café moved to the cloud cash desk: every answer tells the device where it is now (LinkBanner.tsx).
+      inject: async (req) => {
+        const res = await injector.inject(req);
+        return info.cloud ? { ...res, headers: { ...res.headers, ...cloudHeaders(info.cloud) } } : res;
+      },
       changed: saver.changed,
       onChange: (listener) => {
         const l = (e: object) => listener(e);
@@ -243,16 +267,24 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
     info,
     timezone,
     onChange: (listener) => hub.events.on('changed', listener),
-    persist: (patch) => {
-      updateCurrentTrial(patch);
-      return saver.saveNow();
-    },
+    persist,
+    // The codes for the platform owner: the café code and the director's code that works now.
+    codes: () => ({
+      ...(info.cafeCode ? { cafeCode: info.cafeCode } : {}),
+      ...director.codes(),
+      ...(info.directorKeyRefused ? { directorKeyRefused: info.directorKeyRefused } : {}),
+    }),
+    installDirectorKey: (key) => director.install(key),
     applyTerms: (_terms: TrialTerms) => {
       void installTrialLicense(hub, movedLicenseView(info), Date.now()).catch((err: unknown) => console.warn('[trial] could not apply the new terms', err));
     },
     // «Касса перенесена на другой компьютер»: no new orders here (trial-move.ts).
     onMoved: () => {
       void installTrialLicense(hub, movedLicenseView(info), Date.now()).catch((err: unknown) => console.warn('[trial] could not lock the moved cash desk', err));
+    },
+    // «Касса переехала в облако»: no new orders here either (TrialCloud.tsx shows the way there).
+    onCloud: () => {
+      void installTrialLicense(hub, movedLicenseView(info), Date.now()).catch((err: unknown) => console.warn('[trial] could not lock the cash desk moved to the cloud', err));
     },
   });
   if (link) {

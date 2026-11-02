@@ -1,4 +1,14 @@
-import type { PlatformLoginRequest, PlatformLoginResponse, PlatformMe, PlatformNotifyTestResponse, TelegramLinkResponse, TelegramStatusView, TrialView } from '@bills/domain';
+import type {
+  PlatformLoginRequest,
+  PlatformLoginResponse,
+  PlatformMe,
+  PlatformNotifyTestResponse,
+  TelegramLinkResponse,
+  TelegramStatusView,
+  TrialCloudMoveState,
+  TrialsListResponse,
+  TrialView,
+} from '@bills/domain';
 import { telegramStartLink } from '@bills/domain';
 import { authenticatePlatformKey, createPlatformSession, deletePlatformSession, platformByToken } from '../access.ts';
 import { CloudError } from '../errors.ts';
@@ -20,10 +30,14 @@ import {
   extendTrial,
   listTrials,
   makeTrialPermanent,
+  markTrialPaid,
   rejectTrial,
   setTrialEndDate,
   trialSnapshot,
+  withCloudUrl,
 } from '../trial.ts';
+import { approveTrialInCloud, cloudMoveState, moveTrialToCloud, retryCloudTerms, startCloudMove, syncCloudTerms } from '../cloud-cafe.ts';
+import { issueDirectorKey, trialCodes } from '../trial-codes.ts';
 import type { EdgeContext } from './context.ts';
 import { signPendingQuietly } from './context.ts';
 import type { EdgeRequest, Schema } from './http.ts';
@@ -60,6 +74,24 @@ import { authUserId, corsHeaders } from './owner.ts';
  *   POST /platform/trials/:id/end                → TrialView (ended now)
  *   DELETE /platform/trials/:id                  → { deleted, venue } (pending / rejected / ended / expired; 409 TRIAL_RUNNING)
  *   GET  /platform/trials/:id/snapshot           → { snapshot: base64 SQLite, snapshotAt } (404 SNAPSHOT_NOT_FOUND)
+ *
+ * «Облачная касса» (apps/cloud/src/cloud-cafe.ts; CLOUD_HUB_URL + CLOUD_HUB_ADMIN_TOKEN, else 409 CLOUD_HUB_NOT_CONFIGURED;
+ * the Worker's refusals are 424 CLOUD_HUB_* with its words). GET /platform/trials also answers `cloudHub` {configured, url};
+ * every TrialView carries `cloud` (the café's code and link) once it is there. Extend, end date, permanent and end of a
+ * trial in the cloud also send the terms to its café (a failure stays on `cloud.termsError`, never thrown).
+ *   POST /platform/trials/:id/cloud/start        → TrialCloudMoveState (the on-line cash desk is asked for a fresh copy)
+ *   GET  /platform/trials/:id/cloud              → TrialCloudMoveState
+ *   POST /platform/trials/:id/cloud              { acceptOlder? } → TrialView (moved; 409 CLOUD_NOT_FRESH / CLOUD_BUSY,
+ *                                                404 SNAPSHOT_NOT_FOUND; a trial already there answers as it is)
+ *   POST /platform/trials/:id/cloud/terms        → TrialView («Повторить»: the terms to the cloud café again)
+ *   POST /platform/trials/:id/approve-cloud      → TrialCloudApproved (a request → a new cloud café; the director's key once)
+ *
+ * «Купили» (apps/cloud/src/trial.ts markTrialPaid, packages/domain/src/trial-paid.ts):
+ *   POST /platform/trials/:id/paid               TrialPaidRequest {until, amount?, note?} → TrialView (status 'paid'; the
+ *                                                amount and note stay in the cabinet; a cloud café gets active until then)
+ * The café's codes (apps/cloud/src/trial-codes.ts; the platform owner only, 403 for the support team; never logged):
+ *   GET  /platform/trials/:id/codes              → TrialCodesView (the café code, the director's code)
+ *   POST /platform/trials/:id/director-key       → TrialDirectorKeyIssued (a new director code, shown once)
  *
  * «Уведомления о заявках» (platform-notify.ts) — the signed-in person's own chats and devices:
  *   GET    /platform/telegram                    → TelegramStatusView (configured: false without TELEGRAM_BOT_TOKEN)
@@ -173,7 +205,42 @@ export async function handlePlatform(req: EdgeRequest, ctx: EdgeContext): Promis
     }
 
     if (m === 'GET' && path === '/platform/trials') {
-      return json(200, await listTrials(ctx.db, ctx.now(), await requirePlatform(req, ctx)), { ...cors, 'cache-control': 'no-store' });
+      const { trials } = await listTrials(ctx.db, ctx.now(), await requirePlatform(req, ctx));
+      const res: TrialsListResponse<TrialView> = {
+        trials: trials.map((t) => withCloudUrl(t, ctx.cloudHubUrl)),
+        cloudHub: { configured: ctx.cloudHub !== null, url: ctx.cloudHubUrl },
+      };
+      return json(200, res, { ...cors, 'cache-control': 'no-store' });
+    }
+
+    const cloud = /^\/platform\/trials\/([^/]+)\/(cloud|cloud\/start|cloud\/terms|approve-cloud)$/.exec(path);
+    if (cloud && (m === 'POST' || (m === 'GET' && cloud[2] === 'cloud'))) {
+      const me = await requirePlatform(req, ctx);
+      const id = cloud[1]!;
+      const now = ctx.now();
+      const url = (v: TrialView) => withCloudUrl(v, ctx.cloudHubUrl);
+      const stateUrl = (s: TrialCloudMoveState): TrialCloudMoveState => ({ ...s, cloud: withCloudUrl({ cloud: s.cloud }, ctx.cloudHubUrl).cloud });
+      const noStore = { ...cors, 'cache-control': 'no-store' };
+      if (m === 'GET') {
+        return json(200, stateUrl(await cloudMoveState(ctx.db, now, me, id)), noStore);
+      }
+      if (cloud[2] === 'cloud/start') {
+        await readOptionalJson(req);
+        return json(200, stateUrl(await startCloudMove(ctx.db, now, me, id, ctx.cloudHub)), noStore);
+      }
+      if (cloud[2] === 'cloud') {
+        const { view, imported } = await moveTrialToCloud(ctx.db, now, me, id, await readOptionalJson(req), ctx.cloudHub);
+        if (imported) ctx.log(`platform: ${me.name} (${me.id}) перевёл в облачную кассу пробную версию ${view.id} «${view.venue}»`);
+        return json(200, url(view), noStore);
+      }
+      if (cloud[2] === 'cloud/terms') {
+        await readOptionalJson(req);
+        return json(200, url(await retryCloudTerms(ctx.db, now, me, id, ctx.cloudHub)), noStore);
+      }
+      await readOptionalJson(req);
+      const res = await approveTrialInCloud(ctx.db, now, me, id, ctx.cloudHub);
+      ctx.log(`platform: ${me.name} (${me.id}) подтвердил заявку в облачной кассе: пробная версия ${res.trial.id} «${res.trial.venue}»`);
+      return json(200, { ...res, trial: url(res.trial) }, noStore);
     }
 
     const trialDelete = /^\/platform\/trials\/([^/]+)$/.exec(path);
@@ -184,7 +251,26 @@ export async function handlePlatform(req: EdgeRequest, ctx: EdgeContext): Promis
       return json(200, res, cors);
     }
 
-    const trial = /^\/platform\/trials\/([^/]+)\/(extend|end-date|end|snapshot|approve|reject|permanent)$/.exec(path);
+    const codes = /^\/platform\/trials\/([^/]+)\/(codes|director-key)$/.exec(path);
+    if (codes && ((m === 'GET' && codes[2] === 'codes') || (m === 'POST' && codes[2] === 'director-key'))) {
+      const me = await requirePlatform(req, ctx);
+      const now = ctx.now();
+      const noStore = { ...cors, 'cache-control': 'no-store' };
+      if (codes[2] === 'codes') {
+        const res = await trialCodes(ctx.db, now, me, codes[1]!);
+        // Who looked, never what they saw.
+        ctx.log(`platform: ${me.name} (${me.id}) посмотрел коды кофейни: пробная версия ${res.view.id} «${res.view.venue}»`);
+        return json(200, res.codes, noStore);
+      }
+      await readOptionalJson(req);
+      const res = await issueDirectorKey(ctx.db, now, me, codes[1]!, ctx.cloudHub);
+      ctx.log(
+        `platform: ${me.name} (${me.id}) выдал новый код директора (${res.applied === 'cloud' ? 'облачная касса' : 'касса получит при следующей связи'}): пробная версия ${res.trial.id} «${res.trial.venue}»`,
+      );
+      return json(200, { ...res, trial: withCloudUrl(res.trial, ctx.cloudHubUrl) }, noStore);
+    }
+
+    const trial = /^\/platform\/trials\/([^/]+)\/(extend|end-date|end|snapshot|approve|reject|permanent|paid)$/.exec(path);
     if (trial && ((m === 'POST' && trial[2] !== 'snapshot') || (m === 'GET' && trial[2] === 'snapshot'))) {
       const me = await requirePlatform(req, ctx);
       // A uuid needs no decoding; anything else is not a trial (404 from the lookup).
@@ -216,13 +302,20 @@ export async function handlePlatform(req: EdgeRequest, ctx: EdgeContext): Promis
           view = await makeTrialPermanent(ctx.db, now, me, id);
           did = 'сделал постоянной';
           break;
+        case 'paid':
+          view = await markTrialPaid(ctx.db, now, me, id, await readJson(req));
+          // The amount and the note are the platform's own: not even in the log.
+          did = `отметил «Купили»: оплачено до ${view.paid?.until ?? '?'}`;
+          break;
         default:
           view = await endTrial(ctx.db, now, me, id);
           did = `завершил ${new Date(view.endsAt).toISOString()}`;
       }
+      // A trial in the cloud cash desk: its café takes the new terms too (a failure shows on view.cloud.termsError).
+      if (view.cloud) view = await syncCloudTerms(ctx.db, ctx.now(), view.id, ctx.cloudHub);
       // The platform has no audit table: the action goes to the function's log with who did it.
       ctx.log(`platform: ${me.name} (${me.id}) ${did}: пробная версия ${view.id} «${view.venue}»`);
-      return json(200, view, cors);
+      return json(200, withCloudUrl(view, ctx.cloudHubUrl), cors);
     }
 
     // «Уведомления о заявках»: the signed-in person's own Telegram chats and Web Push devices.

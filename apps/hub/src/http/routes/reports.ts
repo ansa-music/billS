@@ -17,4 +17,23 @@ export function registerReportRoutes(app: FastifyInstance, hub: Hub): void {
     },
     async (req) => hub.reports.summary(req.query.date),
   );
+
+  const range = {
+    type: 'object',
+    properties: { from: { type: 'string', maxLength: 10 }, to: { type: 'string', maxLength: 10 } },
+  } as const;
+
+  // «Себестоимость и прибыль» and «Что продаётся» on «Отчёты»: the venue's money, for whoever sees
+  // the revenue of the shift there already (stats.view: the director, the administrator, the senior).
+  app.get<{ Querystring: { from?: string; to?: string } }>(
+    '/api/reports/profit',
+    { preHandler: guard('stats.view'), schema: { querystring: range } },
+    async (req) => hub.reports.profit(req.query.from, req.query.to),
+  );
+
+  app.get<{ Querystring: { from?: string; to?: string } }>(
+    '/api/reports/sales',
+    { preHandler: guard('stats.view'), schema: { querystring: range } },
+    async (req) => hub.reports.sales(req.query.from, req.query.to),
+  );
 }

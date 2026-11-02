@@ -2,6 +2,7 @@ import type {
   AlertView,
   BusinessType,
   CashMovementView,
+  CheckCounterOrderView,
   CheckItemView,
   CheckPaymentView,
   CheckStatus,
@@ -16,6 +17,7 @@ import type {
   PauseSpan,
   PaymentMethod,
   PowerView,
+  Role,
   SessionStatus,
   SessionView,
   ShiftLedger,
@@ -28,6 +30,7 @@ import type {
 import {
   calculateChargeWithPauses,
   checkTotals,
+  isRole,
   minorPerMajor,
   normalizeClubSettings,
   prepaidDeadline,
@@ -523,6 +526,18 @@ interface CheckItemRow {
   started_at: number | null;
   stopped_at: number | null;
   played_seconds: number | null;
+  /** ORDER lines: the chosen options of the bar order line (JSON array), for the receipt. */
+  option_names: string | null;
+}
+
+/** A counter order on a check (coffee shop): the receipt prints its number, «здесь / с собой» and the guest. */
+interface CheckCounterRow {
+  id: string;
+  check_id: string;
+  counter_number: number;
+  service: CheckCounterOrderView['service'];
+  guest_name: string | null;
+  status: CheckCounterOrderView['status'];
 }
 
 export interface PaymentRow {
@@ -579,7 +594,13 @@ function groupLines(items: CheckItemRow[]): CheckItemRow[] {
   return out;
 }
 
-function toCheckView(row: CheckRow, items: CheckItemRow[], payments: PaymentRow[]): CheckView {
+function toCheckView(
+  row: CheckRow,
+  items: CheckItemRow[],
+  payments: PaymentRow[],
+  counter: CheckCounterRow[] = [],
+  roles: ReadonlyMap<string, Role> = new Map(),
+): CheckView {
   const discount =
     row.discount_kind !== null && row.discount_value !== null
       ? { kind: row.discount_kind, value: row.discount_value }
@@ -608,6 +629,7 @@ function toCheckView(row: CheckRow, items: CheckItemRow[], payments: PaymentRow[
         startedAt: i.started_at,
         stoppedAt: i.stopped_at,
         playedSeconds: i.played_seconds,
+        ...withOptions(i.option_names),
       }),
     ),
     discount: discount && { ...discount, reason: row.discount_reason ?? '', by: row.discount_by ?? '' },
@@ -622,7 +644,46 @@ function toCheckView(row: CheckRow, items: CheckItemRow[], payments: PaymentRow[
     createdBy: row.created_by,
     closedAt: row.closed_at,
     updatedAt: row.updated_at,
+    // Coffee shop checks only (they carry counter orders): billiard check views stay as they were.
+    ...(counter.length > 0
+      ? {
+          counter: counter.map((o) => ({
+            id: o.id,
+            number: o.counter_number,
+            service: o.service,
+            guestName: o.guest_name,
+            status: o.status,
+          })),
+          actorRoles: Object.fromEntries(
+            [...new Set([row.created_by, ...payments.map((p) => p.actor)])].flatMap((name) => {
+              const role = roles.get(name);
+              return role ? [[name, role]] : [];
+            }),
+          ),
+        }
+      : {}),
   };
+}
+
+/** `optionNames` of a check line that has options; nothing for the rest (games, plain products, older lines). */
+function withOptions(raw: string | null | undefined): { optionNames?: string[] } {
+  const names = parseOptionNames(raw);
+  return names.length ? { optionNames: names } : {};
+}
+
+const counterSchema = new WeakMap<Db, boolean>();
+
+/**
+ * Counter orders and option names exist from migration 014 on. A HUB always migrates before it
+ * serves, but tests run this code on an older schema to check the migration keeps old data.
+ */
+function hasCounterColumns(db: Db): boolean {
+  let known = counterSchema.get(db);
+  if (known === undefined) {
+    known = all<{ name: string }>(db, 'PRAGMA table_info(bar_orders)').some((c) => c.name === 'counter_number');
+    if (known) counterSchema.set(db, known);
+  }
+  return known;
 }
 
 /** Loads checks matching a condition over `checks c` (may end with ORDER BY). */
@@ -634,13 +695,16 @@ export function loadChecksWhere(db: Db, where: string, ...params: Param[]): Chec
   );
   if (rows.length === 0) return [];
   const ids = JSON.stringify(rows.map((r) => r.id));
+  const cafe = hasCounterColumns(db);
   const items = all<CheckItemRow & { extends_session_id?: string | null }>(
     db,
     `SELECT ci.*, COALESCE(ci.session_id, o.session_id) AS line_session_id,
-            COALESCE(s.table_id, o.table_id) AS table_id, s.started_at, s.stopped_at, s.played_seconds
+            COALESCE(s.table_id, o.table_id) AS table_id, s.started_at, s.stopped_at, s.played_seconds,
+            ${cafe ? 'oi.option_names' : 'NULL AS option_names'}
      FROM check_items ci
      LEFT JOIN table_sessions s ON s.id = ci.session_id
      LEFT JOIN bar_orders o ON o.id = ci.order_id
+     ${cafe ? 'LEFT JOIN bar_order_items oi ON oi.id = ci.order_item_id' : ''}
      WHERE ci.check_id IN (SELECT value FROM json_each(?)) ORDER BY ci.created_at, ci.rowid`,
     ids,
   );
@@ -664,11 +728,38 @@ export function loadChecksWhere(db: Db, where: string, ...params: Param[]): Chec
     'SELECT * FROM payments WHERE check_id IN (SELECT value FROM json_each(?)) ORDER BY at, rowid',
     ids,
   );
+  const counter = cafe
+    ? all<CheckCounterRow>(
+        db,
+        `SELECT id, check_id, counter_number, service, guest_name, status FROM bar_orders
+         WHERE check_id IN (SELECT value FROM json_each(?)) AND counter_number IS NOT NULL ORDER BY created_at, rowid`,
+        ids,
+      )
+    : [];
+  // «Бариста: Данияр» on a coffee shop receipt: the main role of the people named on its checks.
+  // Payments keep the name only; a renamed or unknown person prints as «Кассир».
+  const roles = new Map<string, Role>();
+  if (counter.length > 0) {
+    const names = new Set<string>();
+    for (const r of rows) if (counter.some((o) => o.check_id === r.id)) names.add(r.created_by);
+    for (const p of payments) if (counter.some((o) => o.check_id === p.check_id)) names.add(p.actor);
+    for (const s of all<{ name: string; role: string }>(
+      db,
+      `SELECT name, role FROM staff WHERE club_id = ? AND name IN (SELECT value FROM json_each(?))
+       ORDER BY deleted_at IS NOT NULL, is_active DESC, updated_at DESC`,
+      rows[0]!.club_id,
+      JSON.stringify([...names]),
+    )) {
+      if (!roles.has(s.name) && isRole(s.role)) roles.set(s.name, s.role);
+    }
+  }
   return rows.map((r) =>
     toCheckView(
       r,
       items.filter((i) => i.check_id === r.id),
       payments.filter((p) => p.check_id === r.id),
+      counter.filter((o) => o.check_id === r.id),
+      roles,
     ),
   );
 }

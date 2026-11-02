@@ -46,8 +46,14 @@ import type {
   TelegramLinkResponse,
   TelegramStatusView,
   TestPushResponse,
+  TrialCloudApproved,
+  TrialCloudMoveState,
+  TrialCodesView,
+  TrialDirectorKeyIssued,
   TrialEndDateRequest,
+  TrialPaidRequest,
   TrialRejectRequest,
+  TrialsListResponse,
   UpdateTariffsRequest,
   UpdateTariffsResponse,
 } from '@bills/domain';
@@ -647,8 +653,46 @@ export function issueManagerKey(companyId: string): Promise<IssuedLongKey> {
 
 // «Пробные версии»: browser trials of coffee shops that report to the cloud.
 
-export async function listTrials(): Promise<TrialView[]> {
-  return (await platformEdge<{ trials: TrialView[] }>('GET', '/platform/trials')).trials;
+export async function listTrials(): Promise<TrialsListResponse<TrialView>> {
+  const res = await platformEdge<Partial<TrialsListResponse<TrialView>>>('GET', '/platform/trials');
+  // An older function answers without `cloudHub`: the cloud cash desk is then not connected.
+  return { trials: res.trials ?? [], cloudHub: res.cloudHub ?? { configured: false, url: null } };
+}
+
+// «Облачная касса» (packages/domain/src/cloud-cafe.ts).
+
+export function startTrialCloudMove(id: string): Promise<TrialCloudMoveState> {
+  return platformEdge<TrialCloudMoveState>('POST', `/platform/trials/${enc(id)}/cloud/start`, {});
+}
+
+export function trialCloudMoveState(id: string): Promise<TrialCloudMoveState> {
+  return platformEdge<TrialCloudMoveState>('GET', `/platform/trials/${enc(id)}/cloud`);
+}
+
+export function moveTrialToCloud(id: string, acceptOlder: boolean): Promise<TrialView> {
+  return platformEdge<TrialView>('POST', `/platform/trials/${enc(id)}/cloud`, acceptOlder ? { acceptOlder: true } : {});
+}
+
+export function retryTrialCloudTerms(id: string): Promise<TrialView> {
+  return platformEdge<TrialView>('POST', `/platform/trials/${enc(id)}/cloud/terms`, {});
+}
+
+export function approveTrialInCloud(id: string): Promise<TrialCloudApproved<TrialView>> {
+  return platformEdge<TrialCloudApproved<TrialView>>('POST', `/platform/trials/${enc(id)}/approve-cloud`, {});
+}
+
+// «Купили» (packages/domain/src/trial-paid.ts) and the café's codes (trial-codes.ts).
+
+export function markTrialPaid(id: string, body: TrialPaidRequest): Promise<TrialView> {
+  return platformEdge<TrialView>('POST', `/platform/trials/${enc(id)}/paid`, body);
+}
+
+export function fetchTrialCodes(id: string): Promise<TrialCodesView> {
+  return platformEdge<TrialCodesView>('GET', `/platform/trials/${enc(id)}/codes`);
+}
+
+export function issueDirectorKey(id: string): Promise<TrialDirectorKeyIssued<TrialView>> {
+  return platformEdge<TrialDirectorKeyIssued<TrialView>>('POST', `/platform/trials/${enc(id)}/director-key`, {});
 }
 
 export function extendTrial(id: string, days: number): Promise<TrialView> {

@@ -22,6 +22,7 @@ import { chime, COUNTER_POLL_MS, fetchCounterOrders, formatAge, moveCounterStage
 import type { CancelTarget } from './CounterCancelDialog.tsx';
 import { CounterCancelDialog } from './CounterCancelDialog.tsx';
 import { useAudioUnlock, useFillHeight, useScreenAwake } from './staff-device.ts';
+import { StockStrip } from './StockStrip.tsx';
 import { StopListDialog } from './StopList.tsx';
 import './cafe.css';
 
@@ -283,6 +284,7 @@ export function BaristaPage() {
           </button>
         </p>
       )}
+      <StockStrip />
       {blocked && <p className="blocked-note">{blocked}</p>}
       {!data && error && <p className="kds-hint kds-hint-wake">Нет данных: {error}</p>}
 

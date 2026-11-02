@@ -1,22 +1,24 @@
 import { useState, useSyncExternalStore } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { TRIAL_DELETED_MESSAGE } from '@bills/domain';
+import { TRIAL_DELETED_MESSAGE, trialCloudScreen } from '@bills/domain';
 import { BrandMark } from '../BrandMark.tsx';
 import { Field } from '../ui.tsx';
 import type { NewTrial } from '../demo-hub/boot.ts';
 import type { TrialInfo } from '../demo-hub/trial-store.ts';
 import {
   currentTrial,
+  downloadBackup,
   subscribeTrial,
   TRIAL_DAYS,
   trialAwaiting,
   trialCheckNow,
   trialLastCheck,
-  trialPermanent,
+  trialFull,
   trialVersion,
 } from '../demo-hub/trial-store.ts';
 import type { TrialEntryMode } from './TrialSignIn.tsx';
 import { TrialEntry } from './TrialSignIn.tsx';
+import { CloudMovedScreen, TrialCloudReady, useCloudScreenDismissed } from './TrialCloud.tsx';
 import '../onboarding/onboarding.css';
 import './trial.css';
 
@@ -151,10 +153,13 @@ export function TrialReady({
  * In front of the cash desk: while the request waits for TS — «Заявка отправлена»; when TS turned it
  * down — «Заявка отклонена»; when TS approved it (or the trial is new without the TS cloud) — «Готово»
  * with the director's code once; then the cash desk itself. It follows the trial store, so the cash desk
- * opens by itself the moment the terms say «approved»: no reload, nothing typed again.
+ * opens by itself the moment the terms say «approved»: no reload, nothing typed again. Once the café is in
+ * the cloud cash desk (TrialCloud.tsx): «Ваша касса готова — она в облаке» for a request approved straight
+ * into it, «Касса переехала в облако» for a cash desk that moved there (until «Посмотреть старые данные»).
  */
 export function TrialGate({ fresh, children }: { fresh: boolean; children: ReactNode }) {
   useSyncExternalStore(subscribeTrial, trialVersion);
+  const [cloudDismissed, dismissCloud] = useCloudScreenDismissed();
   const info = currentTrial();
   const waiting = info ? trialAwaiting(info) : false;
   const [ready, setReady] = useState(fresh);
@@ -169,6 +174,9 @@ export function TrialGate({ fresh, children }: { fresh: boolean; children: React
     }
   }
   if (!info) return <>{children}</>;
+  const cloudScreen = trialCloudScreen(info.cloud, cloudDismissed);
+  if (cloudScreen === 'ready') return <TrialCloudReady info={info} />;
+  if (cloudScreen === 'moved' && info.cloud) return <CloudMovedScreen cloud={info.cloud} onDownload={downloadBackup} onDismiss={dismissCloud} />;
   if (waiting) return info.status === 'rejected' ? <TrialRejected info={info} /> : <TrialPending info={info} />;
   if (ready) {
     return (
@@ -176,7 +184,7 @@ export function TrialGate({ fresh, children }: { fresh: boolean; children: React
         venue={info.venue}
         managerKey={info.managerKey}
         approved={approved}
-        permanent={trialPermanent(info)}
+        permanent={trialFull(info)}
         onContinue={() => setReady(false)}
       />
     );

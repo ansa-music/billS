@@ -1,0 +1,24 @@
+<!-- @dsCard group="Касса · статусы" height=60 -->
+<!doctype html>
+<html lang="ru" data-surface="pos">
+<head>
+<meta charset="utf-8">
+<title>PosTag</title>
+<style>
+  body { padding: 16px; }
+
+</style>
+</head>
+<body>
+<script>(function(h,m){h.setAttribute('data-surface','pos');function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{dark:'pos-dark',light:'pos-light'});</script>
+<div class="row wrap">
+  <span class="tag">обычный</span>
+  <span class="tag tag-ok">открыта</span>
+  <span class="tag tag-ok">в зале</span>
+  <span class="tag tag-warn">частично</span>
+  <span class="tag tag-warn">ручной режим</span>
+  <span class="tag tag-danger">нет в наличии</span>
+  <span class="tag tag-muted">выключен</span>
+</div>
+</body>
+</html>
