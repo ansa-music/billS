@@ -1,0 +1,1062 @@
+/* «Касса» on phones, tablets and touch screens. Loaded after cafe.css (Pos.tsx) and refines it:
+ *
+ *  - every size: touch targets of 48 px, tabular numbers, «Отправить бариста» and «Без оплаты —
+ *    счёт потом» as real buttons, the «Заказ 17 отправлен бариста» card;
+ *  - split (`.pos[data-layout='split']`, 768 px and wider): menu and order side by side, the page
+ *    fills the window — a tablet in portrait gets the same two panes as a laptop;
+ *  - phone (`.pos[data-layout='phone']`, under 768 px): one hand. The menu scrolls with the page;
+ *    the chips of the drink just added, the categories with search and the bar with the total and
+ *    the one button sit at the bottom on the app's tab bar (`--pos-nav-h`, measured in Pos.tsx);
+ *    the order opens as a bottom sheet whose total and buttons never scroll away.
+ *
+ * Tokens only (light and dark themes), dvh and safe-area insets for the browser bars.
+ */
+
+/* ── Every size ─────────────────────────────────────────────────────────── */
+
+.pos :is(
+    .pos-total strong,
+    .pos-paybar strong,
+    .pos-tile-price,
+    .pos-line-sum,
+    .pos-qty output,
+    .pos-count,
+    .pos-held-chip strong,
+    .pos-pay-due strong,
+    .pos-cash-btn,
+    .pos-display-sum,
+    .pos-display-change,
+    .pos-flash-number,
+    .pos-flash-change,
+    .pos-flash-sub,
+    .pos-orderbar-text,
+    .pos-orderbar-count,
+    .pos-opts-title small
+  ) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Fingers, not a mouse: 48 px for everything a finger presses. */
+.pos .pos-tool,
+.pos .pos-back {
+  min-height: 48px;
+}
+
+.pos .pos-back {
+  min-width: 48px;
+}
+
+.pos .pos-qty-btn {
+  min-width: 48px;
+  min-height: 48px;
+}
+
+.pos .pos-opt,
+.pos .pos-seg button,
+.pos .pos-opt-text,
+.pos .pos-held-chip,
+.pos .pos-opts-collapse,
+.pos .pos-flash-actions .btn,
+.pos .pos-tab {
+  min-height: 48px;
+}
+
+.pos .pos-failure-x {
+  min-width: 48px;
+  min-height: 48px;
+}
+
+/* «Наличные» never loses a letter to the button's padding. */
+.pos .pos-express-btn {
+  padding-inline: var(--space-1);
+}
+
+.pos .pos-search,
+.pos .pos-mult,
+.pos .ts-design-toggle {
+  min-height: 48px;
+}
+
+/* The menu pane is a container: its toolbar adapts to the pane, not to the window. */
+.pos .pos-menu {
+  container: pos-menu / inline-size;
+}
+
+@container pos-menu (max-width: 560px) {
+  .pos .ts-design-toggle {
+    min-width: 48px;
+    justify-content: center;
+  }
+
+  .pos .ts-design-toggle-text {
+    display: none;
+  }
+}
+
+/*
+ * Narrow order columns. Up to 330 px (1024 landscape, 960 split): the sizes show their price
+ * under the name, «Наличные / Карта / QR» drop the key hints and keep one row. Up to 300 px
+ * (tablet portrait, the phone sheet): the line's name and options get the whole width with
+ * − 1 + and the sum on the row under them, like a receipt; up to 280 px «Наличные» takes a row
+ * of its own above «Карта» and «QR», so no word is ever cut.
+ */
+@container (max-width: 330px) {
+  /* «M +200 ₸»: the price under the size, so three sizes fit the column. */
+  .pos-opt-seg .pos-opt {
+    flex-direction: column;
+    gap: 0;
+    padding: 2px 6px;
+    line-height: 1.15;
+  }
+
+  .pos .pos-express-btn {
+    padding-inline: var(--space-1);
+  }
+
+  .pos .pos-express-btn .pos-kbd {
+    display: none;
+  }
+}
+
+/*
+ * Up to 340 px (1024 landscape; 1366 keeps its three columns): the name on the left, the sum
+ * over − 1 + on the right, so the name keeps ~150 px. The phone sheet does the same (below).
+ */
+@container (max-width: 340px) {
+  .pos-lines li.pos-line {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'main sum'
+      'main qty';
+    align-items: center;
+    row-gap: 2px;
+  }
+
+  .pos-line-main {
+    grid-area: main;
+  }
+
+  .pos-line .pos-qty {
+    grid-area: qty;
+    justify-self: end;
+  }
+
+  .pos-line .pos-line-sum {
+    grid-area: sum;
+    display: block;
+    justify-self: end;
+  }
+
+  .pos-line .pos-opts {
+    grid-column: 1 / -1;
+  }
+
+  .pos-line-name {
+    white-space: normal;
+  }
+}
+
+@container (max-width: 300px) {
+  .pos-lines li.pos-line {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'main main'
+      'qty sum';
+    align-items: center;
+    row-gap: 2px;
+  }
+
+  .pos-line-main {
+    grid-area: main;
+  }
+
+  .pos-line .pos-qty {
+    grid-area: qty;
+    justify-self: start;
+  }
+
+  .pos-line .pos-line-sum {
+    grid-area: sum;
+    display: block;
+    justify-self: end;
+  }
+
+  .pos-line .pos-opts {
+    grid-column: 1 / -1;
+  }
+
+  .pos-line-name {
+    white-space: normal;
+  }
+
+  /* «Здесь / С собой» a little slimmer: «Имя гостя» stays readable next to it. */
+  .pos .pos-seg button {
+    padding: 0 var(--space-2);
+  }
+
+  .pos input.pos-guest {
+    padding: 0 var(--space-2);
+  }
+}
+
+@container (max-width: 280px) {
+  /* «Итого» sits right above: the button keeps its words, the sum goes. */
+  .pos .pos-sendbar strong {
+    display: none;
+  }
+
+  .pos .pos-sendbar {
+    justify-content: center;
+  }
+
+  .pos-express {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pos-express-btn[data-method='CASH'] {
+    grid-column: 1 / -1;
+  }
+
+  .pos .pos-express-btn {
+    min-height: 56px;
+    font-size: var(--fs-lg);
+  }
+}
+
+/* Tablets in landscape (1024, 1280): a wider order column, so a line's name is never squeezed. */
+@media (min-width: 961px) and (max-width: 1365px) {
+  .pos[data-layout='split'] .pos-grid {
+    grid-template-columns: minmax(0, 1fr) clamp(360px, 34vw, 420px);
+  }
+
+  /* …and three columns of tiles at 1024 instead of two oversized ones. */
+  .pos[data-layout='split'] .pos-tiles {
+    grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr));
+    gap: 10px;
+  }
+}
+
+.pos .pos-opt-text {
+  font-size: var(--fs-base);
+}
+
+/* Search: a clear button once something is typed (the native one is hidden). */
+.pos-search-clear {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  margin-right: calc(-1 * var(--space-2));
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.pos-search-clear:active {
+  background: var(--surface-3);
+}
+
+/* Without money (a waiter, or no shift yet): one big button sends the order to the barista. */
+.pos .pos-sendbar {
+  box-shadow: 0 10px 24px color-mix(in oklab, var(--accent) 30%, transparent);
+}
+
+.pos .pos-sendbar {
+  gap: var(--space-2);
+  padding-inline: var(--space-4);
+}
+
+.pos .pos-sendbar span {
+  min-width: 0;
+  overflow: hidden;
+  font-size: clamp(var(--fs-base), 5cqi, var(--fs-xl));
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pos .pos-sendbar strong {
+  flex: none;
+  font-size: clamp(var(--fs-lg), 6cqi, var(--fs-2xl));
+}
+
+.pos-send-note {
+  margin: calc(-1 * var(--space-1)) 0 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Payment view: «Без оплаты — счёт потом» is a button you can see, not a footnote. */
+.pos-later {
+  display: grid;
+  gap: 2px;
+  min-height: 60px;
+  padding: var(--space-2) var(--space-4);
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-lg);
+  font-weight: 750;
+  text-align: center;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.pos-later small {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.pos-later:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.pos-later:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.pos-later:disabled,
+.pos-other-sum:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pos .pos-pay-extra .check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 48px;
+}
+
+.pos .pos-pay-extra .check input {
+  width: 22px;
+  height: 22px;
+}
+
+.pos-other-sum {
+  min-height: 52px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* «Заказ 17 отправлен бариста». */
+.pos-flash-num,
+.pos-flash-info {
+  display: contents;
+}
+
+.pos-flash-sent {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+
+.pos-flash-sent[data-ok] {
+  color: var(--accent-ink);
+}
+
+.pos-flash-later {
+  color: var(--warn);
+  font-weight: 650;
+}
+
+/* The comment field takes its own row under the chips. */
+.pos-opts .pos-opt-row > .pos-opt-text {
+  width: 100%;
+  margin-top: var(--space-1);
+}
+
+/* ── Split: menu and order side by side, 768–960 px (wider: cafe.css) ───── */
+
+@media (min-width: 768px) and (max-width: 960px) {
+  .shell-main:has(> .content > .pos[data-layout='split']) {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .shell-main:has(> .content > .pos[data-layout='split']) > .content {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    padding: 12px 16px 16px;
+  }
+
+  .shell-main:has(> .content > .pos[data-layout='split']) > .pwa-banner,
+  .shell-main:has(> .content > .pos[data-layout='split']) > .license-banner {
+    margin: 12px 16px 0;
+  }
+
+  .pos[data-layout='split'] {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .pos[data-layout='split'] .pos-grid {
+    flex: 1;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) clamp(280px, 42%, 360px);
+    grid-template-rows: minmax(0, 1fr);
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .pos[data-layout='split'] .pos-menu {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    grid-auto-rows: max-content;
+    padding: 0 4px 8px 0;
+    scrollbar-width: thin;
+  }
+
+  .pos[data-layout='split'] .pos-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    padding-bottom: 2px;
+    background: var(--bg);
+  }
+
+  .pos[data-layout='split'] .pos-tabs {
+    position: sticky;
+    top: 50px;
+    z-index: 2;
+    background: var(--bg);
+    box-shadow: 0 -10px 0 var(--bg);
+  }
+
+  .pos[data-layout='split'] .pos-tiles {
+    grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr));
+    gap: 10px;
+  }
+
+  .pos[data-layout='split'] .pos-tile {
+    min-height: 112px;
+    padding: 14px;
+  }
+
+  .pos[data-layout='split'] .pos-side {
+    position: relative;
+    min-height: 0;
+    display: flex;
+  }
+
+  .pos[data-layout='split'] .pos-side .pos-order {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
+    padding: 14px;
+  }
+
+  .pos[data-layout='split'] .pos-lines-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .pos[data-layout='split'] .pos-pay {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .pos[data-layout='split'] .pos-foot {
+    flex: none;
+  }
+
+  /* A narrow column: «Отложить» and «Очистить» stay on the header row, the name gets the width. */
+  .pos[data-layout='split'] .pos-order-head h2 {
+    font-size: var(--fs-lg);
+  }
+
+  .pos[data-layout='split'] .pos-tool {
+    padding: 0 var(--space-2);
+  }
+
+  .pos[data-layout='split'] .pos-express-btn {
+    min-height: 64px;
+  }
+}
+
+/* ── Phone: one hand, everything important under the thumb ──────────────── */
+
+.pos-dockbar {
+  display: none;
+}
+
+.pos[data-layout='phone'] {
+  /* The dock's height (measured): the last tiles scroll clear of it. */
+  --pos-dock-gap: 8px;
+}
+
+.pos[data-layout='phone'] .pos-menu {
+  padding-bottom: calc(var(--pos-dock-h, 150px) + var(--pos-dock-gap));
+}
+
+/* The top toolbar scrolls away with the menu; the strip at the bottom has search too. */
+.pos[data-layout='phone'] .pos-toolbar {
+  position: static;
+}
+
+.pos[data-layout='phone'] .pos-search,
+.pos[data-layout='phone'] .pos-mult {
+  min-height: 48px;
+}
+
+.pos[data-layout='phone'] .pos-tiles {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pos[data-layout='phone'] .pos-tile {
+  min-height: 108px;
+  padding: 12px;
+}
+
+.pos[data-layout='phone'] .pos-tile-price {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.pos[data-layout='phone'] .pos-dockbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  /* Right on the app's tab bar; on the bare screen edge (no tab bar) the home bar is kept clear. */
+  bottom: var(--pos-nav-h, calc(65px + env(safe-area-inset-bottom)));
+  z-index: 29;
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) calc(var(--space-2) + max(0px, env(safe-area-inset-bottom) - var(--pos-nav-h, 0px)));
+  padding-left: max(var(--space-2), env(safe-area-inset-left));
+  padding-right: max(var(--space-2), env(safe-area-inset-right));
+  border-top: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg) 92%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 -8px 24px rgb(0 0 0 / 0.12);
+}
+
+/* Under the open order: keeps its size (no jump of the page), just not shown. */
+.pos[data-layout='phone'] .pos-dockbar[data-hidden] {
+  visibility: hidden;
+}
+
+/* Categories and search at the bottom. */
+.pos-catbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.pos-catbar-search {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.pos-catbar-search[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.pos[data-layout='phone'] .pos-catbar .pos-tabs {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0 2px;
+  background: transparent;
+}
+
+.pos[data-layout='phone'] .pos-catbar .pos-tab {
+  padding-inline: 16px;
+  box-shadow: none;
+  font-size: var(--fs-base);
+}
+
+/* The bar: what is in the order and the one button. */
+.pos-orderbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+}
+
+.pos-orderbar-sum {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 56px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.pos-orderbar-sum:disabled {
+  border-color: var(--border);
+  cursor: default;
+}
+
+.pos-orderbar-count {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--fs-md);
+  font-weight: 800;
+  animation: pos-bump 0.24s var(--ease);
+}
+
+.pos-orderbar-sum:disabled .pos-orderbar-count {
+  background: var(--surface-3);
+  color: var(--text-2);
+  animation: none;
+}
+
+.pos-orderbar-text {
+  display: grid;
+  min-width: 0;
+  line-height: 1.15;
+}
+
+.pos-orderbar-text strong {
+  overflow: hidden;
+  font-size: var(--fs-xl);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pos-orderbar-sum:disabled .pos-orderbar-text strong {
+  color: var(--text-2);
+  font-size: var(--fs-base);
+  font-weight: 700;
+}
+
+.pos-orderbar-text small {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pos-orderbar-up {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-2);
+  transform: rotate(180deg);
+}
+
+.pos-orderbar-go {
+  min-width: 128px;
+  min-height: 56px;
+  padding: 0 var(--space-5);
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--fs-lg);
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: manipulation;
+  box-shadow: 0 6px 16px color-mix(in oklab, var(--accent) 35%, transparent);
+}
+
+.pos-orderbar-go:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.pos-orderbar-go:disabled {
+  opacity: 0.45;
+}
+
+@keyframes pos-bump {
+  50% {
+    transform: scale(1.25);
+  }
+}
+
+/* The drink's chips, docked over the bar: no dialog, the menu stays usable above. */
+.pos-dockbar .pos-opts[data-docked] {
+  max-height: min(46dvh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  gap: 10px;
+  padding: 0 var(--space-3) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: none;
+  animation: pos-dock-up var(--dur) var(--ease);
+}
+
+.pos-dockbar .pos-opts-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  background: var(--surface);
+  font-size: var(--fs-base);
+}
+
+.pos-opts-title {
+  display: grid;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.pos-opts-title strong {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--fs-base);
+  line-height: 1.2;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: break-word;
+}
+
+.pos-opts-title small {
+  color: var(--text-2);
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+
+.pos-dockbar .pos-opts-done {
+  min-height: 48px;
+  padding: 0 var(--space-3);
+}
+
+/* A slimmer − 1 + in the head: the drink's name keeps its width. */
+.pos-dockbar .pos-opts-head .pos-qty {
+  gap: 0;
+  padding: 2px;
+}
+
+.pos-dockbar .pos-opts-head .pos-qty output {
+  min-width: 28px;
+}
+
+/* One row per group, its name on the left: swipe sideways for more, the fade says there is more. */
+.pos-dockbar .pos-opt-row {
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.pos-dockbar .pos-opt-label {
+  font-size: 11px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.pos-dockbar .pos-note-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.pos-dockbar .pos-opt-row > .pos-opt-text {
+  grid-column: 1 / -1;
+}
+
+.pos-dockbar .pos-opt-chips {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  margin-right: calc(-1 * var(--space-3));
+  padding-right: var(--space-3);
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
+}
+
+.pos-dockbar .pos-note-row .pos-opt-chips {
+  margin-left: calc(-1 * var(--space-3));
+  padding-left: var(--space-3);
+}
+
+.pos-dockbar .pos-opt-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.pos-dockbar .pos-opt {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* «Заказ 17 отправлен бариста»: a card over the bar; the next order can be typed at once. */
+.pos-dockbar .pos-flash[data-docked] {
+  position: static;
+  inset: auto;
+  display: block;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  animation: pos-dock-up var(--dur) var(--ease);
+}
+
+.pos-dockbar .pos-flash[data-docked] .pos-flash-card {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  justify-items: stretch;
+  gap: var(--space-1) var(--space-4);
+  max-width: none;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-color: var(--accent);
+  border-radius: var(--radius);
+  box-shadow: none;
+  text-align: left;
+}
+
+.pos-dockbar .pos-flash[data-state='failed'] .pos-flash-card {
+  grid-template-columns: minmax(0, 1fr);
+  border-color: var(--danger);
+}
+
+.pos-dockbar .pos-flash-num {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+}
+
+.pos-dockbar .pos-flash-info {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pos-dockbar .pos-flash-label {
+  font-size: var(--fs-sm);
+}
+
+.pos-dockbar .pos-flash-number {
+  font-size: 56px;
+}
+
+.pos-dockbar .pos-flash-sent {
+  justify-content: flex-start;
+  font-size: var(--fs-xl);
+  font-weight: 800;
+}
+
+.pos-dockbar .pos-flash-change {
+  justify-self: start;
+  margin-top: var(--space-1) !important;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--fs-2xl);
+}
+
+.pos-dockbar .pos-flash-change[data-zero] {
+  font-size: var(--fs-base);
+}
+
+.pos-dockbar .pos-flash-actions {
+  grid-column: 1 / -1;
+  margin-top: var(--space-1);
+}
+
+.pos-dockbar .pos-flash-actions .btn {
+  flex: 1;
+}
+
+@keyframes pos-dock-up {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+}
+
+/* The open order: a bottom sheet; its total and buttons stay, the lines scroll. */
+.pos[data-layout='phone'] .pos-side[data-open] .pos-order {
+  max-height: calc(100dvh - max(env(safe-area-inset-top), 16px) - 16px);
+  padding: var(--space-5) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom));
+  padding-left: max(var(--space-4), env(safe-area-inset-left));
+  padding-right: max(var(--space-4), env(safe-area-inset-right));
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  gap: var(--space-2);
+}
+
+/* The grip: says «pull me down» (the chevron and a tap outside close the sheet). */
+.pos[data-layout='phone'] .pos-side[data-open] .pos-order::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  width: 40px;
+  height: 4px;
+  margin-left: -20px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+.pos[data-layout='phone'] .pos-order-head {
+  padding-bottom: var(--space-2);
+}
+
+.pos[data-layout='phone'] .pos-side[data-open] .pos-pay {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  gap: var(--space-3);
+  padding-bottom: var(--space-2);
+}
+
+.pos[data-layout='phone'] .pos-lines-wrap {
+  overscroll-behavior: contain;
+}
+
+/* Lines: the name on the left, the sum over − 1 + on the right; edge to edge. */
+.pos[data-layout='phone'] .pos-lines li.pos-line {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'main sum'
+    'main qty';
+  align-items: center;
+  row-gap: 2px;
+  padding: var(--space-2) 0;
+}
+
+.pos[data-layout='phone'] .pos-line-main {
+  grid-area: main;
+}
+
+.pos[data-layout='phone'] .pos-line .pos-qty {
+  grid-area: qty;
+  justify-self: end;
+}
+
+.pos[data-layout='phone'] .pos-line .pos-opts {
+  grid-column: 1 / -1;
+}
+
+.pos[data-layout='phone'] .pos-line-name {
+  white-space: normal;
+}
+
+.pos[data-layout='phone'] .pos-line[data-selected] {
+  padding-inline: var(--space-2);
+}
+
+/* cafe.css hid the line's sum on phones; the waiter needs it to tell the guest. */
+.pos[data-layout='phone'] .pos-line .pos-line-sum {
+  grid-area: sum;
+  display: block;
+  justify-self: end;
+  font-size: var(--fs-base);
+}
+
+/* Footer: «Здесь / С собой» and the name on one row; the guest card under them. */
+.pos[data-layout='phone'] .pos-foot {
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+}
+
+.pos[data-layout='phone'] .pos-meta {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.pos[data-layout='phone'] .pos-meta .loy-anchor {
+  grid-column: 1 / -1;
+}
+
+.pos[data-layout='phone'] .pos-total {
+  padding-top: var(--space-2);
+}
+
+.pos[data-layout='phone'] .pos-total strong {
+  font-size: var(--fs-3xl);
+}
+
+.pos[data-layout='phone'] .pos-express-btn {
+  min-height: 60px;
+}
+
+.pos[data-layout='phone'] .pos-paybar {
+  min-height: 60px;
+}
+
+/* Payment on a phone: the sum, three big ways to pay, round sums, then «без оплаты». */
+.pos[data-layout='phone'] .pos-pay-due strong {
+  font-size: var(--fs-3xl);
+}
+
+.pos[data-layout='phone'] .pos-method {
+  min-height: 64px;
+}
+
+/* Three round sums in one row: no half-empty second row. */
+.pos[data-layout='phone'] .pos-pay-quick {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pos[data-layout='phone'] .pos-cash-btn {
+  min-height: 56px;
+  padding-inline: var(--space-2);
+  font-size: var(--fs-lg);
+}
+
+.pos[data-layout='phone'] .pos-cash-btn small {
+  font-size: var(--fs-xs);
+}
+
+.pos[data-layout='phone'] .pos-keypad button {
+  min-height: 56px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pos-orderbar-count,
+  .pos-dockbar .pos-opts[data-docked],
+  .pos-dockbar .pos-flash[data-docked] {
+    animation: none;
+  }
+}

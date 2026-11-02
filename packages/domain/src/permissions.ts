@@ -175,9 +175,11 @@ const BAR: readonly Role[] = [...M, 'admin', 'senior', 'cashier', 'bartender', '
 /** The stop list: whoever stands at the bar (a barista included) puts a product off and back. */
 const BAR_STOP: readonly Role[] = [...M, 'admin', 'senior', 'cashier', 'bartender'];
 /**
- * The counter of a coffee shop: the cashier, the barista and the waiter take orders, payment
- * included, and move them along. A coffee shop has no tables to serve, so without these a waiter
- * would see no page at all; the counter exists only in a coffee shop (`business.type = cafe`).
+ * The counter of a coffee shop: the cashier, the barista and the waiter take orders and move them
+ * along. A coffee shop has no tables to serve, so without these a waiter would see no page at all;
+ * the counter exists only in a coffee shop (`business.type = cafe`). Taking the money with the
+ * order also needs `payment.take` (the HUB checks both): a plain waiter sends the order to the
+ * barista without payment and the till settles the check later.
  */
 const COUNTER: readonly Role[] = [...CASH, 'bartender', 'waiter'];
 
@@ -209,7 +211,7 @@ export const ACTIONS = {
   // Stop list: put a product off the menu and back when it runs out («нет в наличии»).
   'catalog.stop': BAR_STOP,
   // Coffee shop counter (cafe.ts)
-  'counter.take': COUNTER, // take an order at the counter and its payment (POST /api/counter/orders)
+  'counter.take': COUNTER, // take an order at the counter (POST /api/counter/orders); its payment also needs payment.take
   'counter.stage': COUNTER, // move an order NEW → PREPARING → READY → ISSUED
   // Cancel (delete) a counter order or a coffee shop check: only the manager and the administrator.
   // Nothing is erased: the order stays CANCELLED with who and why, and shows in «Архив».

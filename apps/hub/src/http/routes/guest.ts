@@ -4,7 +4,7 @@ import { GUEST_REQUEST_KINDS, OPTION_CHOICES_MAX, OPTION_GROUPS_MAX, ORDER_MAX_L
 import { GuestService } from '../../guest.ts';
 import type { Hub } from '../../hub.ts';
 import { assertCan, emptyBody, guard, runCommand } from '../command.ts';
-import { createSchema as counterOrderSchema } from './counter.ts';
+import { assertCounterPayment, createSchema as counterOrderSchema } from './counter.ts';
 
 const id = { type: 'string', minLength: 1, maxLength: 100 } as const;
 
@@ -109,14 +109,17 @@ export function registerGuestRoutes(app: FastifyInstance, hub: Hub): GuestServic
   app.post<{ Params: { requestId: string }; Body: CreateCounterOrderRequest }>(
     '/api/guest-requests/:requestId/counter-order',
     { schema: { body: counterOrderSchema } },
-    async (req, reply) =>
-      runCommand(
+    async (req, reply) => {
+      assertCan(req, 'counter.take');
+      assertCounterPayment(req, req.body);
+      return runCommand(
         req,
         reply,
         hub,
         (actor) => ({ status: 201, body: guest.counterOrder(req.params.requestId, req.body, actor) }),
         'counter.take',
-      ),
+      );
+    },
   );
 
   // ── Manager: QR codes ─────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, RefObject } from 'react';
 import type {
   CounterService,
   CreateCounterOrderResponse,
@@ -67,10 +67,17 @@ import './cafe.css';
 import { EditGrid, lookStyle, TileBadge, TilePhoto } from './edit/EditGrid.tsx';
 import type { TileLook } from './edit/useTileLook.ts';
 import { ordered, useTileLook } from './edit/useTileLook.ts';
+// Last: phone, tablet and touch layout over the shared café styles.
+import './pos-touch.css';
 
 const HITS = 'hits';
 /** The «Заказ 17» card stays this long after the HUB confirmed, then the counter is ready for the next guest. */
 const FLASH_MS = 3000;
+/**
+ * Phone: the card sits over the bar and blocks nothing (the next drink can be tapped at once), so
+ * it stays longer — the waiter looks up from the guest and still reads «Заказ 17 отправлен бариста».
+ */
+const FLASH_DOCKED_MS = 6000;
 
 /** What the order card shows right after «Оплатить»: at once, before the HUB answers. */
 interface Flash {
@@ -105,6 +112,39 @@ function useMedia(query: string): boolean {
 const isTyping = (el: EventTarget | null) =>
   el instanceof HTMLElement && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
 
+/** Phones (a waiter on the floor): the order is a bottom sheet, categories and the pay button sit under the thumb. */
+const PHONE = '(max-width: 767px)';
+
+/**
+ * Phone: tells the stylesheet how tall the app's tab bar is (`--pos-nav-h`, 0 when there is none)
+ * and how tall the counter's own bottom dock is (`--pos-dock-h`), so the dock sits right on the
+ * tab bar and the last tiles scroll clear of both. Measured, not guessed: safe areas, a bigger
+ * system font or another tab bar all just work.
+ */
+function useBottomChrome(on: boolean, host: RefObject<HTMLElement | null>, dock: RefObject<HTMLElement | null>): void {
+  useLayoutEffect(() => {
+    const el = host.current;
+    if (!on || !el) return;
+    const nav = document.querySelector<HTMLElement>('.bottom-nav') ?? document.querySelector<HTMLElement>('nav[aria-label="Разделы"]');
+    const update = () => {
+      const navH = nav && getComputedStyle(nav).display !== 'none' ? nav.getBoundingClientRect().height : 0;
+      el.style.setProperty('--pos-nav-h', `${Math.round(navH)}px`);
+      el.style.setProperty('--pos-dock-h', `${Math.round(dock.current?.getBoundingClientRect().height ?? 0)}px`);
+    };
+    update();
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null;
+    if (nav) ro?.observe(nav);
+    if (dock.current) ro?.observe(dock.current);
+    window.addEventListener('resize', update);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', update);
+      el.style.removeProperty('--pos-nav-h');
+      el.style.removeProperty('--pos-dock-h');
+    };
+  }, [on, host, dock]);
+}
+
 /**
  * #/pos — «Касса» of a coffee shop. A tap on a drink adds it at once with the
  * usual options and opens its chips right next to the line; money is one more
@@ -119,7 +159,9 @@ export function PosPage() {
   const money = useCallback((a: Minor) => formatMoney(a, currency), [currency]);
   const desk = useDesk({ state, actor, refresh: hub.refresh, notify: hub.notify });
   const { catalog, error: catalogError } = useCachedCatalog(hub.version);
-  const narrow = useMedia('(max-width: 960px)');
+  const narrow = useMedia(PHONE);
+  const sectionRef = useRef<HTMLElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
   // «Редактировать дизайн»: the owner dresses the tiles in place; selling is paused meanwhile.
   const [designing, setDesigning] = useState(false);
   const tileLook = useTileLook();
@@ -166,11 +208,13 @@ export function PosPage() {
   const hueOf = useMemo(() => new Map(categories.map((c, i) => [c.id, categoryHue(i)])), [categories]);
   const hits = useMemo(() => topProducts(products), [products, hitsVersion]);
   const activeTab = tab === HITS || categories.some((c) => c.id === tab) ? tab : HITS;
+  // The field answers every key at once; the tiles follow a beat later (no jank on a slow phone).
+  const deferredQuery = useDeferredValue(query);
   const shown = useMemo(() => {
-    if (query.trim()) return searchProducts(products, query);
+    if (deferredQuery.trim()) return searchProducts(products, deferredQuery);
     if (activeTab === HITS) return hits;
     return products.filter((p) => p.categoryId === activeTab);
-  }, [query, products, activeTab, hits]);
+  }, [deferredQuery, products, activeTab, hits]);
 
   const available = useCallback(
     (p: ProductView) => Math.min(ORDER_MAX_QTY, p.stock === null ? ORDER_MAX_QTY : Math.max(0, p.stock - (pendingStock.get(p.id) ?? 0))),
@@ -216,8 +260,13 @@ export function PosPage() {
   const canOrder = canNow('counter.take');
   const canDesign = canNow('catalog.edit');
   const orderBlocked = blockedReason('counter.take');
+  // Money with the order needs `payment.take` too (the HUB checks it): a plain waiter sends the
+  // order to the barista and the till settles the check later. Without an open shift nobody takes
+  // money either. Then the screen offers «Отправить бариста» instead of pay buttons that do nothing.
+  const canTakeMoney = canNow('payment.take');
+  const payNow = canTakeMoney && !noShift;
   const canSend = online && canOrder && !empty && !broken;
-  const canPayNow = canSend && !noShift;
+  const canPayNow = canSend && payNow;
 
   const patchLines = (fn: (lines: Line[]) => Line[]) => setDraft((d) => ({ ...d, lines: fn(d.lines) }));
 
@@ -256,6 +305,8 @@ export function PosPage() {
       setSelected(options.length ? line.id : null);
     }
     if (query) setQuery('');
+    // Phone: the keyboard goes away, so the drink's chips and the total show at the bottom.
+    if (narrow && document.activeElement === searchRef.current) searchRef.current?.blur();
   };
   const tapRef = useRef(tapProduct);
   tapRef.current = tapProduct;
@@ -340,8 +391,9 @@ export function PosPage() {
    * being typed) with the HUB's message.
    */
   const pay = (method: PaymentMethod | null, opts: { tendered?: Minor; rest?: 'CARD' | 'QR' } = {}) => {
-    if (!canSend || (method !== null && noShift)) {
-      if (method !== null && noShift) setFailure('Смена не открыта — оплату принять нельзя');
+    if (!canSend || (method !== null && !payNow)) {
+      if (method !== null && !canTakeMoney) setFailure('Оплату принимает кассир — отправьте заказ без оплаты');
+      else if (method !== null && noShift) setFailure('Смена не открыта — оплату принять нельзя');
       return;
     }
     const d = draftRef.current;
@@ -411,11 +463,12 @@ export function PosPage() {
   };
 
   // The confirmation goes away by itself: the counter is ready for the next guest.
+  const flashMs = narrow ? FLASH_DOCKED_MS : FLASH_MS;
   useEffect(() => {
     if (flash?.state !== 'ok') return;
-    const t = setTimeout(() => setFlash((f) => (f?.id === flash.id ? null : f)), FLASH_MS);
+    const t = setTimeout(() => setFlash((f) => (f?.id === flash.id ? null : f)), flashMs);
     return () => clearTimeout(t);
-  }, [flash?.state, flash?.id]);
+  }, [flash?.state, flash?.id, flashMs]);
 
   // ── Keyboard (desktop counter) ────────────────────────────────────────────
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
@@ -443,6 +496,7 @@ export function PosPage() {
     }
     if (e.key === 'F1' || e.key === 'F2' || e.key === 'F3') {
       e.preventDefault();
+      if (!payNow) return;
       if (e.key === 'F1') {
         if (!empty) setMode('pay');
       } else pay(e.key === 'F2' ? 'CARD' : 'QR');
@@ -470,12 +524,14 @@ export function PosPage() {
     if (e.key === 'Enter') {
       if (e.target instanceof HTMLButtonElement) return;
       e.preventDefault();
-      if (mode === 'pay' && typed !== null && typed >= due) pay('CASH', { tendered: typed });
+      // Without money (a waiter, or no shift yet) Enter sends the order to the barista.
+      if (!payNow) pay(null);
+      else if (mode === 'pay' && typed !== null && typed >= due) pay('CASH', { tendered: typed });
       else if (mode === 'pay' && typed !== null) return;
       else pay('CASH');
       return;
     }
-    if (e.key === ' ' && !(e.target instanceof HTMLButtonElement) && !empty) {
+    if (e.key === ' ' && !(e.target instanceof HTMLButtonElement) && !empty && payNow) {
       e.preventDefault();
       setMode('pay');
       return;
@@ -490,6 +546,13 @@ export function PosPage() {
     window.addEventListener('keydown', on);
     return () => window.removeEventListener('keydown', on);
   }, []);
+
+  // Selling without money (a waiter, or no shift yet): the payment view has nothing to offer.
+  useEffect(() => {
+    if (!payNow && mode === 'pay') setMode('order');
+  }, [payNow, mode]);
+
+  useBottomChrome(narrow && sorted !== null, sectionRef, dockRef);
 
   // ── Tiles ─────────────────────────────────────────────────────────────────
   const tiles = useMemo(
@@ -517,6 +580,10 @@ export function PosPage() {
   }
 
   const selectedLine = priced.find((p) => p.line.id === selected) ?? null;
+  // Phone with the order folded: the drink's chips dock at the bottom, over the total and the pay
+  // button (no dialog, the menu stays usable). In the open order and on wider screens they open
+  // right under the line.
+  const docked = narrow && !sheetOpen;
   const optionsPanel =
     selectedLine?.product && optionsOf(selectedLine.product).length > 0 ? (
       <OptionsPanel
@@ -526,7 +593,10 @@ export function PosPage() {
         title={selectedLine.product.name}
         currency={currency}
         problem={selectedLine.problem}
-        docked={narrow}
+        docked={docked}
+        sum={selectedLine.priced ? money(selectedLine.priced.unitPrice * selectedLine.line.qty) : null}
+        canMore={qtyOf(selectedLine.line.productId) < available(selectedLine.product)}
+        onQty={(qty) => setQty(selectedLine.line.id, qty)}
         onChoices={(choices) => updateLine(selectedLine.line.id, { choices })}
         onComments={(comments) => updateLine(selectedLine.line.id, { comments })}
         onText={(text) => updateLine(selectedLine.line.id, { text })}
@@ -535,14 +605,44 @@ export function PosPage() {
     ) : null;
   const plainComment =
     selectedLine?.product && optionsOf(selectedLine.product).length === 0 ? selectedLine : null;
+  const dockPanel = docked
+    ? (optionsPanel ??
+      (plainComment ? (
+        <CommentPanel
+          line={plainComment.line}
+          title={plainComment.product!.name}
+          docked
+          onComments={(comments) => updateLine(plainComment.line.id, { comments })}
+          onText={(text) => updateLine(plainComment.line.id, { text })}
+          onClose={() => setSelected(null)}
+        />
+      ) : null))
+    : null;
 
   const searching = query.trim().length > 0;
   const last = empty ? readLast() : null;
+  const pickTab = (id: string) => {
+    setTab(id);
+    setQuery('');
+  };
+  const doneFlash = flash ? (
+    <DoneFlash
+      flash={flash}
+      currency={currency}
+      docked={narrow}
+      ms={flashMs}
+      onClose={() => setFlash(null)}
+      onPrint={(res) => printReceipt(res.check, state.club, undefined, Date.now(), res.order.number)}
+    />
+  ) : null;
 
   return (
     <section
+      ref={sectionRef}
       className="page pos"
       data-mode={mode}
+      data-layout={narrow ? 'phone' : 'split'}
+      data-sheet={(narrow && sheetOpen) || undefined}
       // A tapped button does not keep the focus: Enter and Space stay the counter's hotkeys.
       onMouseDown={(e) => {
         if (e.target instanceof Element && e.target.closest('button')) e.preventDefault();
@@ -571,6 +671,11 @@ export function PosPage() {
                   }
                 }}
               />
+              {searching && (
+                <button type="button" className="pos-search-clear" aria-label="Очистить поиск" onClick={() => setQuery('')}>
+                  <Icon name="close" size={18} />
+                </button>
+              )}
               <kbd className="pos-kbd">/</kbd>
             </label>
             <div className="pos-mult-wrap">
@@ -625,33 +730,13 @@ export function PosPage() {
             </p>
           )}
 
-          <div className="pos-tabs" role="tablist" aria-label="Категории" data-dim={searching || undefined}>
-            <button type="button" role="tab" className="pos-tab pos-tab-hits" aria-selected={!searching && activeTab === HITS} onClick={() => { setTab(HITS); setQuery(''); }}>
-              <span aria-hidden="true">★</span> Хиты
-            </button>
-            {categories.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                role="tab"
-                className="pos-tab"
-                style={{ '--hue': hueOf.get(c.id) } as CSSProperties}
-                aria-selected={!searching && c.id === activeTab}
-                onClick={() => {
-                  setTab(c.id);
-                  setQuery('');
-                }}
-              >
-                <span className="pos-tab-dot" aria-hidden="true" />
-                {c.name}
-              </button>
-            ))}
-          </div>
+          {/* Phone: the categories live at the bottom, under the thumb (the dock below). */}
+          {!narrow && <CategoryTabs categories={categories} hueOf={hueOf} active={activeTab} searching={searching} onTab={pickTab} />}
 
           {products.length === 0 ? (
             <p className="empty">В меню пока нет товаров. Добавьте их в разделе «Меню».</p>
           ) : tiles.length === 0 ? (
-            <p className="empty pos-noresult">Ничего не нашлось по «{query}».</p>
+            <p className="empty pos-noresult">Ничего не нашлось по «{deferredQuery}».</p>
           ) : designing && canDesign ? (
             <EditGrid
               tiles={tiles}
@@ -664,21 +749,6 @@ export function PosPage() {
             />
           ) : (
             <MenuGrid tiles={tiles} looks={tileLook.looks.tiles} onTap={onTap} />
-          )}
-
-          {narrow && (optionsPanel || plainComment) && (
-            <div className="pos-dock">
-              {optionsPanel ?? (
-                <CommentPanel
-                  line={plainComment!.line}
-                  title={plainComment!.product!.name}
-                  docked
-                  onComments={(comments) => updateLine(plainComment!.line.id, { comments })}
-                  onText={(text) => updateLine(plainComment!.line.id, { text })}
-                  onClose={() => setSelected(null)}
-                />
-              )}
-            </div>
           )}
         </div>
 
@@ -755,6 +825,7 @@ export function PosPage() {
                 canPay={canPayNow}
                 canSend={canSend}
                 noShift={noShift}
+                compact={narrow}
                 autoPrint={autoPrint}
                 onAutoPrint={(on) => {
                   setAutoPrint(on);
@@ -785,7 +856,17 @@ export function PosPage() {
                         </button>
                       )}
                       <p className="pos-keys-hint">
-                        <kbd>/</kbd> поиск · <kbd>2</kbd>…<kbd>9</kbd> количество · <kbd>Enter</kbd> без сдачи · <kbd>F2</kbd> карта · <kbd>Esc</kbd> очистить
+                        <kbd>/</kbd> поиск · <kbd>2</kbd>…<kbd>9</kbd> количество ·{' '}
+                        {payNow ? (
+                          <>
+                            <kbd>Enter</kbd> без сдачи · <kbd>F2</kbd> карта
+                          </>
+                        ) : (
+                          <>
+                            <kbd>Enter</kbd> отправить бариста
+                          </>
+                        )}{' '}
+                        · <kbd>Esc</kbd> очистить
                       </p>
                     </div>
                   ) : (
@@ -824,7 +905,7 @@ export function PosPage() {
                               </button>
                             </span>
                             <span className="pos-line-sum">{pl ? money(pl.unitPrice * line.qty) : '—'}</span>
-                            {isSel && !narrow && (optionsPanel ?? (plainComment && (
+                            {isSel && !docked && (optionsPanel ?? (plainComment && (
                               <CommentPanel
                                 line={line}
                                 title={product?.name ?? ''}
@@ -854,6 +935,8 @@ export function PosPage() {
                       value={draft.guestName}
                       maxLength={GUEST_NAME_MAX}
                       autoComplete="off"
+                      autoCapitalize="words"
+                      enterKeyHint="done"
                       placeholder="Имя гостя"
                       aria-label="Имя гостя (на экране заказов)"
                       onChange={(e) => setDraft((d) => ({ ...d, guestName: e.target.value }))}
@@ -887,7 +970,8 @@ export function PosPage() {
                     )}
                   </div>
 
-                  {noShift && canOrder && (
+                  {/* Only for whoever takes the money: a waiter has nothing to do about the shift. */}
+                  {noShift && canOrder && canTakeMoney && (
                     <div className="pos-shift" role="alert">
                       <Icon name="alert" size={18} />
                       <span>Смена не открыта</span>
@@ -909,51 +993,107 @@ export function PosPage() {
                     <span>Итого</span>
                     <strong>{money(due)}</strong>
                   </div>
-                  <div className="pos-express" role="group" aria-label="Оплата в одно нажатие">
-                    <button type="button" className="pos-express-btn" data-method="CASH" disabled={!canPayNow} onClick={() => pay('CASH')}>
-                      <span className="pos-express-name">{METHOD_LABEL.CASH}</span>
-                      <kbd className="pos-kbd">без сдачи · Enter</kbd>
-                    </button>
-                    <button type="button" className="pos-express-btn" data-method="CARD" disabled={!canPayNow} onClick={() => pay('CARD')}>
-                      <span className="pos-express-name">{METHOD_LABEL.CARD}</span>
-                      <kbd className="pos-kbd">F2</kbd>
-                    </button>
-                    <button type="button" className="pos-express-btn" data-method="QR" disabled={!canPayNow} onClick={() => pay('QR')}>
-                      <span className="pos-express-name">{METHOD_LABEL.QR}</span>
-                      <kbd className="pos-kbd">F3</kbd>
-                    </button>
-                  </div>
-                  <button type="button" className="pos-paybar" disabled={empty || broken || !canOrder} onClick={() => setMode('pay')}>
-                    <span>Оплатить</span>
-                    <strong>{money(due)}</strong>
-                  </button>
+                  {payNow ? (
+                    <>
+                      <div className="pos-express" role="group" aria-label="Оплата в одно нажатие">
+                        <button type="button" className="pos-express-btn" data-method="CASH" disabled={!canPayNow} onClick={() => pay('CASH')}>
+                          <span className="pos-express-name">{METHOD_LABEL.CASH}</span>
+                          <kbd className="pos-kbd">без сдачи · Enter</kbd>
+                        </button>
+                        <button type="button" className="pos-express-btn" data-method="CARD" disabled={!canPayNow} onClick={() => pay('CARD')}>
+                          <span className="pos-express-name">{METHOD_LABEL.CARD}</span>
+                          <kbd className="pos-kbd">F2</kbd>
+                        </button>
+                        <button type="button" className="pos-express-btn" data-method="QR" disabled={!canPayNow} onClick={() => pay('QR')}>
+                          <span className="pos-express-name">{METHOD_LABEL.QR}</span>
+                          <kbd className="pos-kbd">F3</kbd>
+                        </button>
+                      </div>
+                      <button type="button" className="pos-paybar" disabled={empty || broken || !canOrder} onClick={() => setMode('pay')}>
+                        <span>Оплатить</span>
+                        <strong>{money(due)}</strong>
+                      </button>
+                    </>
+                  ) : canOrder ? (
+                    <>
+                      <button type="button" className="pos-paybar pos-sendbar" disabled={!canSend} onClick={() => pay(null)}>
+                        <span>Отправить бариста</span>
+                        <strong>{money(due)}</strong>
+                      </button>
+                      <p className="pos-send-note">
+                        {canTakeMoney ? 'Без оплаты — счёт оплатят, когда откроют смену' : 'Без оплаты — счёт оплатят на кассе'}
+                      </p>
+                    </>
+                  ) : null}
                 </footer>
               </>
             )}
           </aside>
-          {flash && <DoneFlash flash={flash} currency={currency} onClose={() => setFlash(null)} onPrint={(res) => printReceipt(res.check, state.club, undefined, Date.now(), res.order.number)} />}
+          {!narrow && doneFlash}
         </div>
       </div>
 
-      {/* Phone: the order is a bottom sheet; this bar opens it. */}
-      {narrow && !sheetOpen && (
-        <div className="pos-bar">
-          <button type="button" className="pos-bar-order" onClick={() => setSheetOpen(true)} disabled={empty && held.length === 0}>
-            <span className="pos-bar-count">{count}</span>
-            <span>{empty ? (held.length ? `Отложено: ${held.length}` : 'Заказ пуст') : 'Заказ'}</span>
-            <Icon name="chevron-down" size={18} className="pos-bar-up" />
-          </button>
-          <button
-            type="button"
-            className="pos-bar-pay"
-            disabled={empty || broken || !canOrder}
-            onClick={() => {
-              setMode('pay');
-              setSheetOpen(true);
-            }}
-          >
-            {money(due)}
-          </button>
+      {/*
+        Phone: everything the thumb needs sits at the bottom, right on the app's tab bar — the
+        drink's chips (or the «Заказ 17» card), the categories with search, and the bar with the
+        total and the one button: «Оплатить» or, without money, «Отправить».
+      */}
+      {narrow && (
+        <div className="pos-dockbar" ref={dockRef} data-hidden={sheetOpen || undefined}>
+          {doneFlash ??
+            dockPanel ?? (
+              <CategoryTabs
+                categories={categories}
+                hueOf={hueOf}
+                active={activeTab}
+                searching={searching}
+                onTab={pickTab}
+                onSearch={() => {
+                  // Synchronously, inside the tap: a phone opens its keyboard only then.
+                  searchRef.current?.focus({ preventScroll: true });
+                  window.scrollTo({ top: 0 });
+                }}
+              />
+            )}
+          <div className="pos-orderbar">
+            <button
+              type="button"
+              className="pos-orderbar-sum"
+              aria-label={empty ? 'Открыть заказ' : `Открыть заказ: ${count} шт., ${money(due)}`}
+              disabled={empty && held.length === 0}
+              onClick={() => setSheetOpen(true)}
+            >
+              <span key={count} className="pos-orderbar-count">
+                {count}
+              </span>
+              <span className="pos-orderbar-text">
+                <strong>{empty ? (held.length ? `Отложено: ${held.length}` : 'Заказ пуст') : money(due)}</strong>
+                <small>
+                  {empty
+                    ? held.length
+                      ? 'нажмите, чтобы вернуть'
+                      : 'нажмите на напиток'
+                    : `${COUNTER_SERVICE_LABEL[draft.service]}${draft.guestName.trim() ? ` · ${draft.guestName.trim()}` : ''}`}
+                </small>
+              </span>
+              <Icon name="chevron-down" size={20} className="pos-orderbar-up" />
+            </button>
+            {!empty && canOrder && (
+              <button
+                type="button"
+                className="pos-orderbar-go"
+                data-kind={payNow ? 'pay' : 'send'}
+                disabled={broken}
+                onClick={() => {
+                  setMode(payNow ? 'pay' : 'order');
+                  setSelected(null);
+                  setSheetOpen(true);
+                }}
+              >
+                {payNow ? 'Оплатить' : 'Отправить'}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -1064,6 +1204,57 @@ const MenuGrid = memo(function MenuGrid({
   );
 });
 
+/**
+ * «Хиты» and the categories. On a phone the strip sits at the bottom with a search button first:
+ * the waiter reaches both with the thumb of the hand that holds the phone.
+ */
+function CategoryTabs({
+  categories,
+  hueOf,
+  active,
+  searching,
+  onTab,
+  onSearch,
+}: {
+  categories: readonly { id: string; name: string }[];
+  hueOf: ReadonlyMap<string, number>;
+  active: string;
+  searching: boolean;
+  onTab: (id: string) => void;
+  onSearch?: () => void;
+}) {
+  const strip = (
+    <div className="pos-tabs" role="tablist" aria-label="Категории" data-dim={searching || undefined}>
+      <button type="button" role="tab" className="pos-tab pos-tab-hits" aria-selected={!searching && active === HITS} onClick={() => onTab(HITS)}>
+        <span aria-hidden="true">★</span> Хиты
+      </button>
+      {categories.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          role="tab"
+          className="pos-tab"
+          style={{ '--hue': hueOf.get(c.id) } as CSSProperties}
+          aria-selected={!searching && c.id === active}
+          onClick={() => onTab(c.id)}
+        >
+          <span className="pos-tab-dot" aria-hidden="true" />
+          {c.name}
+        </button>
+      ))}
+    </div>
+  );
+  if (!onSearch) return strip;
+  return (
+    <div className="pos-catbar">
+      <button type="button" className="pos-catbar-search" aria-label="Поиск по меню" aria-pressed={searching} onClick={onSearch}>
+        <Icon name="search" size={22} />
+      </button>
+      {strip}
+    </div>
+  );
+}
+
 // ── Options and comments next to the line ───────────────────────────────────
 
 function OptionsPanel({
@@ -1073,6 +1264,9 @@ function OptionsPanel({
   currency,
   problem,
   docked,
+  sum,
+  canMore,
+  onQty,
   onChoices,
   onComments,
   onText,
@@ -1084,6 +1278,10 @@ function OptionsPanel({
   currency: string;
   problem: string | null;
   docked: boolean;
+  /** Docked (phone): the line's sum and its quantity next to the name, so nothing else is needed. */
+  sum: string | null;
+  canMore: boolean;
+  onQty: (qty: number) => void;
   onChoices: (choices: string[]) => void;
   onComments: (comments: string[]) => void;
   onText: (text: string) => void;
@@ -1094,7 +1292,19 @@ function OptionsPanel({
     <div className="pos-opts" data-docked={docked || undefined} role="group" aria-label={`Добавки: ${title}`}>
       {docked && (
         <div className="pos-opts-head">
-          <strong>{title}</strong>
+          <span className="pos-opts-title">
+            <strong>{title}</strong>
+            {sum && <small>{sum}</small>}
+          </span>
+          <span className="pos-qty" role="group" aria-label="Количество">
+            <button type="button" className="pos-qty-btn" aria-label={line.qty === 1 ? 'Убрать' : 'Меньше'} onClick={() => onQty(line.qty - 1)}>
+              <Icon name={line.qty === 1 ? 'trash' : 'minus'} size={18} />
+            </button>
+            <output>{line.qty}</output>
+            <button type="button" className="pos-qty-btn" aria-label="Больше" disabled={!canMore} onClick={() => onQty(line.qty + 1)}>
+              <Icon name="plus" size={18} />
+            </button>
+          </span>
           <button type="button" className="pos-opts-done" onClick={onClose}>
             Готово
           </button>
@@ -1126,7 +1336,7 @@ function OptionsPanel({
           </div>
         );
       })}
-      <Comments line={line} onComments={onComments} onText={onText} />
+      <Comments line={line} compact={docked} onComments={onComments} onText={onText} />
       {problem && <p className="form-error">{problem}</p>}
       {!docked && (
         <button type="button" className="pos-opts-collapse" onClick={onClose}>
@@ -1172,11 +1382,23 @@ function CommentPanel({
   );
 }
 
-function Comments({ line, onComments, onText }: { line: Line; onComments: (c: string[]) => void; onText: (t: string) => void }) {
+function Comments({
+  line,
+  compact = false,
+  onComments,
+  onText,
+}: {
+  line: Line;
+  /** Phone dock: one swipeable row; the own-words field opens on «Свой комментарий». */
+  compact?: boolean;
+  onComments: (c: string[]) => void;
+  onText: (t: string) => void;
+}) {
+  const [typing, setTyping] = useState(() => !compact || line.text !== '');
   return (
-    <div className="pos-opt-row">
-      <span className="pos-opt-label">Комментарий</span>
-      <div className="pos-opt-chips">
+    <div className="pos-opt-row pos-note-row">
+      {!compact && <span className="pos-opt-label">Комментарий</span>}
+      <div className="pos-opt-chips pos-notes" role="group" aria-label="Комментарий" data-compact={compact || undefined}>
         {COMMENT_PRESETS.map((c) => {
           const on = line.comments.includes(c);
           return (
@@ -1192,15 +1414,27 @@ function Comments({ line, onComments, onText }: { line: Line; onComments: (c: st
             </button>
           );
         })}
+        {!typing && (
+          <button type="button" className="pos-opt pos-opt-note" onClick={() => setTyping(true)}>
+            ✎ Свой комментарий
+          </button>
+        )}
+      </div>
+      {typing && (
         <input
           className="pos-opt-text"
           value={line.text}
           maxLength={60}
           placeholder="Свой комментарий"
           aria-label="Свой комментарий"
+          enterKeyHint="done"
+          autoFocus={compact}
           onChange={(e) => onText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          }}
         />
-      </div>
+      )}
     </div>
   );
 }
@@ -1216,6 +1450,7 @@ function PayView({
   canPay,
   canSend,
   noShift,
+  compact,
   autoPrint,
   onAutoPrint,
   onTendered,
@@ -1229,12 +1464,15 @@ function PayView({
   canPay: boolean;
   canSend: boolean;
   noShift: boolean;
+  /** Phone: the keypad waits behind «Другая сумма», so the ways to pay and «без оплаты» fit one screen. */
+  compact: boolean;
   autoPrint: boolean;
   onAutoPrint: (on: boolean) => void;
   onTendered: (v: string) => void;
   onPay: (method: PaymentMethod | null, opts?: { tendered?: Minor; rest?: 'CARD' | 'QR' }) => void;
 }) {
   const money = (a: Minor) => formatMoney(a, currency);
+  const [keypad, setKeypad] = useState(() => !compact || tendered !== '');
   const short = typed !== null && typed < total ? total - typed : 0;
   const change = typed !== null && typed >= total ? typed - total : null;
   const press = (k: string) => {
@@ -1242,7 +1480,7 @@ function PayView({
     else onTendered((tendered + k).replace(/^0+(?=\d)/, '').slice(0, 9));
   };
   return (
-    <div className="pos-pay">
+    <div className="pos-pay" data-compact={compact || undefined}>
       <div className="pos-pay-due">
         <span>К оплате</span>
         <strong>{money(total)}</strong>
@@ -1273,49 +1511,57 @@ function PayView({
         </div>
       )}
 
-      <div className="pos-pay-cash">
-        <div className="pos-display" aria-live="polite">
-          <span className="pos-display-label">Гость даёт</span>
-          <span className="pos-display-sum" data-empty={tendered === '' || undefined}>
-            {tendered === '' ? 'сумма' : typed !== null ? money(typed) : tendered}
-          </span>
-          <span className="pos-display-change" data-short={short > 0 || undefined}>
-            {change !== null ? `Сдача ${money(change)}` : short > 0 ? `Не хватает ${money(short)}` : ' '}
-          </span>
-        </div>
-        <div className="pos-keypad" role="group" aria-label="Цифры">
-          {['1', '2', '3', '4', '5', '6', '7', '8', '9', '00', '0', '⌫'].map((k) => (
-            <button key={k} type="button" aria-label={k === '⌫' ? 'Стереть' : k} onClick={() => press(k)}>
-              {k}
-            </button>
-          ))}
-        </div>
-        {short > 0 && typed !== null && typed > 0 ? (
-          <div className="pos-split" role="group" aria-label="Остаток другим способом">
-            <span>Остаток {money(short)}:</span>
-            <button type="button" className="btn" disabled={!canPay} onClick={() => onPay('CASH', { tendered: typed, rest: 'CARD' })}>
-              картой
-            </button>
-            <button type="button" className="btn" disabled={!canPay} onClick={() => onPay('CASH', { tendered: typed, rest: 'QR' })}>
-              QR
-            </button>
+      {keypad ? (
+        <div className="pos-pay-cash">
+          <div className="pos-display" aria-live="polite">
+            <span className="pos-display-label">Гость даёт</span>
+            <span className="pos-display-sum" data-empty={tendered === '' || undefined}>
+              {tendered === '' ? 'сумма' : typed !== null ? money(typed) : tendered}
+            </span>
+            <span className="pos-display-change" data-short={short > 0 || undefined}>
+              {change !== null ? `Сдача ${money(change)}` : short > 0 ? `Не хватает ${money(short)}` : ' '}
+            </span>
           </div>
-        ) : (
-          <button
-            type="button"
-            className="btn btn-primary pos-accept"
-            disabled={!canPay || (typed !== null && typed < total)}
-            onClick={() => onPay('CASH', typed !== null ? { tendered: typed } : {})}
-          >
-            Принять {money(typed ?? total)}
-          </button>
-        )}
-      </div>
-
-      <div className="pos-pay-extra">
-        <button type="button" className="link" disabled={!canSend} onClick={() => onPay(null)} title="Заказ уйдёт бариста, счёт останется открытым в «Счетах»">
-          Без оплаты — счёт потом
+          <div className="pos-keypad" role="group" aria-label="Цифры">
+            {['1', '2', '3', '4', '5', '6', '7', '8', '9', '00', '0', '⌫'].map((k) => (
+              <button key={k} type="button" aria-label={k === '⌫' ? 'Стереть' : k} onClick={() => press(k)}>
+                {k}
+              </button>
+            ))}
+          </div>
+          {short > 0 && typed !== null && typed > 0 ? (
+            <div className="pos-split" role="group" aria-label="Остаток другим способом">
+              <span>Остаток {money(short)}:</span>
+              <button type="button" className="btn" disabled={!canPay} onClick={() => onPay('CASH', { tendered: typed, rest: 'CARD' })}>
+                картой
+              </button>
+              <button type="button" className="btn" disabled={!canPay} onClick={() => onPay('CASH', { tendered: typed, rest: 'QR' })}>
+                QR
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary pos-accept"
+              disabled={!canPay || (typed !== null && typed < total)}
+              onClick={() => onPay('CASH', typed !== null ? { tendered: typed } : {})}
+            >
+              Принять {money(typed ?? total)}
+            </button>
+          )}
+        </div>
+      ) : (
+        <button type="button" className="pos-other-sum" disabled={!canPay} onClick={() => setKeypad(true)}>
+          Другая сумма наличными
         </button>
+      )}
+
+      {/* A real button, not a footnote: the waiter's «take the order now, the money at the counter later». */}
+      <button type="button" className="pos-later" disabled={!canSend} onClick={() => onPay(null)}>
+        <span>Без оплаты — счёт потом</span>
+        <small>заказ сразу уйдёт бариста, счёт будет в «Счетах»</small>
+      </button>
+      <div className="pos-pay-extra">
         <label className="check">
           <input type="checkbox" checked={autoPrint} onChange={(e) => onAutoPrint(e.target.checked)} />
           Печатать чек сам
@@ -1331,18 +1577,24 @@ function PayView({
 function DoneFlash({
   flash,
   currency,
+  docked,
+  ms,
   onClose,
   onPrint,
 }: {
   flash: Flash;
   currency: string;
+  /** Phone: a card at the bottom over the total, not a cover over the order. */
+  docked: boolean;
+  /** How long it stays after the HUB confirmed (the bar at its bottom runs out meanwhile). */
+  ms: number;
   onClose: () => void;
   onPrint: (res: CreateCounterOrderResponse) => void;
 }) {
   const money = (a: Minor) => formatMoney(a, currency);
   const number = flash.res?.order.number;
   return (
-    <div className="pos-flash" data-state={flash.state} role="status" aria-live="assertive" onClick={onClose}>
+    <div className="pos-flash" data-state={flash.state} data-docked={docked || undefined} role="status" aria-live="assertive" onClick={onClose}>
       <div className="pos-flash-card" onClick={(e) => e.stopPropagation()}>
         {flash.state === 'failed' ? (
           <>
@@ -1354,34 +1606,48 @@ function DoneFlash({
           </>
         ) : (
           <>
-            <p className="pos-flash-label">Заказ</p>
-            <p className="pos-flash-number" data-pending={number === undefined || undefined}>
-              {number ?? '···'}
-            </p>
-            <p className="pos-flash-sub">
-              {COUNTER_SERVICE_LABEL[flash.service]}
-              {flash.guestName ? ` · ${flash.guestName}` : ''} · {money(flash.total)}
-            </p>
-            {flash.method === 'CASH' && !flash.rest && (
-              <p className="pos-flash-change" data-zero={flash.change === 0 || undefined}>
-                {flash.change > 0 ? (
+            <div className="pos-flash-num">
+              <p className="pos-flash-label">Заказ</p>
+              <p className="pos-flash-number" data-pending={number === undefined || undefined}>
+                {number ?? '···'}
+              </p>
+            </div>
+            <div className="pos-flash-info">
+              {/* «Заказ 17 отправлен бариста»: the words the waiter waits for. */}
+              <p className="pos-flash-sent" data-ok={flash.state === 'ok' || undefined}>
+                {flash.state === 'ok' ? (
                   <>
-                    <small>Сдача</small>
-                    {money(flash.change)}
+                    <Icon name="check" size={18} /> отправлен бариста
                   </>
                 ) : (
-                  'Без сдачи'
+                  'отправляем бариста…'
                 )}
               </p>
-            )}
-            {flash.rest && (
-              <p className="pos-flash-paid">
-                Наличными {money(flash.total - flash.rest.amount)} + {METHOD_LABEL[flash.rest.method]} {money(flash.rest.amount)}
+              <p className="pos-flash-sub">
+                {COUNTER_SERVICE_LABEL[flash.service]}
+                {flash.guestName ? ` · ${flash.guestName}` : ''} · {money(flash.total)}
               </p>
-            )}
-            {flash.method && flash.method !== 'CASH' && <p className="pos-flash-paid">Оплачено: {METHOD_LABEL[flash.method]}</p>}
-            {!flash.method && <p className="hint hint-warn">Без оплаты — счёт ждёт в «Счетах».</p>}
-            {flash.loyaltyNote && <p className="pos-flash-paid">{flash.loyaltyNote}</p>}
+              {flash.method === 'CASH' && !flash.rest && (
+                <p className="pos-flash-change" data-zero={flash.change === 0 || undefined}>
+                  {flash.change > 0 ? (
+                    <>
+                      <small>Сдача</small>
+                      {money(flash.change)}
+                    </>
+                  ) : (
+                    'Без сдачи'
+                  )}
+                </p>
+              )}
+              {flash.rest && (
+                <p className="pos-flash-paid">
+                  Наличными {money(flash.total - flash.rest.amount)} + {METHOD_LABEL[flash.rest.method]} {money(flash.rest.amount)}
+                </p>
+              )}
+              {flash.method && flash.method !== 'CASH' && <p className="pos-flash-paid">Оплачено: {METHOD_LABEL[flash.method]}</p>}
+              {!flash.method && <p className="pos-flash-later">Без оплаты — счёт оплатят потом на кассе</p>}
+              {flash.loyaltyNote && <p className="pos-flash-paid">{flash.loyaltyNote}</p>}
+            </div>
             <div className="pos-flash-actions">
               <button type="button" className="btn btn-small" disabled={!flash.res} onClick={() => flash.res && onPrint(flash.res)}>
                 Печать чека
@@ -1390,7 +1656,7 @@ function DoneFlash({
                 Дальше
               </button>
             </div>
-            {flash.state === 'ok' && <span className="pos-flash-timer" style={{ animationDuration: `${FLASH_MS}ms` }} />}
+            {flash.state === 'ok' && <span className="pos-flash-timer" style={{ animationDuration: `${ms}ms` }} />}
           </>
         )}
       </div>

@@ -130,9 +130,17 @@ export function useCachedCatalog(trigger: unknown): { catalog: CatalogView | nul
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(false);
   const again = useRef(false);
+  // Not the effect's own `alive`: a request that outlives its effect (the HUB version changed while
+  // it ran) must still serve the reload asked for meanwhile, or the counter stays on the skeleton.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
-    let alive = true;
     const load = async () => {
       if (inFlight.current) {
         again.current = true;
@@ -144,7 +152,7 @@ export function useCachedCatalog(trigger: unknown): { catalog: CatalogView | nul
           again.current = false;
           const fresh = await fetchJson<CatalogView>('/api/bar/catalog');
           const text = JSON.stringify(fresh);
-          if (!alive) return;
+          if (!mounted.current) return;
           setError(null);
           if (text !== raw.current) {
             raw.current = text;
@@ -155,19 +163,16 @@ export function useCachedCatalog(trigger: unknown): { catalog: CatalogView | nul
               // Full or private storage: the cache just does not survive a reload.
             }
           }
-        } while (again.current && alive);
+        } while (again.current && mounted.current);
       } catch (e) {
-        if (alive) setError((e as Error).message);
+        if (mounted.current) setError((e as Error).message);
       } finally {
         inFlight.current = false;
       }
     };
     // Bursts of change events (a sale raises several) become one request.
     const t = setTimeout(() => void load(), raw.current === null ? 0 : 120);
-    return () => {
-      alive = false;
-      clearTimeout(t);
-    };
+    return () => clearTimeout(t);
   }, [key, trigger]);
 
   return { catalog, error };

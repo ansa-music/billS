@@ -359,6 +359,40 @@ test('billiards: a bartender gets no shift and no report', async (t) => {
   assert.equal((await call<HubState>(b, cashier, 'GET', '/api/state')).body.shift?.expectedCash, null);
 });
 
+// ── 4a. The waiter takes orders, the till takes the money ──────────────────
+
+test('coffee shop: a waiter sends orders to the barista without payment; the money is the till’s', async (t) => {
+  const c = await cafe(harness(t));
+  const waiterStaff = c.hub.staff.create({ name: 'Официант Алия', roles: ['waiter'], actor: 'system' });
+  const comboStaff = c.hub.staff.create({ name: 'Официант-кассир Ден', roles: ['waiter', 'cashier'], actor: 'system' });
+  const waiter = await loginAs(c, waiterStaff.name);
+  const combo = await loginAs(c, comboStaff.name);
+  const cashier = await loginAs(c, CASHIER);
+  const opened = await call<ShiftView>(c, cashier, 'POST', '/api/shifts/open', { openingFloat: 0 });
+  assert.equal(opened.status, 201);
+  const croissant = (await call<CatalogView>(c, waiter, 'GET', '/api/bar/catalog')).body.products.find((p) => p.name === 'Круассан')!;
+  const order = (payment: object | null) => ({ items: [{ productId: croissant.id, qty: 1 }], service: 'HERE', guestName: 'Аня', payment });
+  const cash = { parts: [{ method: 'CASH', amount: croissant.price }] };
+
+  // «Без оплаты — счёт потом»: the order goes to the barista, the check stays open.
+  const sent = await call<CreateCounterOrderResponse>(c, waiter, 'POST', '/api/counter/orders', order(null));
+  assert.equal(sent.status, 201, JSON.stringify(sent.body));
+  assert.equal(sent.body.order.stage, 'NEW');
+  assert.equal(sent.body.payment, null);
+  // With money: refused before anything is written, in plain words.
+  const before = one<{ n: number }>(c.db, 'SELECT COUNT(*) AS n FROM bar_orders')!.n;
+  const paid = await call(c, waiter, 'POST', '/api/counter/orders', order(cash));
+  assertError(paid, 403, 'FORBIDDEN');
+  assert.match(paid.body.error!.message, /без оплаты/);
+  assert.equal(one<{ n: number }>(c.db, 'SELECT COUNT(*) AS n FROM bar_orders')!.n, before);
+  // The cashier settles the waiter's check later; a waiter who is also a cashier pays at once.
+  const settled = await call(c, cashier, 'POST', `/api/checks/${sent.body.check.id}/pay`, cash);
+  assert.equal(settled.status, 200, JSON.stringify(settled.body));
+  const comboPaid = await call<CreateCounterOrderResponse>(c, combo, 'POST', '/api/counter/orders', order(cash));
+  assert.equal(comboPaid.status, 201, JSON.stringify(comboPaid.body));
+  assert.notEqual(comboPaid.body.payment, null);
+});
+
 // ── 5. The update: people already switched off in a coffee shop disappear ─
 
 function migrationsWithout020(h: Harness): { dir: string; url: URL } {

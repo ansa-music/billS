@@ -1,8 +1,9 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { CounterCancelRequest, CounterStageRequest, CreateCounterOrderRequest } from '@bills/domain';
 import { COUNTER_STAGES, OPTION_GROUPS_MAX, OPTION_CHOICES_MAX, ORDER_MAX_LINES, PAYMENT_METHODS } from '@bills/domain';
+import { HubError } from '../../errors.ts';
 import type { Hub } from '../../hub.ts';
-import { guard, runCommand } from '../command.ts';
+import { assertCan, guard, runCommand } from '../command.ts';
 import { loyaltyApplySchema } from './loyalty.ts';
 
 const id = { type: 'string', minLength: 1, maxLength: 100 } as const;
@@ -56,15 +57,35 @@ export const createSchema = {
 } as const;
 
 /**
- * Coffee shop counter (packages/domain cafe.ts). Taking an order includes its payment
- * (`counter.take`: cashier, barista and up); the barista moves stages (`counter.stage`);
+ * An order taken with its payment also needs the right to take money (`payment.take`): a coffee
+ * shop's waiter takes orders on the floor and sends them to the barista without payment, the
+ * till (cashier, barista and up) takes the money — at once or later from «Счета».
+ */
+export function assertCounterPayment(req: FastifyRequest, body: Pick<CreateCounterOrderRequest, 'payment'>): void {
+  if (!body.payment) return;
+  try {
+    assertCan(req, 'payment.take');
+  } catch (e) {
+    if (e instanceof HubError && e.code === 'FORBIDDEN') {
+      throw new HubError(403, 'FORBIDDEN', 'Оплату принимает кассир или бариста — отправьте заказ без оплаты');
+    }
+    throw e;
+  }
+}
+
+/**
+ * Coffee shop counter (packages/domain cafe.ts). Taking an order (`counter.take`: the waiter,
+ * cashier, barista and up) may include its payment, which needs `payment.take` as well
+ * (assertCounterPayment); the barista moves stages (`counter.stage`);
  * cancelling (deleting a check) is the manager's and the administrator's (`counter.cancel`):
  * the order stays CANCELLED with who and why. The guest screen's board is public.
  */
 export function registerCounterRoutes(app: FastifyInstance, hub: Hub): void {
-  app.post<{ Body: CreateCounterOrderRequest }>('/api/counter/orders', { schema: { body: createSchema } }, async (req, reply) =>
-    runCommand(req, reply, hub, (actor) => ({ status: 201, body: hub.counter.create({ ...req.body, actor }) }), 'counter.take'),
-  );
+  app.post<{ Body: CreateCounterOrderRequest }>('/api/counter/orders', { schema: { body: createSchema } }, async (req, reply) => {
+    assertCan(req, 'counter.take');
+    assertCounterPayment(req, req.body);
+    return runCommand(req, reply, hub, (actor) => ({ status: 201, body: hub.counter.create({ ...req.body, actor }) }), 'counter.take');
+  });
 
   app.get('/api/counter/orders', { preHandler: guard('hall.view') }, async () => hub.counter.list());
 
