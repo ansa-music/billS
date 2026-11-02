@@ -124,10 +124,13 @@ function ReportBody({ report, club }: { report: ShiftReport; club: HubState['clu
               Выручка
             </h3>
             <dl className="kv">
-              <div>
-                <dt>Время</dt>
-                <dd>{money(report.revenue.time)}</dd>
-              </div>
+              {/* A coffee shop sells no time: only the bar. */}
+              {club.settings.business.type !== 'cafe' && (
+                <div>
+                  <dt>Время</dt>
+                  <dd>{money(report.revenue.time)}</dd>
+                </div>
+              )}
               <div>
                 <dt>Бар</dt>
                 <dd>{money(report.revenue.bar)}</dd>
@@ -137,7 +140,11 @@ function ReportBody({ report, club }: { report: ShiftReport; club: HubState['clu
                 <dd>{money(report.revenue.time + report.revenue.bar)}</dd>
               </div>
             </dl>
-            <p className="hint">По счетам, оплаченным в смену; скидка распределена между временем и баром.</p>
+            <p className="hint">
+              {club.settings.business.type === 'cafe'
+                ? 'По счетам, оплаченным в смену, за вычетом скидок.'
+                : 'По счетам, оплаченным в смену; скидка распределена между временем и баром.'}
+            </p>
           </section>
         )}
       </div>

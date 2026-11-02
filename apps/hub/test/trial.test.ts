@@ -74,6 +74,6 @@ test('trial: without the sample menu the catalog stays empty, blank names get de
   const { hub, clock } = await startHub(t);
   setupTrialClub(hub, { venue: ' ', managerName: '', key: '730514', timezone: 'Asia/Almaty', withMenu: false, now: clock.now() });
   assert.equal(one<{ name: string }>(hub.db, 'SELECT name FROM clubs')!.name, 'Моя кофейня');
-  assert.equal(one<{ name: string }>(hub.db, 'SELECT name FROM staff')!.name, 'Управляющий');
+  assert.equal(one<{ name: string }>(hub.db, 'SELECT name FROM staff')!.name, 'Директор');
   assert.equal(one<{ n: number }>(hub.db, 'SELECT COUNT(*) AS n FROM products')!.n, 0);
 });

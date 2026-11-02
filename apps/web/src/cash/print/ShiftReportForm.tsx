@@ -58,7 +58,7 @@ export function ShiftReportForm({ report, club }: { report: ShiftReport; club: C
           <Sep />
           <p className="pf-h">Выручка</p>
           <p>по счетам, оплаченным в смену</p>
-          <Row label="Время" value={money(report.revenue.time)} />
+          {club.settings.business.type !== 'cafe' && <Row label="Время" value={money(report.revenue.time)} />}
           <Row label="Бар" value={money(report.revenue.bar)} />
           <Row label="Итого" value={money(report.revenue.time + report.revenue.bar)} strong />
         </>

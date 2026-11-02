@@ -33,7 +33,7 @@ export function trialKey(random: () => number = Math.random): string {
 /** Sets the trial club up on an empty database. Returns false when the database already had a club. */
 export function setupTrialClub(hub: Hub, setup: TrialSetup): boolean {
   const venue = setup.venue.trim().slice(0, 80) || 'Моя кофейня';
-  const managerName = setup.managerName.trim().slice(0, 80) || 'Управляющий';
+  const managerName = setup.managerName.trim().slice(0, 80) || 'Директор';
   const created = transaction(hub.db, () => {
     if (!seedEmptyClub(hub.db, setup.now, setup.timezone)) return false;
     const club = one<{ id: string; company_id: string }>(hub.db, 'SELECT id, company_id FROM clubs ORDER BY created_at LIMIT 1')!;
