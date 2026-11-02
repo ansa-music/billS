@@ -86,14 +86,25 @@ export function printForm(form: ReactNode | readonly ReactNode[], paper: Paper =
 
   // A picture (the receipt logo) has no height until it is decoded, even from a data URL:
   // measured too early, the page is cut short and the end of the receipt spills onto a new page.
+  // `load` is enough: layout needs the size, not the decoded pixels (decode() can wait for a
+  // hidden page to paint).
   const pending = [...container.querySelectorAll('img')].filter((img) => !img.complete || img.naturalHeight === 0);
   if (pending.length === 0) {
     print();
     return;
   }
-  const decoded = Promise.all(pending.map((img) => img.decode().catch(() => undefined)));
+  const loaded = Promise.all(
+    pending.map(
+      (img) =>
+        new Promise<void>((resolve) => {
+          if (img.complete && img.naturalHeight > 0) return resolve();
+          img.addEventListener('load', () => resolve(), { once: true });
+          img.addEventListener('error', () => resolve(), { once: true });
+        }),
+    ),
+  );
   const timeout = new Promise((resolve) => window.setTimeout(resolve, IMAGE_WAIT_MS));
-  void Promise.race([decoded, timeout]).then(print);
+  void Promise.race([loaded, timeout]).then(print);
 }
 
 /** A broken picture must not hold the receipt back. */

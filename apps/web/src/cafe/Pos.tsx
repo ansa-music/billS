@@ -1113,7 +1113,7 @@ export function PosPage() {
                   setMode('pay');
                 }
           }
-          onPrint={(res) => printReceipt(res.check, state.club, undefined, Date.now(), res.order.number)}
+          onPrint={(res) => printCounterReceipt(res, state)}
         />
       )}
 
