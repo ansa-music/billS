@@ -1,4 +1,4 @@
-import type { Action, LicenseState, LicenseStatus, RoleSet } from '@bills/domain';
+import type { Action, Business, LicenseState, LicenseStatus, RoleSet } from '@bills/domain';
 import { ACTION_MODULE, MODULE_LABEL, decide, licenseGateOf } from '@bills/domain';
 import { currentTrial, TRIAL } from './demo-hub/trial-store.ts';
 
@@ -33,8 +33,8 @@ const READ_ONLY_TEXT = 'Лицензия не активна — режим «т
  * Why `action` is not available right now, or null when it is. Role first,
  * then the license (read-only mode, a module that is not bought).
  */
-export function blockedReason(roles: RoleSet, action: Action, license: LicenseStatus | null): string | null {
-  switch (decide(roles, action, licenseGateOf(license))) {
+export function blockedReason(roles: RoleSet, action: Action, license: LicenseStatus | null, business?: Business): string | null {
+  switch (decide(roles, action, licenseGateOf(license), business)) {
     case 'ok':
       return null;
     case 'forbidden':

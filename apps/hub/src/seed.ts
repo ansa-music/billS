@@ -148,9 +148,10 @@ export const CAFE_MENU: Array<[category: string, products: CafeProduct[]]> = [
   ],
 ];
 
+/** A coffee shop names the roles its own way (CAFE_ROLE_LABEL): the manager is «Директор», the admin «Управляющий». */
 const CAFE_STAFF: Array<[name: string, roles: Role[]]> = [
-  ['Марат Управляющий', ['manager']],
-  ['Асель Администратор', ['admin']],
+  ['Марат Директор', ['manager']],
+  ['Асель Управляющая', ['admin']],
   ['Айгерим Кассир', ['cashier']],
   ['Данияр Бариста', ['bartender']],
 ];

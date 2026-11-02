@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { GuestRequestKind, HubState, JournalCategory, JournalEntry, TableKind } from '@bills/domain';
 import { formatMoney, GUEST_REQUEST_KINDS, guestRequestSummary, isRole, rolesLabel } from '@bills/domain';
-import type { Role } from '@bills/domain';
+import type { BusinessType, Role } from '@bills/domain';
 import { fetchJournal } from '../api.ts';
+import { businessOf } from '../cafe/cafe.ts';
 import { EmptyState, SectionCard } from '../components.tsx';
 import { formatClock, formatDay, formatSpan, KIND_LABEL, lampErrorText } from '../format.ts';
 import { Icon } from '../icons.tsx';
@@ -63,10 +64,10 @@ const fieldsOf = (d: Record<string, unknown>): string | undefined => {
 const ACTOR_WORD: Record<string, string> = { system: 'Система', setup: 'Установка', cloud: 'Кабинет TS' };
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
-/** "Официант + кассир" from a role or a list of roles in an entry; '' when there is none. */
-const rolesOf = (v: unknown): string => {
+/** "Официант + кассир" from a role or a list of roles in an entry, in this venue's words; '' when there is none. */
+const rolesOf = (v: unknown, business: BusinessType): string => {
   const list: Role[] = (Array.isArray(v) ? v : [v]).filter(isRole);
-  return list.length ? rolesLabel(list) : '';
+  return list.length ? rolesLabel(list, business) : '';
 };
 const METHOD_WORD: Record<string, string> = { CASH: 'наличные', CARD: 'карта', QR: 'QR' };
 const num = (v: unknown) => (typeof v === 'number' ? v : 0);
@@ -76,6 +77,7 @@ function describe(e: JournalEntry, state: HubState): Described {
   const table = state.tables.find((t) => t.id === e.tableId)?.name ?? 'Стол';
   const d = e.data;
   const money = (v: unknown) => formatMoney(num(v), state.club.currency);
+  const business = businessOf(state.settings);
   switch (e.action) {
     case 'session.open_requested': {
       const tariff = state.tariffs.find((t) => t.id === d.tariffId)?.name;
@@ -191,9 +193,22 @@ function describe(e: JournalEntry, state: HubState): Described {
     case 'tariff.updated':
       return { title: `Тариф изменён${str(d.name) ? `: «${str(d.name)}»` : ''}`, detail: fieldsOf(d), icon: 'tariffs', cat: 'club' };
     case 'staff.created':
-      return { title: `Новый сотрудник: ${str(d.name)}`, detail: rolesOf(d.roles ?? d.role) ? `роли: ${rolesOf(d.roles ?? d.role)}` : undefined, icon: 'staff', cat: 'club' };
+      return {
+        title: `Новый сотрудник: ${str(d.name)}`,
+        detail: rolesOf(d.roles ?? d.role, business) ? `роли: ${rolesOf(d.roles ?? d.role, business)}` : undefined,
+        icon: 'staff',
+        cat: 'club',
+      };
     case 'staff.updated':
       return { title: 'Сотрудник изменён', detail: fieldsOf(d), icon: 'staff', cat: 'club' };
+    case 'staff.deleted':
+      return {
+        title: `Сотрудник удалён: ${str(d.name)}`,
+        detail: [rolesOf(d.roles, business), num(d.keysRevoked) > 0 ? 'ключи отозваны' : ''].filter(Boolean).join(' · ') || undefined,
+        icon: 'staff',
+        cat: 'club',
+        bad: true,
+      };
     case 'staff.pin_checked':
       return { title: d.ok === false ? 'Неверный PIN' : 'Вход по PIN', icon: 'user', cat: 'club', bad: d.ok === false };
     // Games: pauses, transfers, prepaid time, settling
@@ -303,7 +318,7 @@ function describe(e: JournalEntry, state: HubState): Described {
     case 'key.issued':
       return {
         title: 'Выдан ключ доступа',
-        detail: [rolesOf(d.forRoles ?? d.forRole), str(d.label)].filter(Boolean).join(' · ') || undefined,
+        detail: [rolesOf(d.forRoles ?? d.forRole, business), str(d.label)].filter(Boolean).join(' · ') || undefined,
         icon: 'staff',
         cat: 'club',
       };

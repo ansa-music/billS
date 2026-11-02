@@ -46,8 +46,10 @@ type ShiftDialog =
 export function ShiftPanel(props: DeskProps) {
   const desk = useDesk(props);
   const { shift, club, serverNow } = desk.state;
-  // The shift's money (expected cash, X report) is stats.view: a cashier counts the drawer blind.
-  const seesMoney = useHub().can('stats.view');
+  // The shift's money (expected cash, X and Z reports) is shift.report: a cashier counts the drawer blind.
+  // A coffee shop's barista has it — often alone at the counter, they close the day.
+  const { can, business } = useHub();
+  const seesMoney = can('shift.report');
   const [dialog, setDialog] = useState<ShiftDialog | null>(null);
   const close = () => setDialog(null);
   const xPrint = useAction();
@@ -75,7 +77,11 @@ export function ShiftPanel(props: DeskProps) {
               <strong className="money">{formatMoney(shift.expectedCash, club.currency)}</strong>
             </div>
           ) : (
-            <p className="hint">Сумму в кассе и X-отчёт видят старший смены, администратор и управляющий.</p>
+            <p className="hint">
+              {business === 'cafe'
+                ? 'Сумму в кассе и X-отчёт видят бариста, старший смены, управляющий и директор.'
+                : 'Сумму в кассе и X-отчёт видят старший смены, администратор и управляющий.'}
+            </p>
           )}
           <div className="shift-actions">
             <button
@@ -274,7 +280,7 @@ function CloseShiftDialog({
   const formId = useId();
 
   const countedCash = counted.trim() === '' ? null : parseMoney(counted, currency);
-  // Blind count (no stats.view): the HUB sends no expected cash, so no difference is shown either.
+  // Blind count (no shift.report): the HUB sends no expected cash, so no difference is shown either.
   const expected = shift.expectedCash;
   const diff =
     countedCash === null || expected === null ? null : describeDifference(cashDifference(countedCash, expected), currency);

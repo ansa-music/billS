@@ -1,5 +1,6 @@
 import type {
   AlertView,
+  BusinessType,
   CashMovementView,
   CheckItemView,
   CheckPaymentView,
@@ -259,6 +260,15 @@ export function loadSettings(db: Db, club: string): ClubSettings {
     // A damaged JSON must not take the hall screen down: fall back to defaults.
   }
   return normalizeClubSettings(parsed);
+}
+
+/**
+ * What the club is (settings.business.type): a coffee shop has its own role words and a few
+ * rights of its own (packages/domain permissions.ts). Billiards when nothing is set up yet.
+ */
+export function businessTypeOf(db: Db): BusinessType {
+  const club = one<{ id: string }>(db, 'SELECT id FROM clubs ORDER BY created_at LIMIT 1');
+  return club ? loadSettings(db, club.id).business.type : 'billiards';
 }
 
 export interface OrderRow {

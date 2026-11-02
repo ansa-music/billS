@@ -4,6 +4,8 @@ import {
   ACTION_NAMES,
   ACTIONS,
   allowedActions,
+  assignableRoles,
+  CAFE_ONLY_ACTIONS,
   can,
   canAssignRole,
   canAssignRoles,
@@ -13,6 +15,8 @@ import {
   normalizeRoles,
   primaryRole,
   READ_ONLY_ACTIONS,
+  ROLE_LABEL,
+  roleLabel,
   ROLES,
   rolesLabel,
   usesLongKey,
@@ -118,14 +122,21 @@ test('the senior of a shift approves refunds and discounts; the admin runs setti
 test('the manager (the client) runs the company: branches, staff, club identity — not the platform', () => {
   for (const action of ACTION_NAMES) {
     const platformOnly = action === 'platform.view' || action === 'clients.edit' || action === 'platform.staff';
-    assert.equal(can('manager', action), !platformOnly, action);
+    // A coffee shop's own actions (deleting a person) do not exist in a billiard club.
+    assert.equal(can('manager', action), !platformOnly && !CAFE_ONLY_ACTIONS.has(action), action);
+    assert.equal(can('manager', action, 'cafe'), !platformOnly, action);
   }
 });
 
 test('the platform owner can do everything; tech everything but hiring the platform team', () => {
-  for (const action of ACTION_NAMES) assert.ok(can('owner', action), action);
-  assert.equal(allowedActions('owner').length, ACTION_NAMES.length);
-  for (const action of ACTION_NAMES) assert.equal(can('tech', action), action !== 'platform.staff', action);
+  for (const action of ACTION_NAMES) assert.equal(can('owner', action), !CAFE_ONLY_ACTIONS.has(action), action);
+  for (const action of ACTION_NAMES) assert.ok(can('owner', action, 'cafe'), action);
+  assert.equal(allowedActions('owner', 'cafe').length, ACTION_NAMES.length);
+  assert.equal(allowedActions('owner').length, ACTION_NAMES.length - CAFE_ONLY_ACTIONS.size);
+  for (const action of ACTION_NAMES) {
+    assert.equal(can('tech', action), action !== 'platform.staff' && !CAFE_ONLY_ACTIONS.has(action), action);
+    assert.equal(can('tech', action, 'cafe'), action !== 'platform.staff', action);
+  }
 });
 
 test('no role or an unknown role gets nothing', () => {
@@ -198,4 +209,118 @@ test('modules: without the bar module there are no orders; without hardware no l
   assert.equal(decide('manager', 'lamp.blink', noBar), 'module_off');
   assert.equal(decide('waiter', 'table.open', noBar), 'ok');
   assert.equal(decide('owner', 'order.create', noBar), 'ok');
+});
+
+// ── Coffee shop: role words and rights (client feedback) ────────────────────
+
+test('billiards keep their rights exactly: no business and «billiards» answer the same for every role and set', () => {
+  for (const role of ROLES) assert.deepEqual(allowedActions(role, 'billiards'), allowedActions(role), role);
+  assert.deepEqual(allowedActions(['waiter', 'cashier'], 'billiards'), allowedActions(['waiter', 'cashier']));
+  // The shift's money in a billiard club stays with the manager, the administrator and the senior.
+  for (const role of ['manager', 'admin', 'senior'] as const) assert.ok(can(role, 'shift.report'), role);
+  for (const role of ['cashier', 'bartender', 'waiter'] as const) assert.ok(!can(role, 'shift.report'), role);
+  for (const action of ['shift.open', 'shift.close', 'shift.cash', 'shift.report', 'payment.take'] as const) {
+    assert.ok(!can('bartender', action), action);
+    assert.ok(!can('bartender', action, 'billiards'), action);
+  }
+  assert.ok(!can('admin', 'staff.edit', 'billiards'));
+  for (const role of ROLES) assert.ok(!can(role, 'staff.delete', 'billiards'), role);
+  assert.deepEqual(assignableRoles('admin'), []);
+  assert.deepEqual(assignableRoles('admin', 'billiards'), []);
+});
+
+test('billiard role words are unchanged', () => {
+  assert.deepEqual(ROLE_LABEL, {
+    owner: 'Владелец платформы',
+    tech: 'Техподдержка',
+    manager: 'Управляющий',
+    admin: 'Администратор',
+    senior: 'Старший смены',
+    cashier: 'Кассир',
+    bartender: 'Бармен / бариста',
+    waiter: 'Официант',
+  });
+  for (const role of ROLES) assert.equal(roleLabel(role), ROLE_LABEL[role], role);
+  for (const role of ROLES) assert.equal(roleLabel(role, 'billiards'), ROLE_LABEL[role], role);
+  assert.equal(rolesLabel(['admin', 'bartender']), 'Администратор + бармен / бариста');
+});
+
+test('a coffee shop says «Директор», «Управляющий», «Бариста»; the codes stay the same', () => {
+  assert.equal(roleLabel('manager', 'cafe'), 'Директор');
+  assert.equal(roleLabel('admin', 'cafe'), 'Управляющий');
+  assert.equal(roleLabel('bartender', 'cafe'), 'Бариста');
+  assert.equal(roleLabel('senior', 'cafe'), 'Старший смены');
+  assert.equal(roleLabel('cashier', 'cafe'), 'Кассир');
+  assert.equal(roleLabel('waiter', 'cafe'), 'Официант');
+  assert.equal(roleLabel('owner', 'cafe'), 'Владелец платформы');
+  assert.equal(rolesLabel(['bartender', 'cashier'], 'cafe'), 'Кассир + бариста');
+  assert.equal(rolesLabel('manager', 'cafe'), 'Директор');
+  const mixed = normalizeRoles(['manager', 'cashier'], 'cafe');
+  assert.equal(mixed.ok, false);
+  assert.match(mixed.ok ? '' : mixed.message, /«Директор»/);
+  const billiard = normalizeRoles(['manager', 'cashier']);
+  assert.match(billiard.ok ? '' : billiard.message, /«Управляющий»/);
+});
+
+test('a coffee shop: its «Управляющий» (admin) hires and keys only the staff below them', () => {
+  assert.ok(can('admin', 'staff.edit', 'cafe'));
+  for (const role of ['senior', 'cashier', 'bartender', 'waiter'] as const) assert.ok(canAssignRole('admin', role, 'cafe'), role);
+  assert.ok(canAssignRoles('admin', ['bartender', 'cashier'], 'cafe'));
+  for (const role of ['admin', 'manager', 'tech', 'owner'] as const) assert.ok(!canAssignRole('admin', role, 'cafe'), role);
+  assert.ok(!canAssignRoles('admin', ['admin', 'senior'], 'cafe'));
+  // Nobody else gains anything: the director as before, the staff still hire nobody.
+  assert.deepEqual(assignableRoles('manager', 'cafe'), assignableRoles('manager'));
+  for (const role of ['senior', 'cashier', 'bartender', 'waiter'] as const) {
+    assert.ok(!can(role, 'staff.edit', 'cafe'), role);
+    assert.deepEqual(assignableRoles(role, 'cafe'), [], role);
+  }
+});
+
+test('a coffee shop: only the director deletes a person (and the platform); nobody in a billiard club', () => {
+  assert.ok(can('manager', 'staff.delete', 'cafe'));
+  assert.ok(can('owner', 'staff.delete', 'cafe'));
+  assert.ok(can('tech', 'staff.delete', 'cafe'));
+  for (const role of ['admin', 'senior', 'cashier', 'bartender', 'waiter'] as const) assert.ok(!can(role, 'staff.delete', 'cafe'), role);
+  assert.ok(!can('manager', 'staff.delete'));
+  assert.ok(!can('owner', 'staff.delete'));
+  const ro: LicenseGate = { readOnly: true, modules: allModules };
+  assert.equal(decide('manager', 'staff.delete', ro, 'cafe'), 'read_only');
+  assert.equal(decide('manager', 'staff.delete', { readOnly: false, modules: allModules }, 'cafe'), 'ok');
+  assert.equal(decide('manager', 'staff.delete', { readOnly: false, modules: allModules }), 'forbidden');
+});
+
+test('a coffee shop: the barista opens and closes the shift, counts the cash, takes X and Z — nothing more', () => {
+  // …and settles a «счёт потом» check, without which the shift would not close.
+  for (const action of ['shift.open', 'shift.close', 'shift.cash', 'shift.report', 'payment.take'] as const) {
+    assert.ok(can('bartender', action, 'cafe'), action);
+  }
+  // Still no menu, revenue page, staff, settings, day totals, refunds or discounts.
+  for (const action of [
+    'catalog.edit',
+    'reports.view',
+    'stats.view',
+    'staff.view',
+    'staff.edit',
+    'settings.view',
+    'refund.approve',
+    'discount.apply',
+    'check.edit',
+    'counter.cancel',
+  ] as const) {
+    assert.ok(!can('bartender', action, 'cafe'), action);
+  }
+  // The cashier of a coffee shop keeps counting blind; a waiter gets no shift at all.
+  assert.ok(can('cashier', 'shift.close', 'cafe'));
+  assert.ok(!can('cashier', 'shift.report', 'cafe'));
+  assert.ok(!can('waiter', 'shift.open', 'cafe'));
+  // Exactly the listed grants, nothing else for the barista.
+  const added = allowedActions('bartender', 'cafe').filter((a) => !allowedActions('bartender').includes(a));
+  assert.deepEqual(added.sort(), ['payment.take', 'shift.cash', 'shift.close', 'shift.open', 'shift.report']);
+  // Read-only license: the shift still closes and its report is still readable.
+  const ro: LicenseGate = { readOnly: true, modules: allModules };
+  assert.equal(decide('bartender', 'shift.close', ro, 'cafe'), 'ok');
+  assert.equal(decide('bartender', 'shift.report', ro, 'cafe'), 'ok');
+  assert.equal(decide('bartender', 'shift.close', ro), 'forbidden');
+  assert.ok(canNow('bartender', 'shift.open', null, 'cafe'));
+  assert.ok(!canNow('bartender', 'shift.open', null));
 });

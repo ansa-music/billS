@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import type { Action } from '@bills/domain';
+import type { Action, BusinessType } from '@bills/domain';
 import { ACTION_MODULE, decide, MODULE_LABEL } from '@bills/domain';
 import type { Actor } from '../auth.ts';
 import { HubError } from '../errors.ts';
@@ -17,7 +17,14 @@ declare module 'fastify' {
     sessionToken?: string;
     /** The HUB's license (set by the auth hook): routes check it with the role. */
     license?: LicenseService;
+    /** The kind of venue right now (set by the auth hook): a coffee shop has rights of its own (CAFE_GRANTS). */
+    business?: () => BusinessType;
   }
+}
+
+/** The kind of venue for this request's rights check; billiards when the hook did not run. */
+export function businessOf(req: FastifyRequest): BusinessType {
+  return req.business?.() ?? 'billiards';
 }
 
 /** The signed-in employee; 401 when the auth hook found nobody. */
@@ -27,14 +34,15 @@ export function actorOf(req: FastifyRequest): Actor {
 }
 
 /**
- * 403 unless the signed-in person's roles may perform the action and the
- * license allows it: FORBIDDEN, LICENSE_READ_ONLY (expired, blocked, missing…)
- * or LICENSE_MODULE_OFF (the bar or the hardware is not in the license).
+ * 403 unless the signed-in person's roles may perform the action in this kind
+ * of venue (a coffee shop adds CAFE_GRANTS) and the license allows it:
+ * FORBIDDEN, LICENSE_READ_ONLY (expired, blocked, missing…) or
+ * LICENSE_MODULE_OFF (the bar or the hardware is not in the license).
  */
 export function assertCan(req: FastifyRequest, action: Action): Actor {
   const actor = actorOf(req);
   const license = req.license;
-  const decision = decide(actor.roles, action, license?.gate() ?? null);
+  const decision = decide(actor.roles, action, license?.gate() ?? null, businessOf(req));
   if (decision === 'forbidden') throw new HubError(403, 'FORBIDDEN', 'Недостаточно прав для этого действия');
   if (decision === 'read_only') {
     const message = license?.status().message ?? 'Лицензия не действует — режим «только чтение»';

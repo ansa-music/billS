@@ -119,7 +119,7 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   // Health for operators and monitoring (public); `now` stays the HUB clock, the rest is wall time.
   const demo = options.demo;
   if (demo) {
-    app.get('/api/demo', async (): Promise<DemoInfo> => ({ demo: true, keys: DEMO_KEYS, resetAt: demo.resetAt() }));
+    app.get('/api/demo', async (): Promise<DemoInfo> => ({ demo: true, keys: DEMO_KEYS, resetAt: demo.resetAt(), business: hub.business() }));
   }
 
   app.get('/api/health', async () => ({
@@ -141,8 +141,8 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   app.get('/api/state', { preHandler: guard('hall.view') }, async (req) => {
     const roles = actorOf(req).roles;
     const state = hub.state({ staffNames: can(roles, 'club.edit') });
-    // Blind count: the cash expected in the drawer is shift money (stats.view).
-    return { ...state, shift: shiftFor(roles, state.shift) };
+    // Blind count: the cash expected in the drawer is shift money (shift.report).
+    return { ...state, shift: shiftFor(roles, state.shift, state.settings.business.type) };
   });
 
   app.post<{ Params: { tableId: string }; Body: { tariffId?: string; prepaidMinutes?: number } }>(

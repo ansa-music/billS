@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { CreateStaffRequest, IssueKeyResponse, Role, StaffListResponse, StaffView, UpdateStaffRequest } from '@bills/domain';
-import { ROLES, ROLE_LABEL, canAssignRoles, isPlatformRole, normalizeRoles, rolesLabel } from '@bills/domain';
+import type {
+  BusinessType,
+  CreateStaffRequest,
+  DeleteStaffResponse,
+  IssueKeyResponse,
+  Role,
+  StaffListResponse,
+  StaffView,
+  UpdateStaffRequest,
+} from '@bills/domain';
+import { ROLES, canAssignRoles, isPlatformRole, normalizeRoles, roleLabel, rolesLabel } from '@bills/domain';
 import { fetchJson } from '../api.ts';
 import { useAuth } from '../auth.ts';
 import { Confirm, Empty, Field, Loading, Modal, Page, Section, Toast, useToast } from '../ui.tsx';
@@ -24,10 +33,15 @@ const isLead = (r: Role) => r === 'manager' || isPlatformRole(r);
  * Staff of the club: name and roles, the login key (issued right when a person
  * is added and shown big, with a QR code and a printed slip), assigned tables,
  * the login log. Editing needs staff.edit (and a license that is not read-only).
+ *
+ * A coffee shop: role words of its own («Директор», «Управляющий», «Бариста»), its admin
+ * manages the staff below them, and people are not switched off but deleted — «Удалить»,
+ * only the director (staff.delete); a deleted person is gone from the list.
  */
 export function StaffPage() {
-  const { state, canNow, blockedReason, license } = useHub();
-  const { staff: me, roles: myRoles, can } = useAuth();
+  const { state, canNow, blockedReason, license, can, business } = useHub();
+  const { staff: me, roles: myRoles } = useAuth();
+  const cafe = business === 'cafe';
   const { toast, show, clear } = useToast();
   const { run, isBusy } = useCommands(show);
   // Errors of the add / edit form go into the form: a toast would sit under the dialog's backdrop.
@@ -41,6 +55,7 @@ export function StaffPage() {
   /** Just added: the person and the key issued in the same step. */
   const [added, setAdded] = useState<{ staff: StaffView; issued: IssueKeyResponse | null; problem: string | null } | null>(null);
   const [toggling, setToggling] = useState<StaffView | null>(null);
+  const [deleting, setDeleting] = useState<StaffView | null>(null);
   const [keysFor, setKeysFor] = useState<StaffView | null>(null);
 
   const load = useCallback(async () => {
@@ -65,11 +80,13 @@ export function StaffPage() {
   const tables = state?.tables ?? [];
   const tableName = useMemo(() => new Map(tables.map((t) => [t.id, t.name])), [tables]);
   /** Roles the viewer may give, one by one (the HUB checks the whole set again). */
-  const assignable = useMemo(() => ROLES.filter((r) => canAssignRoles(myRoles, [r])), [myRoles]);
+  const assignable = useMemo(() => ROLES.filter((r) => canAssignRoles(myRoles, [r], business)), [myRoles, business]);
   /** The viewer may manage this person at all (roles top-down). */
-  const manages = (s: StaffView) => roleCanEdit && canAssignRoles(myRoles, s.roles);
+  const manages = (s: StaffView) => roleCanEdit && canAssignRoles(myRoles, s.roles, business);
   /** People from the manager's cloud cabinet are edited there. */
   const rowEditable = (s: StaffView) => canEdit && s.origin !== 'cloud' && manages(s);
+  /** A coffee shop's director deletes people below them (never themselves); the cabinet's people are deleted there. */
+  const rowDeletable = (s: StaffView) => canNow('staff.delete') && rowEditable(s) && me?.id !== s.id;
   /** Keys: the people one manages, and one's own row. */
   const rowKeysVisible = (s: StaffView) => manages(s) || me?.id === s.id;
   const activeCount = staff?.filter((s) => s.isActive && !s.roles.some(isLead)).length ?? 0;
@@ -105,6 +122,15 @@ export function StaffPage() {
     setToggling(null);
     if (!updated) return;
     show(updated.isActive ? `«${updated.name}» снова может входить` : `«${updated.name}» отключён`);
+    await load();
+  };
+
+  const deleteStaff = async () => {
+    if (!deleting) return;
+    const done = await run<DeleteStaffResponse>(`delete:${deleting.id}`, `/api/staff/${deleting.id}/delete`, {});
+    setDeleting(null);
+    if (!done) return;
+    show(`«${done.name}» удалён из сотрудников`);
     await load();
   };
 
@@ -156,7 +182,7 @@ export function StaffPage() {
                       {s.name}
                       {self && <span className="muted"> (вы)</span>}
                     </span>
-                    <span className="staff-role">{rolesLabel(s.roles)}</span>
+                    <span className="staff-role">{rolesLabel(s.roles, business)}</span>
                     {s.origin === 'cloud' && (
                       <span className="staff-cloud">
                         изменяется в{' '}
@@ -197,15 +223,28 @@ export function StaffPage() {
                           <button type="button" className="btn btn-small" onClick={() => setEditing(s)}>
                             Изменить
                           </button>
-                          <button
-                            type="button"
-                            className={s.isActive ? 'btn btn-small btn-ghost' : 'btn btn-small'}
-                            onClick={() => setToggling(s)}
-                            disabled={self || isBusy(`active:${s.id}`)}
-                            title={self ? 'Нельзя отключить самого себя' : undefined}
-                          >
-                            {s.isActive ? 'Отключить' : 'Включить снова'}
-                          </button>
+                          {/* A coffee shop does not switch people off: its director deletes them. */}
+                          {!cafe && (
+                            <button
+                              type="button"
+                              className={s.isActive ? 'btn btn-small btn-ghost' : 'btn btn-small'}
+                              onClick={() => setToggling(s)}
+                              disabled={self || isBusy(`active:${s.id}`)}
+                              title={self ? 'Нельзя отключить самого себя' : undefined}
+                            >
+                              {s.isActive ? 'Отключить' : 'Включить снова'}
+                            </button>
+                          )}
+                          {rowDeletable(s) && (
+                            <button
+                              type="button"
+                              className="btn btn-small btn-outline-danger"
+                              onClick={() => setDeleting(s)}
+                              disabled={isBusy(`delete:${s.id}`)}
+                            >
+                              Удалить
+                            </button>
+                          )}
                         </>
                       )}
                     </div>
@@ -224,6 +263,7 @@ export function StaffPage() {
           key={editing === 'new' ? 'new' : editing.id}
           staff={editing === 'new' ? null : editing}
           roles={assignable}
+          business={business}
           tables={tables}
           busy={formCmd.isBusy('create') || (editing !== 'new' && formCmd.isBusy(`update:${editing.id}`))}
           serverError={formError}
@@ -294,6 +334,17 @@ export function StaffPage() {
         onCancel={() => setToggling(null)}
       />
 
+      <Confirm
+        open={deleting !== null}
+        title={`Удалить сотрудника «${deleting?.name ?? ''}»?`}
+        text={`«${deleting?.name ?? ''}» пропадёт из списка сотрудников и со входа, его ключи сразу перестанут работать. Вернуть его будет нельзя — только добавить заново. В журнале, чеках и отчётах имя останется.`}
+        confirmLabel="Удалить"
+        danger
+        busy={deleting ? isBusy(`delete:${deleting.id}`) : false}
+        onConfirm={() => void deleteStaff()}
+        onCancel={() => setDeleting(null)}
+      />
+
       <Toast message={toast} onClose={clear} />
     </Page>
   );
@@ -303,6 +354,7 @@ export function StaffPage() {
 function StaffForm({
   staff,
   roles,
+  business,
   tables,
   busy,
   serverError,
@@ -312,6 +364,8 @@ function StaffForm({
   staff: StaffView | null;
   /** Roles the editor may give. */
   roles: readonly Role[];
+  /** Role words of this venue. */
+  business: BusinessType;
   tables: Array<{ id: string; name: string }>;
   busy: boolean;
   /** The HUB refused (LICENSE_STAFF_LIMIT, a role that cannot be given…). */
@@ -342,7 +396,7 @@ function StaffForm({
     const name = form.name.trim();
     if (!name) return setError('Укажите имя');
     if (name.length > 80) return setError('Имя — не длиннее 80 символов');
-    const checked = normalizeRoles(form.roles);
+    const checked = normalizeRoles(form.roles, business);
     if (!checked.ok) return setError(checked.message);
     const added = checked.roles.filter((r) => !staff?.roles.includes(r));
     if (added.some((r) => !roles.includes(r))) {
@@ -375,7 +429,7 @@ function StaffForm({
         </Field>
         <Field
           label="Роли"
-          hint={form.roles.length > 0 ? `Права складываются: ${rolesLabel(form.roles)}` : 'Отметьте хотя бы одну роль'}
+          hint={form.roles.length > 0 ? `Права складываются: ${rolesLabel(form.roles, business)}` : 'Отметьте хотя бы одну роль'}
         >
           <div className="role-picker" role="group" aria-label="Роли">
             {roleOptions.map((r) => {
@@ -383,7 +437,7 @@ function StaffForm({
               return (
                 <label key={r} className="role-option" data-disabled={allowed ? undefined : ''}>
                   <input type="checkbox" checked={form.roles.includes(r)} disabled={!allowed} onChange={() => toggleRole(r)} />
-                  <span>{ROLE_LABEL[r]}</span>
+                  <span>{roleLabel(r, business)}</span>
                 </label>
               );
             })}

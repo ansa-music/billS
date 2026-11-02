@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { CreateStaffRequest, StaffListResponse, UpdateStaffRequest, VerifyPinRequest } from '@bills/domain';
 import { ROLES } from '@bills/domain';
 import type { Hub } from '../../hub.ts';
-import { guard, runCommand } from '../command.ts';
+import { emptyBody, guard, runCommand } from '../command.ts';
 
 const roleSchema = { type: 'string', enum: [...ROLES] } as const;
 const rolesSchema = { type: 'array', minItems: 1, maxItems: ROLES.length, items: { type: 'string', maxLength: 20 } } as const;
@@ -96,6 +96,20 @@ export function registerStaffRoutes(app: FastifyInstance, hub: Hub): void {
           actor,
         }),
       }), 'staff.edit'),
+  );
+
+  // A coffee shop's «Удалить» (DeleteStaffResponse): only its director (staff.delete, café only).
+  app.post<{ Params: { staffId: string } }>('/api/staff/:staffId/delete', { schema: { body: emptyBody } }, async (req, reply) =>
+    runCommand(
+      req,
+      reply,
+      hub,
+      (actor, by) => ({
+        status: 200,
+        body: hub.staff.delete({ staffId: req.params.staffId, actor, by: by.id ? by : undefined }),
+      }),
+      'staff.delete',
+    ),
   );
 
   app.post<{ Params: { staffId: string }; Body: VerifyPinRequest }>(

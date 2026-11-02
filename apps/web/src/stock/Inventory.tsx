@@ -155,7 +155,7 @@ export function InventoryTab({ ingredients, run, busy, notify }: { ingredients: 
                 Начать инвентаризацию
               </button>
             ) : (
-              <p className="muted">Проводит управляющий или администратор.</p>
+              <p className="muted">Проводит директор или управляющий.</p>
             )}
           </div>
         </SectionCard>

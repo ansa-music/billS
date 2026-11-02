@@ -1,6 +1,6 @@
 import type { CancelledSummary } from './archive.ts';
 import type { DiscountKind, PaymentMethod } from './billing.ts';
-import type { ProductOptionGroup } from './cafe.ts';
+import type { BusinessType, ProductOptionGroup } from './cafe.ts';
 import type { SyncStatus } from './cloud.ts';
 import type { Minor } from './money.ts';
 import type { PauseSpan } from './pause.ts';
@@ -248,7 +248,7 @@ export interface ShiftView {
   openingFloat: Minor;
   /**
    * What should be in the drawer now (open) or at close. null for someone without
-   * `stats.view` (a cashier, a barista): they count the drawer blind.
+   * `shift.report` (a cashier; a barista of a billiard club): they count the drawer blind.
    */
   expectedCash: Minor | null;
   closedAt: number | null;
@@ -371,7 +371,7 @@ export interface CloseShiftRequest {
 
 export interface CloseShiftResponse {
   shift: ShiftView;
-  /** The Z report; null for someone without `stats.view` (blind count: no expected cash, no revenue). */
+  /** The Z report; null for someone without `shift.report` (blind count: no expected cash, no revenue). */
   report: ShiftReport | null;
 }
 
@@ -650,6 +650,8 @@ export interface RosterPerson {
 
 export interface RosterResponse {
   people: RosterPerson[];
+  /** What the venue is, so the login screen names roles in its words; absent from an older HUB (= billiards). */
+  business?: BusinessType;
 }
 
 /** GET /api/auth/me */
@@ -771,9 +773,25 @@ export interface StaffView {
   updatedAt: number;
 }
 
-/** GET /api/staff → { staff: StaffView[] } (inactive included, active first). */
+/**
+ * GET /api/staff → { staff: StaffView[] } (inactive included, active first). People deleted in a
+ * coffee shop are never listed; a coffee shop lists only the people who work (inactive = removed).
+ */
 export interface StaffListResponse {
   staff: StaffView[];
+}
+
+/**
+ * POST /api/staff/:staffId/delete (empty body; coffee shop only, `staff.delete` — its director).
+ * The person disappears from the staff list, the login roster and every picker; their keys are
+ * revoked and sessions ended. The name stays in the journal, receipts, the archive and reports.
+ * 403 for yourself, 409 LAST_MANAGER for the last director, 409 STAFF_CLOUD_MANAGED for someone
+ * from the cabinet.
+ */
+export interface DeleteStaffResponse {
+  id: string;
+  name: string;
+  deletedAt: number;
 }
 
 /**
@@ -789,7 +807,10 @@ export interface CreateStaffRequest {
   tableIds?: string[];
 }
 
-/** POST /api/staff/:staffId/update (→ StaffView). `pin: null` removes the PIN. */
+/**
+ * POST /api/staff/:staffId/update (→ StaffView). `pin: null` removes the PIN. A coffee shop does not
+ * switch people off (`isActive: false` → 422 STAFF_DELETE_INSTEAD): its director deletes them.
+ */
 export interface UpdateStaffRequest {
   name?: string;
   roles?: Role[];

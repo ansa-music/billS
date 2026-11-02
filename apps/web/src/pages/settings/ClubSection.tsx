@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ClubAdminView } from '@bills/domain';
 import { isValidTimeZone } from '@bills/domain';
+import { businessOf } from '../../cafe/cafe.ts';
 import { Field, Section } from '../../ui.tsx';
 import type { SectionProps } from './shared.tsx';
 import { CURRENCIES, CURRENCY_LABEL, SaveBar, TIME_ZONE_LABEL, TIME_ZONES, useDraft } from './shared.tsx';
@@ -33,7 +34,9 @@ export function ClubSection({ club, online, isBusy, run, onSaved, canEdit }: Sec
 
   return (
     <Section title="Клуб">
-      {!canEdit && <p className="hint">Название, часовой пояс и валюту меняет управляющий.</p>}
+      {!canEdit && (
+        <p className="hint">Название, часовой пояс и валюту меняет {businessOf(club.settings) === 'cafe' ? 'директор' : 'управляющий'}.</p>
+      )}
       <div className="form">
         <div className="form-row">
           <Field label="Название клуба" error={dirty ? nameError : null}>

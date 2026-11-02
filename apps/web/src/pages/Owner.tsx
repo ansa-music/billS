@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import type { Action, OwnerSummary } from '@bills/domain';
 import { formatMoney } from '@bills/domain';
 import { fetchJson } from '../api.ts';
-import { useAuth } from '../auth.ts';
 import { formatClock } from '../format.ts';
 import { Link } from '../router.tsx';
 import { Empty, Loading, Page, Section, Toast, formatDateTime, localDate, useToast } from '../ui.tsx';
@@ -33,8 +32,7 @@ const QUICK_LINKS: QuickLink[] = [
 ];
 
 export function OwnerPage() {
-  const { state, online } = useHub();
-  const { can } = useAuth();
+  const { state, online, can } = useHub();
   const serverNow = useServerNow(1000);
   const { toast, show, clear } = useToast();
   const { run, isBusy } = useCommands(show);

@@ -107,7 +107,7 @@ export function SuppliesTab({ ingredients, run, busy, notify }: { ingredients: I
               ))}
             </div>
           )}
-          {query.trim() && found.length === 0 && <p className="muted">Такого сырья нет — его добавляет управляющий в «Остатках».</p>}
+          {query.trim() && found.length === 0 && <p className="muted">Такого сырья нет — его добавляет директор или управляющий в «Остатках».</p>}
         </div>
 
         {parsed.length === 0 ? (

@@ -276,7 +276,7 @@ export function registerMoneyRoutes(app: FastifyInstance, hub: Hub): void {
         hub,
         (actor, who) => ({
           status: 201,
-          body: shiftFor(who.roles, hub.shifts.open({ openingFloat: req.body.openingFloat, actor })),
+          body: shiftFor(who.roles, hub.shifts.open({ openingFloat: req.body.openingFloat, actor }), hub.business()),
         }),
         'shift.open',
       ),
@@ -305,14 +305,15 @@ export function registerMoneyRoutes(app: FastifyInstance, hub: Hub): void {
         hub,
         (actor, who) => ({
           status: 200,
-          body: shiftFor(who.roles, hub.shifts.moveCash({ shiftId: req.params.shiftId, ...req.body, actor })),
+          body: shiftFor(who.roles, hub.shifts.moveCash({ shiftId: req.params.shiftId, ...req.body, actor }), hub.business()),
         }),
         'shift.cash',
       ),
   );
 
-  // X and Z reports are the shift's money: managers, administrators, seniors (stats.view), not the cashier.
-  app.get<{ Params: { shiftId: string } }>('/api/shifts/:shiftId/report', { preHandler: guard('stats.view') }, async (req) =>
+  // X and Z reports are the shift's money (shift.report): managers, administrators, seniors — and a
+  // coffee shop's barista — not the cashier, who counts blind.
+  app.get<{ Params: { shiftId: string } }>('/api/shifts/:shiftId/report', { preHandler: guard('shift.report') }, async (req) =>
     hub.shifts.report(req.params.shiftId),
   );
 
@@ -340,7 +341,7 @@ export function registerMoneyRoutes(app: FastifyInstance, hub: Hub): void {
         (actor, who) => ({
           status: 200,
           // A cashier counts blind: no expected cash, no difference, no Z report in the answer.
-          body: closeFor(who.roles, hub.shifts.close({ shiftId: req.params.shiftId, ...req.body, actor })),
+          body: closeFor(who.roles, hub.shifts.close({ shiftId: req.params.shiftId, ...req.body, actor }), hub.business()),
         }),
         'shift.close',
       ),

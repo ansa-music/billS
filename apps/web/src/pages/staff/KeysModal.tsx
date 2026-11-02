@@ -5,7 +5,7 @@ import { SHORT_KEY_LENGTH, isShortKeyShape, isWeakShortKey, usesLongKey } from '
 import { fetchJson } from '../../api.ts';
 import { hrefFor } from '../../router.tsx';
 import { Confirm, Empty, Field, Loading, Modal, formatDate, formatDateTime } from '../../ui.tsx';
-import { useCommands } from '../../useHub.tsx';
+import { useCommands, useHub } from '../../useHub.tsx';
 import { printForm } from '../../cash/print/printForm.tsx';
 import { QrCode } from '../../QrCode.tsx';
 
@@ -260,6 +260,7 @@ function IssueForm({
   onSubmit: (body: IssueKeyRequest) => Promise<boolean>;
   onCancelReplace: () => void;
 }) {
+  const { business } = useHub();
   const [label, setLabel] = useState('');
   const [expires, setExpires] = useState('');
   const [own, setOwn] = useState(false);
@@ -300,7 +301,7 @@ function IssueForm({
       <h3>{title}</h3>
       {replacing && <p className="hint">Старый ключ отзовётся сразу после выдачи нового.</p>}
       {long ? (
-        <p className="hint">Управляющему выдаётся длинный ключ — он работает во всех филиалах.</p>
+        <p className="hint">{business === 'cafe' ? 'Директору' : 'Управляющему'} выдаётся длинный ключ — он работает во всех филиалах.</p>
       ) : (
         <>
           <p className="hint">Простой ключ — 6 цифр, работает только в этом филиале. Удобно вводить на планшете.</p>

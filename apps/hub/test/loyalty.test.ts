@@ -438,7 +438,7 @@ test('rights: a cashier looks guests up and applies rewards; only the manager se
     return (await hub.app.inject({ method, url, headers, ...(method === 'POST' ? { payload: body ?? {} } : {}) })).statusCode;
   };
   const cashier = await tokenOf('Айгерим Кассир');
-  const manager = await tokenOf('Марат Управляющий');
+  const manager = await tokenOf('Марат Директор');
   assert.equal(await call(cashier, 'POST', '/api/loyalty/settings', { enabled: true }), 403);
   assert.equal(await call(manager, 'POST', '/api/loyalty/settings', { enabled: true }), 200);
   assert.equal(await call(cashier, 'GET', `/api/loyalty/lookup?phone=${encodeURIComponent(PHONE)}`), 200);
