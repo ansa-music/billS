@@ -198,10 +198,12 @@ function ReportBody({ report, club }: { report: ShiftReport; club: HubState['clu
           <dt>Скидки</dt>
           <dd>{money(report.discounts)}</dd>
         </div>
-        <div>
-          <dt>Отменённых игр</dt>
-          <dd>{report.cancelledGames}</dd>
-        </div>
+        {report.cancelledGames > 0 && (
+          <div>
+            <dt>Отменённых игр</dt>
+            <dd>{report.cancelledGames}</dd>
+          </div>
+        )}
       </dl>
 
       {/* «Отменённые»: absent only from a HUB older than this screen. */}

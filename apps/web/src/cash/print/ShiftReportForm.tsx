@@ -85,7 +85,7 @@ export function ShiftReportForm({ report, club }: { report: ShiftReport; club: C
       <Row label="Операций оплаты" value={report.paymentsCount} />
       <Row label="Возвратов" value={report.refundsCount} />
       <Row label="Скидки" value={money(report.discounts)} />
-      <Row label="Отменённых игр" value={report.cancelledGames} />
+      {report.cancelledGames > 0 && <Row label="Отменённых игр" value={report.cancelledGames} />}
 
       {/* «Отменённые»: absent only from a HUB older than this screen. */}
       {report.cancelled && (

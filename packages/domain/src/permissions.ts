@@ -28,7 +28,7 @@ export const ROLE_LABEL: Record<Role, string> = {
   admin: 'Администратор',
   senior: 'Старший смены',
   cashier: 'Кассир',
-  bartender: 'Бармен',
+  bartender: 'Бармен / бариста',
   waiter: 'Официант',
 };
 
