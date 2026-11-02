@@ -1,7 +1,6 @@
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, RefObject } from 'react';
 import type {
-  CounterService,
   CreateCounterOrderResponse,
   Minor,
   PaymentMethod,
@@ -40,7 +39,7 @@ import { useHub } from '../useHub.tsx';
 import { createCounterOrder, optionsOf, useCachedCatalog } from './cafe.ts';
 import { takeGuestCounterOrder } from '../guest/api.ts';
 import { draftOfGuestOrder, PosGuestOrders } from '../guest/PosGuestOrders.tsx';
-import type { Draft, Held, Line } from './pos-model.ts';
+import type { Draft, Flash, Held, Line } from './pos-model.ts';
 import {
   buildRequest,
   categoryHue,
@@ -67,10 +66,13 @@ import {
 } from './pos-model.ts';
 import './cafe.css';
 import { EditGrid, lookStyle, TileBadge, TilePhoto } from './edit/EditGrid.tsx';
+import type { PayLine } from './PayStep.tsx';
+import { PAY_COMPACT, PayStep } from './PayStep.tsx';
 import type { TileLook } from './edit/useTileLook.ts';
 import { ordered, useTileLook } from './edit/useTileLook.ts';
 // Last: phone, tablet and touch layout over the shared café styles.
 import './pos-touch.css';
+import './pos-polish.css';
 
 const HITS = 'hits';
 /** The «Заказ 17» card stays this long after the HUB confirmed, then the counter is ready for the next guest. */
@@ -80,23 +82,13 @@ const FLASH_MS = 3000;
  * it stays longer — the waiter looks up from the guest and still reads «Заказ 17 отправлен бариста».
  */
 const FLASH_DOCKED_MS = 6000;
-
-/** What the order card shows right after «Оплатить»: at once, before the HUB answers. */
-interface Flash {
-  id: string;
-  state: 'sending' | 'ok' | 'failed';
-  method: PaymentMethod | null;
-  total: Minor;
-  change: Minor;
-  /** Split: the part paid by card or QR after the cash. */
-  rest: { method: PaymentMethod; amount: Minor } | null;
-  service: CounterService;
-  guestName: string;
-  res?: CreateCounterOrderResponse;
-  error?: string;
-  /** «Гостю начислено 45 ₸ бонусами» after the HUB confirmed. */
-  loyaltyNote?: string | null;
-}
+/**
+ * The full-screen payment step: «Заказ 17 · Сдача 450 ₸» stays this long after the HUB confirmed
+ * (or until a tap), then the counter is empty for the next guest. With change to hand back it
+ * stays a second longer — the cashier reads the sum while counting the coins.
+ */
+const STEP_DONE_MS = 2000;
+const STEP_CHANGE_MS = 3000;
 
 function useMedia(query: string): boolean {
   const [on, setOn] = useState(() => typeof matchMedia === 'function' && matchMedia(query).matches);
@@ -162,6 +154,7 @@ export function PosPage() {
   const desk = useDesk({ state, actor, refresh: hub.refresh, notify: hub.notify });
   const { catalog, error: catalogError } = useCachedCatalog(hub.version);
   const narrow = useMedia(PHONE);
+  const payCompact = useMedia(PAY_COMPACT);
   const sectionRef = useRef<HTMLElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
   // «Редактировать дизайн»: the owner dresses the tiles in place; selling is paused meanwhile.
@@ -269,6 +262,8 @@ export function PosPage() {
   const payNow = canTakeMoney && !noShift;
   const canSend = online && canOrder && !empty && !broken;
   const canPayNow = canSend && payNow;
+  // «Оплатить» opens the full-screen payment step (offline too: it says why the money must wait).
+  const canOpenPay = payNow && canOrder && !empty && !broken;
 
   const patchLines = (fn: (lines: Line[]) => Line[]) => setDraft((d) => ({ ...d, lines: fn(d.lines) }));
 
@@ -425,7 +420,9 @@ export function PosPage() {
     const taken = new Map<string, number>();
     for (const l of d.lines) taken.set(l.productId, (taken.get(l.productId) ?? 0) + l.qty);
 
-    setFlash({ id, state: 'sending', method, total: amount, change, rest, service: d.service, guestName: d.guestName.trim() });
+    // Paid in the full-screen step: its screen shows «Заказ 17 · Сдача 450 ₸»; a one-tap button: the card over the order.
+    const where = mode === 'pay' ? 'step' : 'panel';
+    setFlash({ id, state: 'sending', method, total: amount, change, rest, service: d.service, guestName: d.guestName.trim(), where });
     setFailure(null);
     setCleared(null);
     dropGuest();
@@ -465,7 +462,8 @@ export function PosPage() {
   };
 
   // The confirmation goes away by itself: the counter is ready for the next guest.
-  const flashMs = narrow ? FLASH_DOCKED_MS : FLASH_MS;
+  const flashMs =
+    flash?.where === 'step' ? (flash.change > 0 ? STEP_CHANGE_MS : STEP_DONE_MS) : narrow ? FLASH_DOCKED_MS : FLASH_MS;
   useEffect(() => {
     if (flash?.state !== 'ok') return;
     const t = setTimeout(() => setFlash((f) => (f?.id === flash.id ? null : f)), flashMs);
@@ -473,15 +471,16 @@ export function PosPage() {
   }, [flash?.state, flash?.id, flashMs]);
 
   // ── Keyboard (desktop counter) ────────────────────────────────────────────
+  // The full-screen payment step (a <dialog>) has keys of its own: PayStep.tsx.
+  const stepOpen = mode === 'pay' || flash?.where === 'step';
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   keyRef.current = (e: KeyboardEvent) => {
-    if (designing || shiftDialog || guestOpen || document.querySelector('dialog[open]')) return;
+    if (stepOpen || designing || shiftDialog || guestOpen || document.querySelector('dialog[open]')) return;
     const typing = isTyping(e.target);
     if (e.key === 'Escape') {
       if (typing) (e.target as HTMLElement).blur();
       if (flash) setFlash(null);
       else if (qtyPad) setQtyPad(false);
-      else if (mode === 'pay') setMode('order');
       else if (query) setQuery('');
       else if (selected) setSelected(null);
       else if (multiplier) setMultiplier(null);
@@ -500,20 +499,18 @@ export function PosPage() {
       e.preventDefault();
       if (!payNow) return;
       if (e.key === 'F1') {
-        if (!empty) setMode('pay');
+        if (canOpenPay) setMode('pay');
       } else pay(e.key === 'F2' ? 'CARD' : 'QR');
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (/^\d$/.test(e.key)) {
-      if (mode === 'pay') setTendered((t) => (t + e.key).replace(/^0+(?=\d)/, '').slice(0, 9));
-      else setMultiplier((m) => Math.min(99, (m ?? 0) * 10 + Number(e.key)) || null);
+      setMultiplier((m) => Math.min(99, (m ?? 0) * 10 + Number(e.key)) || null);
       e.preventDefault();
       return;
     }
     if (e.key === 'Backspace') {
-      if (mode === 'pay') setTendered((t) => t.slice(0, -1));
-      else setMultiplier((m) => (m && m >= 10 ? Math.floor(m / 10) : null));
+      setMultiplier((m) => (m && m >= 10 ? Math.floor(m / 10) : null));
       e.preventDefault();
       return;
     }
@@ -528,18 +525,16 @@ export function PosPage() {
       e.preventDefault();
       // Without money (a waiter, or no shift yet) Enter sends the order to the barista.
       if (!payNow) pay(null);
-      else if (mode === 'pay' && typed !== null && typed >= due) pay('CASH', { tendered: typed });
-      else if (mode === 'pay' && typed !== null) return;
       else pay('CASH');
       return;
     }
-    if (e.key === ' ' && !(e.target instanceof HTMLButtonElement) && !empty && payNow) {
+    if (e.key === ' ' && !(e.target instanceof HTMLButtonElement) && canOpenPay) {
       e.preventDefault();
       setMode('pay');
       return;
     }
     // Letters start a search, like on a desktop POS.
-    if (e.key.length === 1 && /\p{L}/u.test(e.key) && mode === 'order') {
+    if (e.key.length === 1 && /\p{L}/u.test(e.key)) {
       searchRef.current?.focus();
     }
   };
@@ -630,7 +625,7 @@ export function PosPage() {
     setTab(id);
     setQuery('');
   };
-  const doneFlash = flash ? (
+  const doneFlash = flash && flash.where === 'panel' ? (
     <DoneFlash
       flash={flash}
       currency={currency}
@@ -761,28 +756,17 @@ export function PosPage() {
           {narrow && sheetOpen && <button type="button" className="pos-scrim" aria-label="Свернуть заказ" onClick={() => setSheetOpen(false)} />}
           <aside className="pos-order" aria-label="Текущий заказ">
             <header className="pos-order-head">
-              {mode === 'pay' ? (
-                <>
-                  <button type="button" className="pos-back" onClick={() => setMode('order')} aria-label="Назад к заказу">
-                    <Icon name="back" size={20} />
-                  </button>
-                  <h2>Оплата</h2>
-                </>
-              ) : (
-                <>
-                  <h2>
-                    Заказ{count > 0 && <span className="pos-count">{count}</span>}
-                  </h2>
-                  <div className="pos-head-tools">
-                    <button type="button" className="pos-tool" disabled={empty} onClick={park} title="Гость отошёл — заказ подождёт">
-                      Отложить
-                    </button>
-                    <button type="button" className="pos-tool" disabled={empty} onClick={clearOrder} title="Esc">
-                      Очистить
-                    </button>
-                  </div>
-                </>
-              )}
+              <h2>
+                Заказ{count > 0 && <span className="pos-count">{count}</span>}
+              </h2>
+              <div className="pos-head-tools">
+                <button type="button" className="pos-tool" disabled={empty} onClick={park} title="Гость отошёл — заказ подождёт">
+                  Отложить
+                </button>
+                <button type="button" className="pos-tool" disabled={empty} onClick={clearOrder} title="Esc">
+                  Очистить
+                </button>
+              </div>
               {narrow && (
                 <button type="button" className="pos-back pos-sheet-close" aria-label="Свернуть заказ" onClick={() => setSheetOpen(false)}>
                   <Icon name="chevron-down" size={22} />
@@ -790,16 +774,14 @@ export function PosPage() {
               )}
             </header>
 
-            {mode === 'order' && (
-              <PosGuestOrders
-                loaded={new Set([draft.guestRequestId, ...held.map((h) => h.draft.guestRequestId)].filter((x): x is string => !!x))}
-                onLoad={(r) => {
-                  if (!empty) park();
-                  loadDraft(draftOfGuestOrder(r, draft.service));
-                }}
-              />
-            )}
-            {held.length > 0 && mode === 'order' && (
+            <PosGuestOrders
+              loaded={new Set([draft.guestRequestId, ...held.map((h) => h.draft.guestRequestId)].filter((x): x is string => !!x))}
+              onLoad={(r) => {
+                if (!empty) park();
+                loadDraft(draftOfGuestOrder(r, draft.service));
+              }}
+            />
+            {held.length > 0 && (
               <div className="pos-held" role="group" aria-label="Отложенные заказы">
                 {held.map((h) => (
                   <button key={h.id} type="button" className="pos-held-chip" data-failed={h.failed ? '' : undefined} onClick={() => recall(h)} title={h.failed ?? 'Вернуть заказ'}>
@@ -820,219 +802,197 @@ export function PosPage() {
               </div>
             )}
 
-            {mode === 'pay' ? (
-              <PayView
-                total={due}
-                currency={currency}
-                tendered={tendered}
-                typed={typed}
-                quick={quickTenders(due, currency, 3)}
-                canPay={canPayNow}
-                canSend={canSend}
-                noShift={noShift}
-                compact={narrow}
-                autoPrint={autoPrint}
-                onAutoPrint={(on) => {
-                  setAutoPrint(on);
-                  writeAutoPrint(on);
-                }}
-                onTendered={setTendered}
-                onPay={pay}
-              />
-            ) : (
-              <>
-                <div className="pos-lines-wrap">
-                  {empty ? (
-                    <div className="pos-empty">
-                      <Icon name="cup" size={40} />
-                      <p>Нажмите на напиток — он сразу в заказе.</p>
-                      {cleared && (
-                        <button type="button" className="btn btn-small" onClick={() => { loadDraft(cleared); setCleared(null); }}>
-                          Вернуть очищенный заказ
-                        </button>
-                      )}
-                      {last && !cleared && last.lines.length > 0 && (
-                        <button type="button" className="pos-repeat" onClick={() => loadDraft(last)}>
-                          <Icon name="rotate" size={18} />
-                          <span>
-                            Повторить последний
-                            <small>{describe(last, byId)}</small>
-                          </span>
-                        </button>
-                      )}
-                      <p className="pos-keys-hint">
-                        <kbd>/</kbd> поиск · <kbd>2</kbd>…<kbd>9</kbd> количество ·{' '}
-                        {payNow ? (
-                          <>
-                            <kbd>Enter</kbd> без сдачи · <kbd>F2</kbd> карта
-                          </>
-                        ) : (
-                          <>
-                            <kbd>Enter</kbd> отправить бариста
-                          </>
-                        )}{' '}
-                        · <kbd>Esc</kbd> очистить
-                      </p>
-                    </div>
-                  ) : (
-                    <ul className="pos-lines">
-                      {priced.map(({ line, product, priced: pl, problem }) => {
-                        const isSel = line.id === selected;
-                        const comment = lineComment(line);
-                        return (
-                          <li key={line.id} className="pos-line" data-selected={isSel || undefined} data-broken={!pl || undefined}>
-                            <button
-                              type="button"
-                              className="pos-line-main"
-                              aria-expanded={isSel}
-                              onClick={() => setSelected(isSel ? null : line.id)}
-                              title="Добавки и комментарий"
-                            >
-                              <span className="pos-line-name">{product?.name ?? 'Товар недоступен'}</span>
-                              <span className="pos-line-sub">
-                                {pl ? (pl.optionNames.length ? pl.optionNames.join(' · ') : `${money(pl.unitPrice)}`) : (problem ?? 'уберите из заказа')}
-                              </span>
-                              {comment && <span className="pos-line-comment">«{comment}»</span>}
-                            </button>
-                            <span className="pos-qty" role="group" aria-label="Количество">
-                              <button type="button" className="pos-qty-btn" aria-label={line.qty === 1 ? 'Убрать' : 'Меньше'} onClick={() => setQty(line.id, line.qty - 1)}>
-                                <Icon name={line.qty === 1 ? 'trash' : 'minus'} size={18} />
-                              </button>
-                              <output>{line.qty}</output>
-                              <button
-                                type="button"
-                                className="pos-qty-btn"
-                                aria-label="Больше"
-                                disabled={!product || qtyOf(line.productId) >= available(product)}
-                                onClick={() => setQty(line.id, line.qty + 1)}
-                              >
-                                <Icon name="plus" size={18} />
-                              </button>
-                            </span>
-                            <span className="pos-line-sum">{pl ? money(pl.unitPrice * line.qty) : '—'}</span>
-                            {isSel && !docked && (optionsPanel ?? (plainComment && (
-                              <CommentPanel
-                                line={line}
-                                title={product?.name ?? ''}
-                                onComments={(comments) => updateLine(line.id, { comments })}
-                                onText={(text) => updateLine(line.id, { text })}
-                                onClose={() => setSelected(null)}
-                              />
-                            )))}
-                          </li>
-                        );
-                      })}
-                    </ul>
+            <div className="pos-lines-wrap">
+              {empty ? (
+                <div className="pos-empty">
+                  <Icon name="cup" size={40} />
+                  <p>Нажмите на напиток — он сразу в заказе.</p>
+                  {cleared && (
+                    <button type="button" className="btn btn-small" onClick={() => { loadDraft(cleared); setCleared(null); }}>
+                      Вернуть очищенный заказ
+                    </button>
                   )}
+                  {last && !cleared && last.lines.length > 0 && (
+                    <button type="button" className="pos-repeat" onClick={() => loadDraft(last)}>
+                      <Icon name="rotate" size={18} />
+                      <span>
+                        Повторить последний
+                        <small>{describe(last, byId)}</small>
+                      </span>
+                    </button>
+                  )}
+                  <p className="pos-keys-hint">
+                    <kbd>/</kbd> поиск · <kbd>2</kbd>…<kbd>9</kbd> количество ·{' '}
+                    {payNow ? (
+                      <>
+                        <kbd>Enter</kbd> без сдачи · <kbd>F2</kbd> карта
+                      </>
+                    ) : (
+                      <>
+                        <kbd>Enter</kbd> отправить бариста
+                      </>
+                    )}{' '}
+                    · <kbd>Esc</kbd> очистить
+                  </p>
                 </div>
-
-                <footer className="pos-foot">
-                  <div className="pos-meta">
-                    <div className="pos-seg" role="radiogroup" aria-label="Где пьёт гость">
-                      {(['HERE', 'TAKEAWAY'] as const).map((s) => (
-                        <button key={s} type="button" role="radio" aria-checked={draft.service === s} onClick={() => setDraft((d) => ({ ...d, service: s }))}>
-                          {COUNTER_SERVICE_LABEL[s]}
-                        </button>
-                      ))}
-                    </div>
-                    <input
-                      className="pos-guest"
-                      value={draft.guestName}
-                      maxLength={GUEST_NAME_MAX}
-                      autoComplete="off"
-                      autoCapitalize="words"
-                      enterKeyHint="done"
-                      placeholder="Имя гостя"
-                      aria-label="Имя гостя (на экране заказов)"
-                      onChange={(e) => setDraft((d) => ({ ...d, guestName: e.target.value }))}
-                    />
-                    {loyalty.enabled && (
-                      <div className="loy-anchor">
+              ) : (
+                <ul className="pos-lines">
+                  {priced.map(({ line, product, priced: pl, problem }) => {
+                    const isSel = line.id === selected;
+                    const comment = lineComment(line);
+                    return (
+                      <li key={line.id} className="pos-line" data-selected={isSel || undefined} data-broken={!pl || undefined}>
                         <button
                           type="button"
-                          className="loy-chip"
-                          data-on={guest ? '' : undefined}
-                          aria-expanded={guestOpen}
-                          title="Гость по номеру телефона: бонусы и подарки"
-                          onClick={() => setGuestOpen((o) => !o)}
+                          className="pos-line-main"
+                          aria-expanded={isSel}
+                          onClick={() => setSelected(isSel ? null : line.id)}
+                          title="Добавки и комментарий"
                         >
-                          <Icon name="user" size={18} />
-                          <span>{guest ? guestChip(guest.card, loyalty, currency) : 'Гость — бонусы и подарки'}</span>
+                          <span className="pos-line-name">{product?.name ?? 'Товар недоступен'}</span>
+                          <span className="pos-line-sub">
+                            {pl ? (pl.optionNames.length ? pl.optionNames.join(' · ') : `${money(pl.unitPrice)}`) : (problem ?? 'уберите из заказа')}
+                          </span>
+                          {comment && <span className="pos-line-comment">«{comment}»</span>}
                         </button>
-                        {guestOpen && (
-                          <div className="loy-pop" onClick={(e) => e.target === e.currentTarget && setGuestOpen(false)}>
-                            <GuestPad
-                              settings={loyalty}
-                              currency={currency}
-                              initial={guest}
-                              onDone={pickGuest}
-                              onRemove={guest ? dropGuest : null}
-                              onClose={() => setGuestOpen(false)}
-                            />
-                          </div>
-                        )}
+                        <span className="pos-qty" role="group" aria-label="Количество">
+                          <button type="button" className="pos-qty-btn" aria-label={line.qty === 1 ? 'Убрать' : 'Меньше'} onClick={() => setQty(line.id, line.qty - 1)}>
+                            <Icon name={line.qty === 1 ? 'trash' : 'minus'} size={18} />
+                          </button>
+                          <output>{line.qty}</output>
+                          <button
+                            type="button"
+                            className="pos-qty-btn"
+                            aria-label="Больше"
+                            disabled={!product || qtyOf(line.productId) >= available(product)}
+                            onClick={() => setQty(line.id, line.qty + 1)}
+                          >
+                            <Icon name="plus" size={18} />
+                          </button>
+                        </span>
+                        <span className="pos-line-sum">{pl ? money(pl.unitPrice * line.qty) : '—'}</span>
+                        {isSel && !docked && (optionsPanel ?? (plainComment && (
+                          <CommentPanel
+                            line={line}
+                            title={product?.name ?? ''}
+                            onComments={(comments) => updateLine(line.id, { comments })}
+                            onText={(text) => updateLine(line.id, { text })}
+                            onClose={() => setSelected(null)}
+                          />
+                        )))}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+
+            <footer className="pos-foot">
+              <div className="pos-meta">
+                <div className="pos-seg" role="radiogroup" aria-label="Где пьёт гость">
+                  {(['HERE', 'TAKEAWAY'] as const).map((s) => (
+                    <button key={s} type="button" role="radio" aria-checked={draft.service === s} onClick={() => setDraft((d) => ({ ...d, service: s }))}>
+                      {COUNTER_SERVICE_LABEL[s]}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  className="pos-guest"
+                  value={draft.guestName}
+                  maxLength={GUEST_NAME_MAX}
+                  autoComplete="off"
+                  autoCapitalize="words"
+                  enterKeyHint="done"
+                  placeholder="Имя гостя"
+                  aria-label="Имя гостя (на экране заказов)"
+                  onChange={(e) => setDraft((d) => ({ ...d, guestName: e.target.value }))}
+                />
+                {loyalty.enabled && (
+                  <div className="loy-anchor">
+                    <button
+                      type="button"
+                      className="loy-chip"
+                      data-on={guest ? '' : undefined}
+                      aria-expanded={guestOpen}
+                      title="Гость по номеру телефона: бонусы и подарки"
+                      onClick={() => setGuestOpen((o) => !o)}
+                    >
+                      <Icon name="user" size={18} />
+                      <span>{guest ? guestChip(guest.card, loyalty, currency) : 'Гость — бонусы и подарки'}</span>
+                    </button>
+                    {guestOpen && (
+                      <div className="loy-pop" onClick={(e) => e.target === e.currentTarget && setGuestOpen(false)}>
+                        <GuestPad
+                          settings={loyalty}
+                          currency={currency}
+                          initial={guest}
+                          onDone={pickGuest}
+                          onRemove={guest ? dropGuest : null}
+                          onClose={() => setGuestOpen(false)}
+                        />
                       </div>
                     )}
                   </div>
+                )}
+              </div>
 
-                  {/* Only for whoever takes the money: a waiter has nothing to do about the shift. */}
-                  {noShift && canOrder && canTakeMoney && (
-                    <div className="pos-shift" role="alert">
-                      <Icon name="alert" size={18} />
-                      <span>Смена не открыта</span>
-                      {canNow('shift.open') && (
-                        <button type="button" className="btn btn-small btn-primary" onClick={() => setShiftDialog(true)}>
-                          Открыть смену
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  {offer && (
-                    <button type="button" className="loy-offer" aria-pressed={reward} onClick={() => setReward((r) => !r)}>
-                      <span>{reward ? `✓ ${offer.done}` : offer.ask}</span>
-                      <small>{reward ? `−${money(offer.discount)} · отменить` : `−${money(offer.discount)}`}</small>
+              {/* Only for whoever takes the money: a waiter has nothing to do about the shift. */}
+              {noShift && canOrder && canTakeMoney && (
+                <div className="pos-shift" role="alert">
+                  <Icon name="alert" size={18} />
+                  <span>Смена не открыта</span>
+                  {canNow('shift.open') && (
+                    <button type="button" className="btn btn-small btn-primary" onClick={() => setShiftDialog(true)}>
+                      Открыть смену
                     </button>
                   )}
-                  <div className="pos-total">
-                    <span>Итого</span>
-                    <strong>{money(due)}</strong>
+                </div>
+              )}
+
+              {offer && (
+                <button type="button" className="loy-offer" aria-pressed={reward} onClick={() => setReward((r) => !r)}>
+                  <span>{reward ? `✓ ${offer.done}` : offer.ask}</span>
+                  <small>{reward ? `−${money(offer.discount)} · отменить` : `−${money(offer.discount)}`}</small>
+                </button>
+              )}
+              <div className="pos-total">
+                <span>Итого</span>
+                <strong>{money(due)}</strong>
+              </div>
+              {payNow ? (
+                <>
+                  <div className="pos-express" role="group" aria-label="Оплата в одно нажатие">
+                    <button type="button" className="pos-express-btn" data-method="CASH" disabled={!canPayNow} onClick={() => pay('CASH')}>
+                      <span className="pos-express-name">{METHOD_LABEL.CASH}</span>
+                      <kbd className="pos-kbd">без сдачи · Enter</kbd>
+                    </button>
+                    <button type="button" className="pos-express-btn" data-method="CARD" disabled={!canPayNow} onClick={() => pay('CARD')}>
+                      <span className="pos-express-name">{METHOD_LABEL.CARD}</span>
+                      <kbd className="pos-kbd">F2</kbd>
+                    </button>
+                    <button type="button" className="pos-express-btn" data-method="QR" disabled={!canPayNow} onClick={() => pay('QR')}>
+                      <span className="pos-express-name">{METHOD_LABEL.QR}</span>
+                      <kbd className="pos-kbd">F3</kbd>
+                    </button>
                   </div>
-                  {payNow ? (
-                    <>
-                      <div className="pos-express" role="group" aria-label="Оплата в одно нажатие">
-                        <button type="button" className="pos-express-btn" data-method="CASH" disabled={!canPayNow} onClick={() => pay('CASH')}>
-                          <span className="pos-express-name">{METHOD_LABEL.CASH}</span>
-                          <kbd className="pos-kbd">без сдачи · Enter</kbd>
-                        </button>
-                        <button type="button" className="pos-express-btn" data-method="CARD" disabled={!canPayNow} onClick={() => pay('CARD')}>
-                          <span className="pos-express-name">{METHOD_LABEL.CARD}</span>
-                          <kbd className="pos-kbd">F2</kbd>
-                        </button>
-                        <button type="button" className="pos-express-btn" data-method="QR" disabled={!canPayNow} onClick={() => pay('QR')}>
-                          <span className="pos-express-name">{METHOD_LABEL.QR}</span>
-                          <kbd className="pos-kbd">F3</kbd>
-                        </button>
-                      </div>
-                      <button type="button" className="pos-paybar" disabled={empty || broken || !canOrder} onClick={() => setMode('pay')}>
-                        <span>Оплатить</span>
-                        <strong>{money(due)}</strong>
-                      </button>
-                    </>
-                  ) : canOrder ? (
-                    <>
-                      <button type="button" className="pos-paybar pos-sendbar" disabled={!canSend} onClick={() => pay(null)}>
-                        <span>Отправить бариста</span>
-                        <strong>{money(due)}</strong>
-                      </button>
-                      <p className="pos-send-note">
-                        {canTakeMoney ? 'Без оплаты — счёт оплатят, когда откроют смену' : 'Без оплаты — счёт оплатят на кассе'}
-                      </p>
-                    </>
-                  ) : null}
-                </footer>
-              </>
-            )}
+                  {/* The full-screen payment step: round sums, the keypad and the change in large type. */}
+                  <button type="button" className="pos-paybar" disabled={!canOpenPay} onClick={() => setMode('pay')}>
+                    <span>Оплатить</span>
+                    <strong>{money(due)}</strong>
+                  </button>
+                </>
+              ) : canOrder ? (
+                <>
+                  <button type="button" className="pos-paybar pos-sendbar" disabled={!canSend} onClick={() => pay(null)}>
+                    <span>Отправить бариста</span>
+                    <strong>{money(due)}</strong>
+                  </button>
+                  <p className="pos-send-note">
+                    {canTakeMoney ? 'Без оплаты — счёт оплатят, когда откроют смену' : 'Без оплаты — счёт оплатят на кассе'}
+                  </p>
+                </>
+              ) : null}
+            </footer>
           </aside>
           {!narrow && doneFlash}
         </div>
@@ -1090,9 +1050,13 @@ export function PosPage() {
                 data-kind={payNow ? 'pay' : 'send'}
                 disabled={broken}
                 onClick={() => {
-                  setMode(payNow ? 'pay' : 'order');
                   setSelected(null);
-                  setSheetOpen(true);
+                  // «Оплатить» — the full-screen payment step over everything; «Отправить» — the order sheet.
+                  if (payNow) setMode('pay');
+                  else {
+                    setMode('order');
+                    setSheetOpen(true);
+                  }
                 }}
               >
                 {payNow ? 'Оплатить' : 'Отправить'}
@@ -1100,6 +1064,62 @@ export function PosPage() {
             )}
           </div>
         </div>
+      )}
+
+      {/* «Оплатить»: the whole screen, and after the money «Заказ 17 · Сдача 450 ₸» on the same screen. */}
+      {stepOpen && (
+        <PayStep
+          currency={currency}
+          lines={priced.map(
+            ({ line, product, priced: pl, problem }): PayLine => ({
+              id: line.id,
+              name: product?.name ?? 'Товар недоступен',
+              detail: pl ? pl.optionNames.join(' · ') : (problem ?? 'уберите из заказа'),
+              comment: lineComment(line),
+              qty: line.qty,
+              sum: pl ? pl.unitPrice * line.qty : null,
+            }),
+          )}
+          count={count}
+          total={total}
+          due={due}
+          offer={offer ? { ask: offer.ask, done: offer.done, amount: offer.discount } : null}
+          rewardOn={reward && offer !== null}
+          onReward={() => setReward((r) => !r)}
+          guestCard={guest ? guestChip(guest.card, loyalty, currency) : null}
+          service={draft.service}
+          onService={(s) => setDraft((d) => ({ ...d, service: s }))}
+          guestName={draft.guestName}
+          onGuestName={(v) => setDraft((d) => ({ ...d, guestName: v }))}
+          tendered={tendered}
+          typed={typed}
+          onTendered={setTendered}
+          quick={quickTenders(due, currency, 4)}
+          canPay={canPayNow}
+          canSend={canSend}
+          online={online}
+          compact={payCompact}
+          autoPrint={autoPrint}
+          onAutoPrint={(on) => {
+            setAutoPrint(on);
+            writeAutoPrint(on);
+          }}
+          onPay={pay}
+          onBack={() => setMode('order')}
+          flash={flash?.where === 'step' ? flash : null}
+          doneMs={flashMs}
+          onDone={() => setFlash(null)}
+          // A refused order is back in the cart: pay it again right here (same idempotency key).
+          onRetry={
+            empty
+              ? null
+              : () => {
+                  setFlash(null);
+                  setMode('pay');
+                }
+          }
+          onPrint={(res) => printReceipt(res.check, state.club, undefined, Date.now(), res.order.number)}
+        />
       )}
 
       {shiftDialog && (
@@ -1447,139 +1467,6 @@ function Comments({
           }}
         />
       )}
-    </div>
-  );
-}
-
-// ── Payment ─────────────────────────────────────────────────────────────────
-
-function PayView({
-  total,
-  currency,
-  tendered,
-  typed,
-  quick,
-  canPay,
-  canSend,
-  noShift,
-  compact,
-  autoPrint,
-  onAutoPrint,
-  onTendered,
-  onPay,
-}: {
-  total: Minor;
-  currency: string;
-  tendered: string;
-  typed: Minor | null;
-  quick: Minor[];
-  canPay: boolean;
-  canSend: boolean;
-  noShift: boolean;
-  /** Phone: the keypad waits behind «Другая сумма», so the ways to pay and «без оплаты» fit one screen. */
-  compact: boolean;
-  autoPrint: boolean;
-  onAutoPrint: (on: boolean) => void;
-  onTendered: (v: string) => void;
-  onPay: (method: PaymentMethod | null, opts?: { tendered?: Minor; rest?: 'CARD' | 'QR' }) => void;
-}) {
-  const money = (a: Minor) => formatMoney(a, currency);
-  const [keypad, setKeypad] = useState(() => !compact || tendered !== '');
-  const short = typed !== null && typed < total ? total - typed : 0;
-  const change = typed !== null && typed >= total ? typed - total : null;
-  const press = (k: string) => {
-    if (k === '⌫') onTendered(tendered.slice(0, -1));
-    else onTendered((tendered + k).replace(/^0+(?=\d)/, '').slice(0, 9));
-  };
-  return (
-    <div className="pos-pay" data-compact={compact || undefined}>
-      <div className="pos-pay-due">
-        <span>К оплате</span>
-        <strong>{money(total)}</strong>
-      </div>
-
-      {/* The three ways to pay, big and first: read from a step away, one tap each. */}
-      <div className="pos-pay-methods" role="group" aria-label="Способ оплаты">
-        <button type="button" className="pos-method" data-method="CASH" disabled={!canPay} onClick={() => onPay('CASH')}>
-          {METHOD_LABEL.CASH}
-          <small>без сдачи</small>
-        </button>
-        <button type="button" className="pos-method" data-method="CARD" disabled={!canPay} onClick={() => onPay('CARD')}>
-          {METHOD_LABEL.CARD}
-        </button>
-        <button type="button" className="pos-method" data-method="QR" disabled={!canPay} onClick={() => onPay('QR')}>
-          {METHOD_LABEL.QR}
-        </button>
-      </div>
-
-      {quick.length > 0 && (
-        <div className="pos-pay-quick" role="group" aria-label="Наличные: сумма от гостя">
-          {quick.map((q) => (
-            <button key={q} type="button" className="pos-cash-btn" disabled={!canPay} onClick={() => onPay('CASH', { tendered: q })}>
-              <small>сдача {money(q - total)}</small>
-              {money(q)}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {keypad ? (
-        <div className="pos-pay-cash">
-          <div className="pos-display" aria-live="polite">
-            <span className="pos-display-label">Гость даёт</span>
-            <span className="pos-display-sum" data-empty={tendered === '' || undefined}>
-              {tendered === '' ? 'сумма' : typed !== null ? money(typed) : tendered}
-            </span>
-            <span className="pos-display-change" data-short={short > 0 || undefined}>
-              {change !== null ? `Сдача ${money(change)}` : short > 0 ? `Не хватает ${money(short)}` : ' '}
-            </span>
-          </div>
-          <div className="pos-keypad" role="group" aria-label="Цифры">
-            {['1', '2', '3', '4', '5', '6', '7', '8', '9', '00', '0', '⌫'].map((k) => (
-              <button key={k} type="button" aria-label={k === '⌫' ? 'Стереть' : k} onClick={() => press(k)}>
-                {k}
-              </button>
-            ))}
-          </div>
-          {short > 0 && typed !== null && typed > 0 ? (
-            <div className="pos-split" role="group" aria-label="Остаток другим способом">
-              <span>Остаток {money(short)}:</span>
-              <button type="button" className="btn" disabled={!canPay} onClick={() => onPay('CASH', { tendered: typed, rest: 'CARD' })}>
-                картой
-              </button>
-              <button type="button" className="btn" disabled={!canPay} onClick={() => onPay('CASH', { tendered: typed, rest: 'QR' })}>
-                QR
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="btn btn-primary pos-accept"
-              disabled={!canPay || (typed !== null && typed < total)}
-              onClick={() => onPay('CASH', typed !== null ? { tendered: typed } : {})}
-            >
-              Принять {money(typed ?? total)}
-            </button>
-          )}
-        </div>
-      ) : (
-        <button type="button" className="pos-other-sum" disabled={!canPay} onClick={() => setKeypad(true)}>
-          Другая сумма наличными
-        </button>
-      )}
-
-      {/* A real button, not a footnote: the waiter's «take the order now, the money at the counter later». */}
-      <button type="button" className="pos-later" disabled={!canSend} onClick={() => onPay(null)}>
-        <span>Без оплаты — счёт потом</span>
-        <small>заказ сразу уйдёт бариста, счёт будет в «Счетах»</small>
-      </button>
-      <div className="pos-pay-extra">
-        <label className="check">
-          <input type="checkbox" checked={autoPrint} onChange={(e) => onAutoPrint(e.target.checked)} />
-          Печатать чек сам
-        </label>
-      </div>
-      {noShift && <p className="hint hint-warn">Смена не открыта — откройте её, чтобы принять оплату.</p>}
     </div>
   );
 }

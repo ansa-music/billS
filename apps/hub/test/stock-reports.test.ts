@@ -222,10 +222,11 @@ test('«Докупить на неделю»: use per day × 7 + minimum − sto
     await sell(hub, [{ product: 'Латте', qty: 10, options: ['s'] }]);
     h.clock.advance(DAY);
   }
-  // Something archived below its minimum is not bought.
-  const old = await send<IngredientView>(hub, '/api/stock/ingredients', { name: 'Сироп мятный', unit: 'мл', quantity: 10, minLevel: 500 });
-  await send(hub, `/api/stock/ingredients/${old.body.id}/remove`, {});
-  hub.hub.stock.writeOff({ ingredientId: old.body.id, quantity: 1, reason: 'Пролили', actor: DIRECTOR });
+  // Raw materials archived or deleted for good are not bought, even below their minimum.
+  const archived = await send<IngredientView>(hub, '/api/stock/ingredients', { name: 'Сироп мятный', unit: 'мл', quantity: 10, minLevel: 500 });
+  assert.equal((await send(hub, `/api/stock/ingredients/${archived.body.id}/update`, { isArchived: true })).status, 200);
+  const deleted = await send<IngredientView>(hub, '/api/stock/ingredients', { name: 'Сироп кокосовый', unit: 'мл', quantity: 10, minLevel: 500 });
+  assert.equal((await send(hub, `/api/stock/ingredients/${deleted.body.id}/remove`, {})).status, 200);
 
   const list = (await get<PurchaseListView>(hub, '/api/stock/purchase')).body;
   assert.equal(list.days, 7);
@@ -238,6 +239,7 @@ test('«Докупить на неделю»: use per day × 7 + minimum − sto
   // Cups 0,3: 200 − 40 = 160, minimum 50: 10 × 7 + 50 − 160 < 0.
   assert.equal(line('Стакан 0,3'), undefined);
   assert.equal(line('Сироп мятный'), undefined);
+  assert.equal(line('Сироп кокосовый'), undefined);
   assert.equal(list.total, list.lines.reduce((s, l) => s + (l.cost ?? 0), 0));
 });
 
@@ -330,10 +332,17 @@ test('profit: revenue, cost of goods sold by the recipes with options, cancels l
   // Revenue here is the owner's «Выручка сегодня».
   assert.equal(hub.hub.reports.summary().revenue.today, r.revenue);
 
-  // An archived raw material keeps its cost in the report.
+  // A raw material archived or deleted for good keeps its cost in the report (what was on hand of a
+  // deleted one is written off: a loss of the day).
   const before = r.cost;
-  await send(hub, `/api/stock/ingredients/${(await ingredient(hub, 'Овсяное молоко')).id}/remove`, { fromRecipes: true });
-  assert.equal((await get<ProfitReport>(hub, '/api/reports/profit')).body.cost, before);
+  const cupL = await ingredient(hub, 'Стакан 0,5');
+  assert.equal((await send(hub, `/api/stock/ingredients/${cupL.id}/remove`, { fromRecipes: true })).status, 200);
+  const oat = await ingredient(hub, 'Овсяное молоко');
+  assert.equal((await send(hub, `/api/stock/ingredients/${oat.id}/remove`, { fromRecipes: true })).status, 200);
+  assert.equal(hub.hub.stock.ingredients().ingredients.some((i) => i.id === oat.id), false, 'deleted for good');
+  const after = (await get<ProfitReport>(hub, '/api/reports/profit')).body;
+  assert.equal(after.cost, before);
+  assert.equal(after.losses.writeOff, r.losses.writeOff + cupL.quantity * 4000 + oat.quantity * 180);
 
   // Yesterday: nothing; a period over several days covers today too.
   const today = r.from;

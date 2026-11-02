@@ -1,0 +1,45 @@
+<!-- @dsCard group="Кабинет · онбординг" height=470 width=860 -->
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Steps</title>
+<style>
+  body { padding: 16px; }
+
+</style>
+</head>
+<body>
+<script>(function(h,m){function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{'pos-dark':'dark','pos-light':'light'});</script>
+<div class="start-page">
+  <header class="start-head">
+    <div>
+      <h2>Первые шаги</h2>
+      <p class="muted">Семь простых шагов — и заведение работает в TS. Кабинет запоминает, что уже сделано.</p>
+    </div>
+    <div class="start-progress">
+      <span class="start-count">1 из 7</span>
+      <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="7" aria-valuenow="1" aria-label="Пройдено шагов"><span class="progress-fill" style="width:14.3%"></span></div>
+    </div>
+  </header>
+  <ol class="steps-list">
+    <li class="step" data-state="done">
+      <button type="button" class="step-head" aria-expanded="false"><span class="step-num" aria-hidden="true">✓</span><span class="step-titles"><span class="step-title">Заведение создано</span><span class="step-text">«Зерно» — кофейня. Пробный период уже включён.</span></span></button>
+    </li>
+    <li class="step" data-state="current" data-open="">
+      <button type="button" class="step-head" aria-expanded="true"><span class="step-num" aria-hidden="true">2</span><span class="step-titles"><span class="step-title">Установите TS на компьютер кассы или мини-ПК</span><span class="step-text">Программа работает в заведении даже без интернета: касса, смены и отчёты.</span></span></button>
+      <div class="step-body">
+        <div class="dl-pair">
+          <a class="btn btn-primary btn-big" href="#"><span>Скачать для Windows</span><small>компьютер кассы</small></a>
+          <a class="btn btn-big" href="#"><span>Скачать для мини-ПК</span><small>образ на флешку</small></a>
+        </div>
+        <p class="hint">Другие системы и инструкции — на странице <a class="link-inline" href="#">«Скачать»</a>.</p>
+      </div>
+    </li>
+    <li class="step" data-state="todo">
+      <button type="button" class="step-head" aria-expanded="false"><span class="step-num" aria-hidden="true">3</span><span class="step-titles"><span class="step-title">Подключите кассу</span><span class="step-text">Вставьте код в программу TS на кассе — она сама свяжется с этим кабинетом.</span></span></button>
+    </li>
+  </ol>
+</div>
+</body>
+</html>

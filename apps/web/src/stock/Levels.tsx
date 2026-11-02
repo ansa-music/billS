@@ -31,9 +31,10 @@ const ADJUST_REASONS = ['Пересчитали', 'Продажа списала
 
 /**
  * «Остатки»: every ingredient with its level and the warning below the minimum; «Списать»,
- * «История», change it (the level too: «Сколько есть на самом деле», an adjustment with a reason)
- * or «Удалить» (archived when it has history, taken out of recipes when asked). The example TS put
- * in is marked and goes away at once with «Убрать пример».
+ * «История», change it (the level too: «Сколько есть на самом деле», an adjustment with a reason),
+ * «В архив» / «Вернуть» to hide it for a while, or «Удалить» — active or archived, for good: its
+ * history keeps the name, what is left is written off, it leaves recipes when asked. The example
+ * TS put in is marked and goes away at once with «Убрать пример».
  */
 export function LevelsTab({
   ingredients,
@@ -66,6 +67,13 @@ export function LevelsTab({
   const [buying, setBuying] = useState(false);
   const canEdit = canNow('stock.edit');
   const canWriteOff = canNow('stock.writeoff');
+
+  /** «В архив» / «Вернуть из архива»: hidden for a while, nothing is lost. */
+  const setArchivedOf = async (i: IngredientView, archive: boolean): Promise<boolean> => {
+    const ok = await run(`ingredient:${i.id}`, `/api/stock/ingredients/${i.id}/update`, { isArchived: archive });
+    if (ok) notify(archive ? `«${i.name}» убрано в архив — вернуть можно из «Архива»` : `«${i.name}» снова на складе`);
+    return ok !== undefined;
+  };
 
   useEffect(() => {
     if (openNew && canEdit) {
@@ -137,7 +145,7 @@ export function LevelsTab({
       ) : shown.length === 0 ? (
         <EmptyState icon="orders" title={query ? 'Ничего не нашлось' : archived ? 'Архив пуст' : 'Сырья пока нет'}>
           {!query && !archived && 'Добавьте кофе, молоко, стаканы — всё, из чего готовите.'}
-          {!query && archived && 'Сюда уходит удалённое сырьё, по которому уже была история.'}
+          {!query && archived && 'Сюда попадает сырьё, которое убрали в архив, — его можно вернуть или удалить.'}
         </EmptyState>
       ) : (
         <ul className="stock-list">
@@ -176,17 +184,17 @@ export function LevelsTab({
                   </button>
                   {i.isArchived ? (
                     canEdit && (
-                      <button
-                        type="button"
-                        className="btn btn-small"
-                        disabled={busy}
-                        onClick={async () => {
-                          const ok = await run(`ingredient:${i.id}`, `/api/stock/ingredients/${i.id}/update`, { isArchived: false });
-                          if (ok) notify(`«${i.name}» снова на складе`);
-                        }}
-                      >
-                        Вернуть
-                      </button>
+                      <>
+                        <button type="button" className="btn btn-small" disabled={busy} onClick={() => void setArchivedOf(i, false)}>
+                          Вернуть
+                        </button>
+                        <button type="button" className="btn btn-small" onClick={() => setEditing(i)} aria-label={`Изменить: ${i.name}`}>
+                          <Icon name="edit" size={16} /> <span className="stock-btn-word">Изменить</span>
+                        </button>
+                        <button type="button" className="btn btn-small btn-outline-danger" onClick={() => setRemoving(i)} aria-label={`Удалить: ${i.name}`}>
+                          <Icon name="trash" size={16} /> <span className="stock-btn-word">Удалить</span>
+                        </button>
+                      </>
                     )
                   ) : (
                     <>
@@ -219,6 +227,9 @@ export function LevelsTab({
             setRemoving(editing);
             setEditing(null);
           } : undefined}
+          onArchive={editing !== 'new' ? async () => {
+            if (await setArchivedOf(editing, !editing.isArchived)) setEditing(null);
+          } : undefined}
           onSave={async (body, adjust, id) => {
             if (!id) {
               const ok = await run('ingredient:new', '/api/stock/ingredients', body);
@@ -243,14 +254,18 @@ export function LevelsTab({
       {removing && (
         <RemoveIngredientDialog
           ingredient={removing}
+          currency={currency}
           busy={busy}
           onClose={() => setRemoving(null)}
           onConfirm={async (fromRecipes) => {
             const res = await run<RemoveIngredientResponse>(`ingredient:${removing.id}:remove`, `/api/stock/ingredients/${removing.id}/remove`, { fromRecipes });
             if (res) {
               setRemoving(null);
-              const where = res.recipes.length ? ` и убрано из состава: ${res.recipes.join(', ')}` : '';
-              notify(res.outcome === 'deleted' ? `«${removing.name}» удалено${where}` : `«${removing.name}» убрано в архив${where}`);
+              const parts = [
+                res.quantity > 0 ? `списано ${qtyLabel(res.quantity, removing.unit)}` : '',
+                res.recipes.length ? `убрано из состава: ${res.recipes.join(', ')}` : '',
+              ].filter(Boolean);
+              notify(`«${removing.name}» удалено${parts.length ? ` — ${parts.join(', ')}` : ''}`);
             }
           }}
         />
@@ -313,13 +328,17 @@ function IngredientForm({
   onClose,
   onSave,
   onRemove,
+  onArchive,
 }: {
   ingredient: IngredientView | null;
   currency: string;
   busy: boolean;
   onClose: () => void;
   onSave: (body: CreateIngredientRequest | UpdateIngredientRequest, adjust: { quantity: number; reason: string } | null, id: string | null) => void;
+  /** «Удалить» — always offered for an existing one, archived too. */
   onRemove?: (() => void) | undefined;
+  /** «В архив» / «Вернуть из архива». */
+  onArchive?: (() => void) | undefined;
 }) {
   const [name, setName] = useState(ingredient?.name ?? '');
   const [unit, setUnit] = useState<IngredientUnit>(ingredient?.unit ?? 'г');
@@ -343,10 +362,16 @@ function IngredientForm({
   const [error, setError] = useState<string | null>(null);
   // The HUB keeps the unit once anything happened to the ingredient (the history is in it).
   const unitLocked = ingredient !== null && ingredient.hasHistory;
+  // An archived one keeps its level as it was: it comes back first, then the level can change.
+  const archived = ingredient?.isArchived === true;
   // Empty: a new ingredient starts at 0, an existing one keeps its level.
   const typed = quantity.trim() ? typedQty(quantity, qtyFactor) : (ingredient?.quantity ?? 0);
   const changesLevel =
-    ingredient !== null && quantity.trim() !== '' && typed !== null && Math.round(typed * 1000) !== Math.round(ingredient.quantity * 1000);
+    ingredient !== null &&
+    !archived &&
+    quantity.trim() !== '' &&
+    typed !== null &&
+    Math.round(typed * 1000) !== Math.round(ingredient.quantity * 1000);
 
   const pickUnit = (u: IngredientUnit) => {
     setUnit(u);
@@ -385,6 +410,11 @@ function IngredientForm({
                 <Icon name="trash" size={16} /> Удалить
               </button>
             )}
+            {onArchive && ingredient && (
+              <button type="button" className="btn" disabled={busy} onClick={onArchive}>
+                {ingredient.isArchived ? 'Вернуть из архива' : 'В архив'}
+              </button>
+            )}
             <button type="button" className="btn btn-primary btn-large" disabled={busy} onClick={submit}>
               Сохранить
             </button>
@@ -408,14 +438,24 @@ function IngredientForm({
           </div>
           {unitLocked && <span className="hint">Единицу не меняем: по этому сырью уже есть история. Нужна другая — заведите новое сырьё.</span>}
         </div>
-        <div className="field">
-          <span>{ingredient ? 'Сколько есть на самом деле' : 'Сейчас на складе'}</span>
-          <QtyInput value={quantity} factor={qtyFactor} unit={unit} label="Остаток" placeholder={ingredient ? 'как по учёту' : '0'} onChange={(t, f) => {
-            setQuantity(t);
-            setQtyFactor(f);
-          }} />
-          {ingredient && !changesLevel && <span className="hint">Сейчас по учёту {qtyLabel(ingredient.quantity, ingredient.unit)}. Поменяйте, если на полке другое.</span>}
-        </div>
+        {archived && ingredient ? (
+          <div className="field">
+            <span>В архиве</span>
+            <span className="hint">
+              Не видно в поставках, составах и инвентаризации, по учёту {qtyLabel(ingredient.quantity, ingredient.unit)}. «Вернуть из архива» — снова на
+              складе, «Удалить» — убрать совсем.
+            </span>
+          </div>
+        ) : (
+          <div className="field">
+            <span>{ingredient ? 'Сколько есть на самом деле' : 'Сейчас на складе'}</span>
+            <QtyInput value={quantity} factor={qtyFactor} unit={unit} label="Остаток" placeholder={ingredient ? 'как по учёту' : '0'} onChange={(t, f) => {
+              setQuantity(t);
+              setQtyFactor(f);
+            }} />
+            {ingredient && !changesLevel && <span className="hint">Сейчас по учёту {qtyLabel(ingredient.quantity, ingredient.unit)}. Поменяйте, если на полке другое.</span>}
+          </div>
+        )}
         {changesLevel && ingredient && typed !== null && (
           <div className="field stock-adjust">
             <span>
@@ -450,26 +490,41 @@ function IngredientForm({
 }
 
 /**
- * «Удалить сырьё?»: what will happen, said before it happens — deleted, or archived because of its
- * history; the recipes that use it are named and it leaves them on the same click.
+ * «Удалить сырьё?» — active or archived: what will happen, said before it happens. Never used —
+ * it goes completely; with history — for good («навсегда»), the history keeps its name, what is
+ * left on hand is written off as «удалено». The recipes that use it are named and it leaves them
+ * on the same click. Hiding it for a while is «В архив».
  */
 function RemoveIngredientDialog({
   ingredient,
+  currency,
   busy,
   onClose,
   onConfirm,
 }: {
   ingredient: IngredientView;
+  currency: string;
   busy: boolean;
   onClose: () => void;
   onConfirm: (fromRecipes: boolean) => void;
 }) {
   const { data, error } = useLive(() => fetchJson<IngredientRemovalView>(`/api/stock/ingredients/${ingredient.id}/removal`), [ingredient.id], 0);
   const recipes = data?.recipes ?? [];
+  const forGood = data?.outcome === 'history';
   const h = data?.history;
+  const history = h
+    ? [
+        h.movements ? `${h.movements} ${plural(h.movements, 'движение', 'движения', 'движений')}` : '',
+        h.supplies ? `${h.supplies} ${plural(h.supplies, 'поставка', 'поставки', 'поставок')}` : '',
+        h.counts ? `${h.counts} ${plural(h.counts, 'инвентаризация', 'инвентаризации', 'инвентаризаций')}` : '',
+      ]
+        .filter(Boolean)
+        .join(', ')
+    : '';
+  const worth = data && data.quantity > 0 && ingredient.costPerUnit !== null ? Math.round(data.quantity * ingredient.costPerUnit) : null;
   return (
     <Modal
-      title={`Удалить «${ingredient.name}»?`}
+      title={forGood ? `Удалить «${ingredient.name}» навсегда?` : `Удалить «${ingredient.name}»?`}
       onClose={onClose}
       className="stock-modal"
       footer={
@@ -479,7 +534,7 @@ function RemoveIngredientDialog({
               Не удалять
             </button>
             <button type="button" className="btn btn-danger btn-large" disabled={busy || !data} onClick={() => onConfirm(recipes.length > 0)}>
-              {recipes.length > 0 ? 'Убрать из составов и удалить' : data?.outcome === 'archive' ? 'Удалить (в архив)' : 'Удалить'}
+              {recipes.length > 0 ? 'Убрать из составов и удалить' : forGood ? 'Удалить навсегда' : 'Удалить'}
             </button>
           </div>
         </div>
@@ -493,17 +548,26 @@ function RemoveIngredientDialog({
           <>
             {recipes.length > 0 && (
               <div className="warn-note">
-                Используется в составе: <strong>{recipes.map((r) => r.name).join(', ')}</strong>. Оно уйдёт и из этих составов — их продажи перестанут
+                Используется в составе: <strong>{recipes.map((r) => r.name).join(', ')}</strong>. Оно уйдёт из этих составов — их продажи перестанут
                 списывать «{ingredient.name}». Остальное в составах останется.
               </div>
             )}
-            {data.outcome === 'archive' ? (
-              <p>
-                По нему уже есть история
-                {h ? ` (${[h.movements ? `${h.movements} ${plural(h.movements, 'движение', 'движения', 'движений')}` : '', h.supplies ? `${h.supplies} ${plural(h.supplies, 'поставка', 'поставки', 'поставок')}` : '', h.counts ? `${h.counts} ${plural(h.counts, 'инвентаризация', 'инвентаризации', 'инвентаризаций')}` : ''].filter(Boolean).join(', ')})` : ''}
-                , поэтому оно уйдёт в <strong>архив</strong>: пропадёт из списков, поставок и составов, а история сохранит название. Вернуть можно из «Архива».
-                {data.quantity !== 0 ? ` Остаток ${qtyLabel(data.quantity, data.unit)} останется при нём.` : ''}
-              </p>
+            {forGood ? (
+              <>
+                <p>
+                  <strong>История движений сохранится</strong>
+                  {history ? ` (${history})` : ''}: в поставках, инвентаризациях и журнале название останется. Из остатков, архива и списков выбора
+                  сырьё пропадёт, вернуть его будет нельзя. Новое сырьё с таким же названием можно завести потом.
+                </p>
+                {data.quantity > 0 && (
+                  <div className="warn-note">
+                    На складе ещё <strong>{qtyLabel(data.quantity, data.unit)}</strong>
+                    {worth !== null ? ` на ${formatMoney(worth, currency)}` : ''} — спишется с пометкой «удалено».
+                  </div>
+                )}
+                {data.quantity < 0 && <p>Остаток в минусе ({qtyLabel(data.quantity, data.unit)}) — обнулится с пометкой «удалено».</p>}
+                {!ingredient.isArchived && <p className="hint">Нужно только спрятать на время — нажмите «В архив» в карточке сырья.</p>}
+              </>
             ) : (
               <p>По нему ещё ничего не было — оно удалится полностью.</p>
             )}

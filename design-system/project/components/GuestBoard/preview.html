@@ -1,0 +1,16 @@
+<!-- @dsCard group="Кофейня · экран гостей" height=800 width=1280 -->
+<!doctype html>
+<html lang="ru" data-surface="pos" data-business="cafe">
+<head>
+<meta charset="utf-8">
+<title>GuestBoard</title>
+<style>
+  body { padding: 16px; }
+  body { padding: 0; }
+</style>
+</head>
+<body>
+<script>(function(h,m){h.setAttribute('data-surface','pos');h.setAttribute('data-business','cafe');function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{dark:'pos-dark',light:'pos-light'});</script>
+<main class="gb"><header class="gb-head"><div class="gb-brand"><svg class="brand-mark gb-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><defs><linearGradient id="ts-mark-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4a2c18"></stop><stop offset="1" stop-color="#1e120a"></stop></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#ts-mark-bg)"></rect><rect x="0.75" y="0.75" width="30.5" height="30.5" rx="8.25" fill="none" stroke="#ffe2bf" stroke-opacity="0.18" stroke-width="1.5"></rect><text x="16" y="21.5" text-anchor="middle" font-family="'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif" font-size="14" font-weight="800" letter-spacing="-0.5" fill="#f6d3a6">TS</text></svg><h1>Кофейня «Демо»</h1></div><div class="gb-tools"><span class="gb-clock">16:42</span><button type="button" class="gb-icon gb-fade" aria-label="Выключить звук" title="Выключить звук"><svg class="icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"></path></svg></button><button type="button" class="gb-icon gb-fade" aria-label="На весь экран" title="На весь экран"><svg class="icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"></path></svg></button><a class="gb-icon gb-fade" href="#" aria-label="Назад в TS" title="Назад в TS"><svg class="icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"></path></svg></a></div></header><div class="gb-cols" aria-live="polite"><section class="gb-col" data-kind="preparing"><h2>Готовится</h2><div class="gb-fit"><ul class="gb-numbers" style="grid-template-columns: repeat(1, minmax(0px, 1fr)); gap: 12px; font-size: 220px;"><li><span class="gb-num">2</span></li><li><span class="gb-num">3</span></li></ul></div></section><section class="gb-col" data-kind="ready"><h2>Готово — заберите</h2><div class="gb-fit"><ul class="gb-numbers" style="grid-template-columns: repeat(1, minmax(0px, 1fr)); gap: 16px; font-size: 320px;"><li><span class="gb-num">1</span></li></ul></div></section></div></main>
+</body>
+</html>

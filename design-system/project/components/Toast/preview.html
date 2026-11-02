@@ -1,0 +1,22 @@
+<!-- @dsCard group="Кабинет · сообщения" height=100 -->
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Toast</title>
+<style>
+  body { padding: 16px; }
+  .stack { display: grid; gap: 8px; max-width: 420px; }
+</style>
+</head>
+<body>
+<script>(function(h,m){function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{'pos-dark':'dark','pos-light':'light'});</script>
+<div class="stack" role="status">
+  <div class="toast">
+    <span class="toast-dot" aria-hidden="true"></span>
+    <a class="toast-text" href="#">Стол 4: свет горит без игры уже 12 мин — проверьте стол</a>
+    <button type="button" class="toast-close" aria-label="Закрыть">×</button>
+  </div>
+</div>
+</body>
+</html>

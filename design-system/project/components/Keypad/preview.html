@@ -1,0 +1,24 @@
+<!-- @dsCard group="Касса · формы" height=400 width=420 -->
+<!doctype html>
+<html lang="ru" data-surface="pos">
+<head>
+<meta charset="utf-8">
+<title>Keypad</title>
+<style>
+  body { padding: 16px; }
+
+</style>
+</head>
+<body>
+<script>(function(h,m){h.setAttribute('data-surface','pos');function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{dark:'pos-dark',light:'pos-light'});</script>
+<div class="keypad" role="group" aria-label="Цифровая клавиатура">
+  <div class="keypad-dots" aria-hidden="true"><span class="keypad-dot" data-on></span><span class="keypad-dot" data-on></span><span class="keypad-dot" data-on></span><span class="keypad-dot"></span><span class="keypad-dot"></span><span class="keypad-dot"></span></div>
+  <button type="button" class="keypad-key">1</button><button type="button" class="keypad-key">2</button><button type="button" class="keypad-key">3</button>
+  <button type="button" class="keypad-key">4</button><button type="button" class="keypad-key">5</button><button type="button" class="keypad-key">6</button>
+  <button type="button" class="keypad-key">7</button><button type="button" class="keypad-key">8</button><button type="button" class="keypad-key">9</button>
+  <button type="button" class="keypad-key keypad-erase" aria-label="Стереть">⌫</button>
+  <button type="button" class="keypad-key">0</button>
+  <button type="submit" class="keypad-key keypad-enter" disabled aria-label="Войти">Войти</button>
+</div>
+</body>
+</html>

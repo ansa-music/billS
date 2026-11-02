@@ -1,6 +1,7 @@
 import type {
   CounterService,
   CreateCounterOrderRequest,
+  CreateCounterOrderResponse,
   Minor,
   PaymentMethod,
   PricedLine,
@@ -110,6 +111,29 @@ export function buildRequest(
   };
 }
 
+/** What the counter shows right after «Оплатить»: at once, before the HUB answers. */
+export interface Flash {
+  id: string;
+  state: 'sending' | 'ok' | 'failed';
+  method: PaymentMethod | null;
+  total: Minor;
+  change: Minor;
+  /** Split: the part paid by card or QR after the cash. */
+  rest: { method: PaymentMethod; amount: Minor } | null;
+  service: CounterService;
+  guestName: string;
+  /**
+   * Where the money was taken: `step` — the full-screen payment step, whose screen turns into the
+   * big «Заказ 17 · Сдача 450 ₸»; `panel` — a one-tap button or key in the order column, whose
+   * card shows over that column.
+   */
+  where: 'step' | 'panel';
+  res?: CreateCounterOrderResponse;
+  error?: string;
+  /** «Гостю начислено 45 ₸ бонусами» after the HUB confirmed. */
+  loyaltyNote?: string | null;
+}
+
 /** Payment parts for a method: cash may be more than due (change), card and QR exactly due. */
 export function paymentParts(
   total: Minor,
@@ -144,6 +168,9 @@ export function quickTenders(total: Minor, currency: string, count = 4): Minor[]
   }
   return [...out].sort((a, b) => a - b).slice(0, count);
 }
+
+/** A digit (or «00») typed into the cash the guest hands over: no leading zeros, at most 9 digits. */
+export const typeDigit = (typed: string, key: string) => (typed + key).replace(/^0+(?=\d)/, '').slice(0, 9);
 
 // ── Search ──────────────────────────────────────────────────────────────────
 

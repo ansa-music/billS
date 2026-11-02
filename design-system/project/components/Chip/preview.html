@@ -1,0 +1,23 @@
+<!-- @dsCard group="Касса · действия" height=120 width=760 -->
+<!doctype html>
+<html lang="ru" data-surface="pos">
+<head>
+<meta charset="utf-8">
+<title>Chip</title>
+<style>
+  body { padding: 16px; }
+
+</style>
+</head>
+<body>
+<script>(function(h,m){h.setAttribute('data-surface','pos');function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{dark:'pos-dark',light:'pos-light'});</script>
+<div class="chips" role="group" aria-label="Комментарий">
+  <button type="button" class="chip" aria-pressed="true">без сахара</button>
+  <button type="button" class="chip" aria-pressed="false">погорячее</button>
+  <button type="button" class="chip" aria-pressed="true">без крышки</button>
+  <button type="button" class="chip" aria-pressed="false">в свою кружку</button>
+  <button type="button" class="chip" aria-pressed="false">сначала это</button>
+  <button type="button" class="chip" aria-pressed="false" disabled>нет в наличии</button>
+</div>
+</body>
+</html>

@@ -1,0 +1,23 @@
+<!-- @dsCard group="Кабинет · статусы" height=60 -->
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Tag</title>
+<style>
+  body { padding: 16px; }
+
+</style>
+</head>
+<body>
+<script>(function(h,m){function f(){var t=h.getAttribute('data-theme');if(m[t])h.setAttribute('data-theme',m[t]);}f();new MutationObserver(f).observe(h,{attributes:true,attributeFilter:['data-theme']});})(document.documentElement,{'pos-dark':'dark','pos-light':'light'});</script>
+<div class="row wrap">
+  <span class="tag tag-new">новый</span>
+  <span class="tag tag-live">открыта</span>
+  <span class="tag tag-live">смена №128</span>
+  <span class="tag tag-warn" title="Кабинет отправил новые настройки, касса их ещё не забрала">ждёт настройки</span>
+  <span class="tag tag-danger" title="Смены, где посчитанная наличность не сошлась с ожидаемой">расхождений: 2</span>
+  <span class="tag tag-danger">сейчас нет света</span>
+</div>
+</body>
+</html>
