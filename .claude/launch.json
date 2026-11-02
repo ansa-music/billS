@@ -58,7 +58,7 @@
     {
       "name": "lead-cloud",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["--env-file=C:/Users/User/AppData/Local/Temp/claude/C--Users-User--claude-spares-spare-jKL4eh/8171d584-9025-4aa9-895c-b6c96ac0a52e/scratchpad/lead-cloud.env", "apps/cloud/src/main.ts"],
+      "runtimeArgs": ["--env-file=scripts/stands/lead-cloud.env", "apps/cloud/src/main.ts"],
       "port": 4320
     },
     {
