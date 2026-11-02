@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type {
+  AdjustStockRequest,
   CreateIngredientRequest,
   CreateStockCountRequest,
   CreateSupplyRequest,
+  IngredientRemovalView,
   IngredientsView,
   IngredientUnit,
   IngredientView,
@@ -11,19 +13,26 @@ import type {
   RecipeOptionLine,
   RecipesView,
   RecipeView,
+  RemoveIngredientResponse,
+  RemoveSampleResponse,
   SetRecipeRequest,
   StockCountsView,
   StockCountView,
   StockMovementKind,
   StockMovementsView,
+  StockSampleView,
+  StockSetupView,
   SuppliesView,
+  SupplyLineInput,
   SupplyView,
   UpdateIngredientRequest,
   WriteOffRequest,
 } from '@bills/domain';
 import {
   averageCost,
+  canChangeSupply,
   costOf,
+  costWithout,
   daysLeftOf,
   fromMilli,
   INGREDIENT_NAME_MAX,
@@ -34,6 +43,7 @@ import {
   STOCK_NOTE_MAX,
   STOCK_USAGE_DAYS,
   SUPPLIER_MAX,
+  supplyChanges,
   SUPPLY_MAX_LINES,
   toMilli,
   UNIT_COST_LIMIT,
@@ -70,9 +80,44 @@ interface IngredientRow {
   cost_per_unit: number | null;
   min_level: number | null;
   is_archived: number;
+  is_sample: number;
   created_at: number;
   updated_at: number;
 }
+
+interface SupplyRow {
+  id: string;
+  at: number;
+  supplier: string;
+  note: string | null;
+  total: number;
+  created_by: string;
+  created_by_id: string | null;
+  deleted_at: number | null;
+  deleted_by: string | null;
+  delete_reason: string | null;
+  changed_at: number | null;
+  changed_by: string | null;
+}
+
+interface SupplyLineRow {
+  id: number;
+  supply_id: string;
+  ingredient_id: string;
+  quantity: number;
+  amount: number;
+  cost_before: number | null;
+  has_cost_before: number;
+}
+
+/** Who looks at the deliveries or changes one: their staff id and whether they hold `stock.edit`. */
+export interface StockViewer {
+  id: string | null;
+  mayEditStock: boolean;
+}
+
+/** Internal calls (tests, the sample) see and may change everything. */
+const ANY: StockViewer = { id: null, mayEditStock: true };
 
 interface RecipeRow {
   id: number;
@@ -315,17 +360,19 @@ export class StockService {
          ) GROUP BY id`,
       ).map((r) => [r.id, r.n]),
     );
+    const withHistory = this.#withHistory();
     const ingredients = rows
       .map((r) => {
         const u = used.get(r.id) ?? 0;
         const perDay = u > 0 ? fromMilli(Math.round(u / days)) : null;
-        return this.#view(r, perDay, usedIn.get(r.id) ?? 0);
+        return this.#view(r, perDay, usedIn.get(r.id) ?? 0, withHistory.has(r.id));
       })
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
     return { ingredients };
   }
 
-  createIngredient(input: CreateIngredientRequest & { actor: string }): IngredientView {
+  /** `sample` — put in by TS (stock-sample.ts), not by the owner. */
+  createIngredient(input: CreateIngredientRequest & { actor: string; sample?: boolean }): IngredientView {
     const db = this.#db;
     const now = this.#clock.now();
     return transaction(db, () => {
@@ -335,19 +382,7 @@ export class StockService {
       const cost = checkCost(input.costPerUnit);
       const minLevel = checkMin(input.minLevel);
       this.#assertNameFree(name, null);
-      const id = randomUUID();
-      run(
-        db,
-        `INSERT INTO ingredients (id, name, unit, quantity, cost_per_unit, min_level, is_archived, created_at, updated_at)
-         VALUES (?, ?, ?, 0, ?, ?, 0, ?, ?)`,
-        id,
-        name,
-        unit,
-        cost,
-        minLevel,
-        now,
-        now,
-      );
+      const id = this.#insertIngredient({ name, unit, cost, minLevel, sample: input.sample === true, now });
       if (quantity > 0) move(db, now, { ingredientId: id, deltaMilli: quantity, kind: 'initial', actor: input.actor });
       record(db, now, {
         actor: input.actor,
@@ -359,6 +394,192 @@ export class StockService {
       this.#changed();
       return this.#one(id);
     });
+  }
+
+  /**
+   * What «Удалить» will do with an ingredient: delete it (nothing ever happened to it) or archive
+   * it (it has history, which keeps its name), and which recipes use it.
+   */
+  removal(id: string): IngredientRemovalView {
+    const db = this.#db;
+    const ing = this.#row(id);
+    const n = (sql: string) => one<{ n: number }>(db, sql, id)?.n ?? 0;
+    const history = {
+      movements: n('SELECT COUNT(*) AS n FROM stock_movements WHERE ingredient_id = ?'),
+      supplies: n('SELECT COUNT(DISTINCT supply_id) AS n FROM supply_lines WHERE ingredient_id = ?'),
+      counts: n('SELECT COUNT(DISTINCT count_id) AS n FROM stock_count_lines WHERE ingredient_id = ?'),
+    };
+    return {
+      ingredientId: ing.id,
+      name: ing.name,
+      unit: ing.unit,
+      quantity: fromMilli(ing.quantity),
+      recipes: this.#recipesUsing(ing.id),
+      outcome: history.movements + history.supplies + history.counts > 0 ? 'archive' : 'delete',
+      history,
+    };
+  }
+
+  /**
+   * «Удалить»: an ingredient nothing happened to is deleted; one with history is archived — gone
+   * from lists and pickers, its name kept by the history. One that recipes use is refused (409,
+   * naming them) unless `fromRecipes`: then it leaves those recipes too (its base lines, the option
+   * lines that take it and the swaps that replace it).
+   */
+  removeIngredient(input: { id: string; fromRecipes?: boolean; actor: string }): RemoveIngredientResponse {
+    const db = this.#db;
+    const now = this.#clock.now();
+    return transaction(db, () => {
+      const plan = this.removal(input.id);
+      const recipes = plan.recipes.map((r) => r.name);
+      if (recipes.length > 0 && input.fromRecipes !== true) {
+        throw new HubError(
+          409,
+          'INGREDIENT_IN_RECIPES',
+          `«${plan.name}» есть в составе: ${recipes.join(', ')}. Уберите его оттуда или удалите вместе с составом`,
+        );
+      }
+      if (recipes.length > 0) {
+        run(db, 'DELETE FROM recipe_items WHERE ingredient_id = ? OR replaces_id = ?', plan.ingredientId, plan.ingredientId);
+        for (const r of plan.recipes) run(db, 'UPDATE recipe_items SET updated_at = ? WHERE product_id = ?', now, r.productId);
+      }
+      if (plan.outcome === 'delete') run(db, 'DELETE FROM ingredients WHERE id = ?', plan.ingredientId);
+      else run(db, 'UPDATE ingredients SET is_archived = 1, updated_at = ? WHERE id = ?', now, plan.ingredientId);
+      const outcome = plan.outcome === 'delete' ? 'deleted' : 'archived';
+      record(db, now, {
+        actor: input.actor,
+        action: 'stock.ingredient_removed',
+        entityType: 'ingredient',
+        entityId: plan.ingredientId,
+        data: { name: plan.name, unit: plan.unit, outcome, recipes, quantity: plan.quantity },
+      });
+      this.#changed();
+      return { outcome, recipes };
+    });
+  }
+
+  /**
+   * «Исправить остаток»: the level as it really is (a wrong sale deduction, a miscount, a sample
+   * level), with a reason. One `adjust` movement on top — nothing before it changes.
+   */
+  adjust(input: AdjustStockRequest & { id: string; actor: string }): IngredientView {
+    const db = this.#db;
+    const now = this.#clock.now();
+    return transaction(db, () => {
+      const ing = this.#row(input.id);
+      if (ing.is_archived) throw new HubError(422, 'INGREDIENT_ARCHIVED', `«${ing.name}» в архиве`);
+      const target = checkQty(input.quantity, false, 'Остаток');
+      const reason = cleanText(input.reason, STOCK_NOTE_MAX, 'REASON_REQUIRED', 'причину', true)!;
+      if (reason.length < WRITE_OFF_REASON_MIN) throw new HubError(422, 'REASON_REQUIRED', 'Укажите причину');
+      const delta = target - ing.quantity;
+      if (delta === 0) throw new HubError(422, 'NOTHING_CHANGED', 'Остаток уже такой');
+      move(db, now, { ingredientId: ing.id, deltaMilli: delta, kind: 'adjust', actor: input.actor, reason });
+      record(db, now, {
+        actor: input.actor,
+        action: 'stock.adjusted',
+        entityType: 'ingredient',
+        entityId: ing.id,
+        data: {
+          name: ing.name,
+          unit: ing.unit,
+          from: fromMilli(ing.quantity),
+          to: fromMilli(target),
+          reason,
+          cost: costOf(fromMilli(delta), ing.cost_per_unit),
+        },
+      });
+      this.#changed();
+      return this.#one(ing.id);
+    });
+  }
+
+  // ── The sample TS put in (stock-sample.ts) ──────────────────────────────
+
+  /**
+   * The example still on the stock and what «Убрать пример» would do: a sample recipe nobody saved
+   * goes; a sample ingredient goes completely when nothing happened to it, is archived when it has
+   * real history (sales, deliveries, counts, corrections), stays when the owner's own recipes use it.
+   */
+  sample(): StockSampleView {
+    const db = this.#db;
+    const sampleProducts = new Set(
+      all<{ product_id: string }>(db, 'SELECT product_id FROM recipe_items GROUP BY product_id HAVING MIN(is_sample) = 1').map((r) => r.product_id),
+    );
+    const names = this.#productNames();
+    const ingredients = all<IngredientRow>(db, 'SELECT * FROM ingredients WHERE is_sample = 1 AND is_archived = 0')
+      .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+      .map((ing) => {
+        const own = this.#recipesUsing(ing.id).filter((r) => !sampleProducts.has(r.productId));
+        if (own.length > 0) {
+          return { id: ing.id, name: ing.name, outcome: 'keep' as const, why: `в составе ${own.map((r) => `«${r.name}»`).join(', ')}` };
+        }
+        const kinds = new Set(
+          all<{ kind: string }>(db, "SELECT DISTINCT kind FROM stock_movements WHERE ingredient_id = ? AND kind <> 'initial'", ing.id).map((r) => r.kind),
+        );
+        const why =
+          kinds.has('sale') || kinds.has('return')
+            ? 'уже были продажи'
+            : kinds.has('supply') || one(db, 'SELECT id FROM supply_lines WHERE ingredient_id = ? LIMIT 1', ing.id)
+              ? 'были поставки'
+              : kinds.has('inventory') || one(db, 'SELECT id FROM stock_count_lines WHERE ingredient_id = ? LIMIT 1', ing.id)
+                ? 'была инвентаризация'
+                : kinds.size > 0
+                  ? 'остаток уже исправляли или списывали'
+                  : null;
+        return { id: ing.id, name: ing.name, outcome: why ? ('archive' as const) : ('delete' as const), why };
+      });
+    const recipes = [...sampleProducts]
+      .map((productId) => ({ productId, name: names.get(productId) ?? '—' }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+    return { ingredients, recipes };
+  }
+
+  /** «Убрать пример со склада»: see `sample()`; what stays is the owner's from now on. */
+  removeSample(input: { actor: string }): RemoveSampleResponse {
+    const db = this.#db;
+    const now = this.#clock.now();
+    return transaction(db, () => {
+      const plan = this.sample();
+      for (const r of plan.recipes) run(db, 'DELETE FROM recipe_items WHERE product_id = ?', r.productId);
+      const result: RemoveSampleResponse = { deleted: [], archived: [], kept: [], recipes: plan.recipes.map((r) => r.name) };
+      for (const ing of plan.ingredients) {
+        if (ing.outcome === 'delete') {
+          // Only its example starting level was ever written: the example goes with it.
+          run(db, "DELETE FROM stock_movements WHERE ingredient_id = ? AND kind = 'initial'", ing.id);
+          run(db, 'DELETE FROM ingredients WHERE id = ?', ing.id);
+          result.deleted.push(ing.name);
+        } else if (ing.outcome === 'archive') {
+          run(db, 'UPDATE ingredients SET is_archived = 1, is_sample = 0, updated_at = ? WHERE id = ?', now, ing.id);
+          result.archived.push(ing.name);
+        } else {
+          run(db, 'UPDATE ingredients SET is_sample = 0, updated_at = ? WHERE id = ?', now, ing.id);
+          result.kept.push({ name: ing.name, why: ing.why ?? '' });
+        }
+      }
+      record(db, now, { actor: input.actor, action: 'stock.sample_removed', entityType: 'stock', entityId: 'sample', data: { ...result } });
+      this.#changed();
+      return result;
+    });
+  }
+
+  /** The first-run checklist of «Склад»: raw materials → recipes → deliveries → sales. */
+  setup(): StockSetupView {
+    const db = this.#db;
+    const n = (sql: string) => one<{ n: number }>(db, sql)?.n ?? 0;
+    const products = all<{ id: string; name: string; has: number }>(
+      db,
+      `SELECT p.id, p.name, EXISTS (SELECT 1 FROM recipe_items r WHERE r.product_id = p.id) AS has
+       FROM products p JOIN product_categories c ON c.id = p.category_id
+       WHERE p.is_active = 1 AND c.is_active = 1
+       ORDER BY c.sort_order, p.sort_order, p.name`,
+    );
+    return {
+      ingredients: n('SELECT COUNT(*) AS n FROM ingredients WHERE is_archived = 0'),
+      products: products.length,
+      withoutRecipe: products.filter((p) => !p.has).map((p) => ({ productId: p.id, name: p.name })),
+      supplies: n('SELECT COUNT(*) AS n FROM supplies WHERE deleted_at IS NULL'),
+      sales: n("SELECT COUNT(DISTINCT order_id) AS n FROM stock_movements WHERE kind = 'sale'"),
+    };
   }
 
   updateIngredient(input: UpdateIngredientRequest & { id: string; actor: string }): IngredientView {
@@ -376,6 +597,17 @@ export class StockService {
       const minLevel = input.minLevel === undefined ? current.min_level : checkMin(input.minLevel);
       const archived = input.isArchived === undefined ? current.is_archived === 1 : input.isArchived === true;
       if (!archived && (name !== current.name || current.is_archived === 1)) this.#assertNameFree(name, current.id);
+      // An archived ingredient is hidden: recipes still taking it would move a level nobody sees.
+      if (archived && current.is_archived === 0) {
+        const recipes = this.#recipesUsing(current.id).map((r) => r.name);
+        if (recipes.length > 0) {
+          throw new HubError(
+            409,
+            'INGREDIENT_IN_RECIPES',
+            `«${current.name}» есть в составе: ${recipes.join(', ')}. Уберите его оттуда или удалите вместе с составом`,
+          );
+        }
+      }
       run(
         db,
         `UPDATE ingredients SET name = ?, unit = ?, cost_per_unit = ?, min_level = ?, is_archived = ?, updated_at = ?
@@ -430,8 +662,11 @@ export class StockService {
     };
   }
 
-  /** Replaces the recipe of a product (base lines and option changes); empty lists remove it. */
-  setRecipe(input: SetRecipeRequest & { productId: string; actor: string }): RecipeView {
+  /**
+   * Replaces the recipe of a product (base lines and option changes); empty lists remove it.
+   * `sample` — TS's example (stock-sample.ts); a recipe the owner saves is theirs.
+   */
+  setRecipe(input: SetRecipeRequest & { productId: string; actor: string; sample?: boolean }): RecipeView {
     const db = this.#db;
     const now = this.#clock.now();
     return transaction(db, () => {
@@ -445,8 +680,8 @@ export class StockService {
       const insert = (choiceId: string | null, mode: RecipeRow['mode'], ingredientId: string, replacesId: string | null, quantity: number) =>
         run(
           db,
-          `INSERT INTO recipe_items (product_id, choice_id, mode, ingredient_id, replaces_id, quantity, sort_order, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO recipe_items (product_id, choice_id, mode, ingredient_id, replaces_id, quantity, sort_order, updated_at, is_sample)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           product.id,
           choiceId,
           mode,
@@ -455,6 +690,7 @@ export class StockService {
           toMilli(quantity),
           ++order,
           now,
+          input.sample === true ? 1 : 0,
         );
       for (const line of recipe.items) insert(null, 'base', line.ingredientId, null, line.quantity);
       for (const o of recipe.options) {
@@ -474,14 +710,19 @@ export class StockService {
 
   // ── Supplies ────────────────────────────────────────────────────────────
 
-  supplies(range: { from?: number | undefined; to?: number | undefined } = {}): SuppliesView {
-    const db = this.#db;
+  /** Deliveries, newest first, deleted ones included (marked); `viewer` decides `canChange`. */
+  supplies(range: { from?: number | undefined; to?: number | undefined } = {}, viewer: StockViewer = ANY): SuppliesView {
     const { where, params } = rangeOf(range, 's.at');
-    const rows = all<{ id: string; at: number; supplier: string; note: string | null; total: number; created_by: string }>(
-      db,
-      `SELECT s.* FROM supplies s ${where} ORDER BY s.at DESC, s.rowid DESC LIMIT ${LIST_LIMIT}`,
-      ...params,
-    );
+    const rows = all<SupplyRow>(this.#db, `SELECT s.* FROM supplies s ${where} ORDER BY s.at DESC, s.rowid DESC LIMIT ${LIST_LIMIT}`, ...params);
+    return { supplies: this.#supplyViews(rows, viewer) };
+  }
+
+  #supplyView(id: string, viewer: StockViewer): SupplyView {
+    return this.#supplyViews([this.#supplyRow(id)], viewer)[0]!;
+  }
+
+  #supplyViews(rows: readonly SupplyRow[], viewer: StockViewer): SupplyView[] {
+    const now = this.#clock.now();
     const lines = this.#linesOf<{
       supply_id: string;
       ingredient_id: string;
@@ -495,8 +736,9 @@ export class StockService {
       rows.map((r) => r.id),
       'l.id',
     );
-    return {
-      supplies: rows.map((r): SupplyView => ({
+    return rows.map((r): SupplyView => {
+      const may = canChangeSupply({ at: r.at, createdById: r.created_by_id, deletedAt: r.deleted_at }, viewer, now);
+      return {
         id: r.id,
         at: r.at,
         supplier: r.supplier,
@@ -506,51 +748,53 @@ export class StockService {
         lines: lines
           .filter((l) => l.supply_id === r.id)
           .map((l) => ({ ingredientId: l.ingredient_id, name: l.name, unit: l.unit, quantity: fromMilli(l.quantity), amount: l.amount })),
-      })),
-    };
+        deletedAt: r.deleted_at,
+        deletedBy: r.deleted_by,
+        deleteReason: r.delete_reason,
+        changedAt: r.changed_at,
+        changedBy: r.changed_by,
+        canChange: may.ok,
+        changeUntil: may.until,
+      };
+    });
   }
 
-  /** A delivery: every line adds to the stock and updates the ingredient's cost (weighted average). */
-  createSupply(input: CreateSupplyRequest & { actor: string }): SupplyView {
+  /**
+   * A delivery: every line adds to the stock and updates the ingredient's cost (weighted average).
+   * A line may bring an ingredient that is not on the stock yet (`newIngredient`): it is created
+   * with the delivery — whoever receives deliveries may do that.
+   */
+  createSupply(input: CreateSupplyRequest & { actor: string; actorId?: string | null; viewer?: StockViewer }): SupplyView {
     const db = this.#db;
     const now = this.#clock.now();
     return transaction(db, () => {
       const supplier = cleanText(input.supplier, SUPPLIER_MAX, 'SUPPLIER_REQUIRED', 'поставщика', true)!;
       const note = cleanText(input.note, STOCK_NOTE_MAX, 'NOTE_TOO_LONG', 'комментарий', false);
-      const lines = Array.isArray(input.lines) ? input.lines : [];
-      if (lines.length === 0) throw new HubError(422, 'SUPPLY_EMPTY', 'Добавьте хотя бы одну строку');
-      if (lines.length > SUPPLY_MAX_LINES) throw new HubError(422, 'SUPPLY_TOO_LONG', `Не больше ${SUPPLY_MAX_LINES} строк`);
-      const checked = lines.map((l, i) => {
-        const ing = this.#row(l.ingredientId);
-        if (ing.is_archived) throw new HubError(422, 'INGREDIENT_ARCHIVED', `Строка ${i + 1}: «${ing.name}» в архиве`);
-        const milli = checkQty(l.quantity, true, `Строка ${i + 1}, количество`);
-        if (!Number.isInteger(l.amount) || l.amount < 0) {
-          throw new HubError(422, 'AMOUNT_INVALID', `Строка ${i + 1}: сумма — целое число не меньше нуля`);
-        }
-        return { ing, milli, amount: l.amount };
-      });
+      const checked = this.#supplyLines(input.lines, input.actor, now);
       const total = checked.reduce((s, l) => s + l.amount, 0);
       const id = randomUUID();
       run(
         db,
-        'INSERT INTO supplies (id, at, supplier, note, total, created_by) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO supplies (id, at, supplier, note, total, created_by, created_by_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
         id,
         now,
         supplier,
         note,
         total,
         input.actor,
+        input.actorId ?? null,
       );
       for (const l of checked) {
+        const before = this.#row(l.ing.id);
         run(
           db,
-          'INSERT INTO supply_lines (supply_id, ingredient_id, quantity, amount) VALUES (?, ?, ?, ?)',
+          'INSERT INTO supply_lines (supply_id, ingredient_id, quantity, amount, cost_before, has_cost_before) VALUES (?, ?, ?, ?, ?, 1)',
           id,
           l.ing.id,
           l.milli,
           l.amount,
+          before.cost_per_unit,
         );
-        const before = this.#row(l.ing.id);
         // A line at 0 (a free sample) adds stock but leaves the known price as it is.
         if (l.amount > 0) {
           const cost = averageCost(fromMilli(before.quantity), before.cost_per_unit, fromMilli(l.milli), l.amount);
@@ -571,7 +815,163 @@ export class StockService {
         },
       });
       this.#changed();
-      return this.supplies().supplies.find((s) => s.id === id)!;
+      return this.#supplyView(id, input.viewer ?? ANY);
+    });
+  }
+
+  /**
+   * «Удалить поставку»: a delivery typed in by mistake takes back exactly what it added — one
+   * `supply_undo` movement per line, at the line's amount — and the price goes back to what it was
+   * (see #costWithoutLine). If part of it was used already, the level goes below zero: sales are
+   * never undone, and the level shows what is really missing. The delivery stays in the list, marked.
+   */
+  deleteSupply(input: { id: string; reason?: string | undefined; actor: string; viewer?: StockViewer }): SupplyView {
+    const db = this.#db;
+    const now = this.#clock.now();
+    return transaction(db, () => {
+      const supply = this.#supplyRow(input.id);
+      this.#assertMayChange(supply, input.viewer ?? ANY, now);
+      const reason = cleanText(input.reason, STOCK_NOTE_MAX, 'NOTE_TOO_LONG', 'причину', false);
+      const text = `Поставка от ${this.#day(supply.at)} «${supply.supplier}» удалена${reason ? `: ${reason}` : ''}`;
+      const lines = all<SupplyLineRow>(db, 'SELECT * FROM supply_lines WHERE supply_id = ? ORDER BY id', supply.id);
+      const audit: Array<Record<string, unknown>> = [];
+      // Last line first: two lines of the same ingredient give their prices back in turn.
+      for (const line of [...lines].reverse()) {
+        const ing = this.#row(line.ingredient_id);
+        const cost = this.#costWithoutLine(supply, line, ing.quantity, ing.cost_per_unit);
+        run(db, 'UPDATE ingredients SET cost_per_unit = ? WHERE id = ?', cost, ing.id);
+        const balance = move(db, now, {
+          ingredientId: ing.id,
+          deltaMilli: -line.quantity,
+          kind: 'supply_undo',
+          actor: input.actor,
+          cost: -line.amount,
+          supplyId: supply.id,
+          reason: text,
+        });
+        audit.unshift({ ingredientId: ing.id, name: ing.name, quantity: fromMilli(line.quantity), amount: line.amount, balance: fromMilli(balance) });
+      }
+      run(
+        db,
+        'UPDATE supplies SET deleted_at = ?, deleted_by = ?, delete_reason = ? WHERE id = ?',
+        now,
+        input.actor,
+        reason,
+        supply.id,
+      );
+      record(db, now, {
+        actor: input.actor,
+        action: 'stock.supply_deleted',
+        entityType: 'supply',
+        entityId: supply.id,
+        data: { supplier: supply.supplier, at: supply.at, total: supply.total, reason, lines: audit },
+      });
+      this.#changed();
+      return this.#supplyView(supply.id, input.viewer ?? ANY);
+    });
+  }
+
+  /**
+   * «Исправить поставку»: the delivery gets the corrected lines; only what differs moves, per
+   * ingredient (`supply_fix`: the wrong item goes back, the right one comes in, a quantity or a sum
+   * is put right), and each changed price is worked out again without the old lines and with the new.
+   */
+  updateSupply(input: CreateSupplyRequest & { id: string; actor: string; viewer?: StockViewer }): SupplyView {
+    const db = this.#db;
+    const now = this.#clock.now();
+    return transaction(db, () => {
+      const supply = this.#supplyRow(input.id);
+      this.#assertMayChange(supply, input.viewer ?? ANY, now);
+      const supplier = cleanText(input.supplier, SUPPLIER_MAX, 'SUPPLIER_REQUIRED', 'поставщика', true)!;
+      const note = cleanText(input.note, STOCK_NOTE_MAX, 'NOTE_TOO_LONG', 'комментарий', false);
+      const old = all<SupplyLineRow>(db, 'SELECT * FROM supply_lines WHERE supply_id = ? ORDER BY id', supply.id);
+      const checked = this.#supplyLines(input.lines, input.actor, now, new Set(old.map((l) => l.ingredient_id)));
+      const changes = supplyChanges(
+        old.map((l) => ({ ingredientId: l.ingredient_id, quantity: fromMilli(l.quantity), amount: l.amount })),
+        checked.map((l) => ({ ingredientId: l.ing.id, quantity: fromMilli(l.milli), amount: l.amount })),
+      );
+      const text = `Поставка от ${this.#day(supply.at)} «${supplier}» исправлена`;
+      const changed = new Set(changes.map((c) => c.ingredientId));
+      // The price each new line found: for a changed ingredient, worked out below; else kept as it was.
+      const costBefore = new Map<number, { cost: number | null; known: boolean }>();
+      checked.forEach((l, i) => {
+        if (changed.has(l.ing.id)) return;
+        const was = old.find((o) => o.ingredient_id === l.ing.id);
+        costBefore.set(i, { cost: was?.cost_before ?? null, known: was?.has_cost_before === 1 });
+      });
+      const audit: Array<Record<string, unknown>> = [];
+      for (const c of changes) {
+        const ing = this.#row(c.ingredientId);
+        let stock = ing.quantity;
+        let cost = ing.cost_per_unit;
+        for (const line of old.filter((l) => l.ingredient_id === ing.id).reverse()) {
+          cost = this.#costWithoutLine(supply, line, stock, cost);
+          stock -= line.quantity;
+        }
+        checked.forEach((l, i) => {
+          if (l.ing.id !== ing.id) return;
+          costBefore.set(i, { cost, known: true });
+          if (l.amount > 0) cost = averageCost(fromMilli(stock), cost, fromMilli(l.milli), l.amount);
+          stock += l.milli;
+        });
+        run(db, 'UPDATE ingredients SET cost_per_unit = ? WHERE id = ?', cost, ing.id);
+        const balance = move(db, now, {
+          ingredientId: ing.id,
+          deltaMilli: toMilli(c.after.quantity) - toMilli(c.before.quantity),
+          kind: 'supply_fix',
+          actor: input.actor,
+          cost: c.after.amount - c.before.amount,
+          supplyId: supply.id,
+          reason: text,
+        });
+        audit.push({ ingredientId: ing.id, name: ing.name, before: c.before, after: c.after, balance: fromMilli(balance) });
+      }
+      run(db, 'DELETE FROM supply_lines WHERE supply_id = ?', supply.id);
+      checked.forEach((l, i) => {
+        const before = costBefore.get(i) ?? { cost: null, known: false };
+        run(
+          db,
+          'INSERT INTO supply_lines (supply_id, ingredient_id, quantity, amount, cost_before, has_cost_before) VALUES (?, ?, ?, ?, ?, ?)',
+          supply.id,
+          l.ing.id,
+          l.milli,
+          l.amount,
+          before.cost,
+          before.known ? 1 : 0,
+        );
+      });
+      const total = checked.reduce((s, l) => s + l.amount, 0);
+      run(
+        db,
+        'UPDATE supplies SET supplier = ?, note = ?, total = ?, changed_at = ?, changed_by = ? WHERE id = ?',
+        supplier,
+        note,
+        total,
+        now,
+        input.actor,
+        supply.id,
+      );
+      record(db, now, {
+        actor: input.actor,
+        action: 'stock.supply_changed',
+        entityType: 'supply',
+        entityId: supply.id,
+        data: {
+          supplier,
+          note,
+          total,
+          lines: checked.map((l) => ({ ingredientId: l.ing.id, name: l.ing.name, quantity: fromMilli(l.milli), amount: l.amount })),
+          changes: audit,
+          was: {
+            supplier: supply.supplier,
+            note: supply.note,
+            total: supply.total,
+            lines: old.map((l) => ({ ingredientId: l.ingredient_id, quantity: fromMilli(l.quantity), amount: l.amount })),
+          },
+        },
+      });
+      this.#changed();
+      return this.#supplyView(supply.id, input.viewer ?? ANY);
     });
   }
 
@@ -774,10 +1174,161 @@ export class StockService {
   }
 
   #one(id: string): IngredientView {
-    return this.ingredients().ingredients.find((i) => i.id === id) ?? this.#view(this.#row(id), null, 0);
+    return this.ingredients().ingredients.find((i) => i.id === id) ?? this.#view(this.#row(id), null, 0, true);
   }
 
-  #view(r: IngredientRow, perDay: number | null, usedIn: number): IngredientView {
+  /** Ingredients something happened to: movements, delivery lines, count lines. */
+  #withHistory(): Set<string> {
+    return new Set(
+      all<{ id: string }>(
+        this.#db,
+        `SELECT ingredient_id AS id FROM stock_movements
+         UNION SELECT ingredient_id FROM supply_lines
+         UNION SELECT ingredient_id FROM stock_count_lines`,
+      ).map((r) => r.id),
+    );
+  }
+
+  #insertIngredient(i: { name: string; unit: IngredientUnit; cost: number | null; minLevel: number | null; sample: boolean; now: number }): string {
+    const id = randomUUID();
+    run(
+      this.#db,
+      `INSERT INTO ingredients (id, name, unit, quantity, cost_per_unit, min_level, is_archived, is_sample, created_at, updated_at)
+       VALUES (?, ?, ?, 0, ?, ?, 0, ?, ?, ?)`,
+      id,
+      i.name,
+      i.unit,
+      i.cost,
+      i.minLevel,
+      i.sample ? 1 : 0,
+      i.now,
+      i.now,
+    );
+    return id;
+  }
+
+  /** Products whose recipe uses the ingredient — taken, or replaced by an option — by name. */
+  #recipesUsing(ingredientId: string): Array<{ productId: string; name: string }> {
+    return all<{ productId: string; name: string }>(
+      this.#db,
+      `SELECT DISTINCT p.id AS productId, p.name FROM recipe_items r JOIN products p ON p.id = r.product_id
+       WHERE r.ingredient_id = ? OR r.replaces_id = ?`,
+      ingredientId,
+      ingredientId,
+    ).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+  }
+
+  #productNames(): Map<string, string> {
+    return new Map(all<{ id: string; name: string }>(this.#db, 'SELECT id, name FROM products').map((r) => [r.id, r.name]));
+  }
+
+  /**
+   * Lines of a delivery as typed: a known ingredient (not archived) or a new one created on the spot
+   * (`newIngredient`; an active one of that name is used instead of a twin), a quantity above 0 and
+   * the line's sum. Inside the delivery's transaction: a refused delivery creates nothing.
+   */
+  #supplyLines(
+    raw: readonly SupplyLineInput[] | undefined,
+    actor: string,
+    now: number,
+    /** A correction keeps the lines of an ingredient archived since the delivery. */
+    archivedOk: ReadonlySet<string> = new Set(),
+  ): Array<{ ing: IngredientRow; milli: number; amount: number }> {
+    const lines = Array.isArray(raw) ? raw : [];
+    if (lines.length === 0) throw new HubError(422, 'SUPPLY_EMPTY', 'Добавьте хотя бы одну строку');
+    if (lines.length > SUPPLY_MAX_LINES) throw new HubError(422, 'SUPPLY_TOO_LONG', `Не больше ${SUPPLY_MAX_LINES} строк`);
+    return lines.map((l, i) => {
+      let ing: IngredientRow;
+      if (typeof l.ingredientId === 'string' && l.ingredientId) {
+        ing = this.#row(l.ingredientId);
+        if (ing.is_archived && !archivedOk.has(ing.id)) throw new HubError(422, 'INGREDIENT_ARCHIVED', `Строка ${i + 1}: «${ing.name}» в архиве`);
+      } else if (l.newIngredient && typeof l.newIngredient === 'object') {
+        ing = this.#findOrCreate(l.newIngredient, actor, now, i);
+      } else {
+        throw new HubError(422, 'LINE_INGREDIENT_REQUIRED', `Строка ${i + 1}: выберите сырьё`);
+      }
+      const milli = checkQty(l.quantity, true, `Строка ${i + 1}, количество`);
+      if (!Number.isInteger(l.amount) || l.amount < 0) {
+        throw new HubError(422, 'AMOUNT_INVALID', `Строка ${i + 1}: сумма — целое число не меньше нуля`);
+      }
+      return { ing, milli, amount: l.amount };
+    });
+  }
+
+  #findOrCreate(raw: { name: string; unit: IngredientUnit }, actor: string, now: number, index: number): IngredientRow {
+    const name = cleanText(raw.name, INGREDIENT_NAME_MAX, 'NAME_REQUIRED', `название сырья в строке ${index + 1}`, true)!;
+    const unit = checkUnit(raw.unit);
+    const wanted = name.toLocaleLowerCase('ru');
+    const existing = all<IngredientRow>(this.#db, 'SELECT * FROM ingredients WHERE is_archived = 0').find(
+      (r) => r.name.toLocaleLowerCase('ru') === wanted,
+    );
+    if (existing) {
+      if (existing.unit !== unit) {
+        throw new HubError(422, 'UNIT_MISMATCH', `Строка ${index + 1}: «${existing.name}» уже есть на складе — в ${existing.unit}`);
+      }
+      return existing;
+    }
+    const id = this.#insertIngredient({ name, unit, cost: null, minLevel: null, sample: false, now });
+    record(this.#db, now, {
+      actor,
+      action: 'stock.ingredient_created',
+      entityType: 'ingredient',
+      entityId: id,
+      data: { name, unit, quantity: 0, costPerUnit: null, minLevel: null, via: 'supply' },
+    });
+    return this.#row(id);
+  }
+
+  #supplyRow(id: string): SupplyRow {
+    const row = one<SupplyRow>(this.#db, 'SELECT * FROM supplies WHERE id = ?', id);
+    if (!row) throw new HubError(404, 'SUPPLY_NOT_FOUND', 'Поставка не найдена');
+    return row;
+  }
+
+  #assertMayChange(supply: SupplyRow, viewer: StockViewer, now: number): void {
+    if (supply.deleted_at !== null) throw new HubError(409, 'SUPPLY_DELETED', 'Эта поставка уже удалена');
+    if (!canChangeSupply({ at: supply.at, createdById: supply.created_by_id, deletedAt: null }, viewer, now).ok) {
+      throw new HubError(
+        403,
+        'SUPPLY_CHANGE_FORBIDDEN',
+        'Удалить или исправить поставку может директор или управляющий. Свою поставку — в течение 30 минут после приёмки',
+      );
+    }
+  }
+
+  /**
+   * The price of an ingredient without one delivery line: the price just before it, when no later
+   * delivery of that ingredient came since (exact); otherwise the line's value taken out of the
+   * average (costWithout). Lines of the delivery being undone do not count as later.
+   */
+  #costWithoutLine(supply: SupplyRow, line: SupplyLineRow, stockMilli: number, cost: number | null): number | null {
+    const later = one(
+      this.#db,
+      `SELECT l.id FROM supply_lines l JOIN supplies s ON s.id = l.supply_id
+       WHERE l.ingredient_id = ? AND s.deleted_at IS NULL AND s.id <> ?
+         AND (s.at > ? OR (s.at = ? AND s.rowid > (SELECT rowid FROM supplies WHERE id = ?)))
+       LIMIT 1`,
+      line.ingredient_id,
+      supply.id,
+      supply.at,
+      supply.at,
+      supply.id,
+    );
+    if (!later && line.has_cost_before === 1) return line.cost_before;
+    return costWithout(fromMilli(stockMilli), cost, fromMilli(line.quantity), line.amount);
+  }
+
+  /** «2 нояб.» in the club's time zone, for movement reasons. */
+  #day(at: number): string {
+    const tz = one<{ timezone: string }>(this.#db, 'SELECT timezone FROM clubs ORDER BY created_at LIMIT 1')?.timezone;
+    try {
+      return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', ...(tz ? { timeZone: tz } : {}) }).format(at);
+    } catch {
+      return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' }).format(at);
+    }
+  }
+
+  #view(r: IngredientRow, perDay: number | null, usedIn: number, hasHistory: boolean): IngredientView {
     const quantity = fromMilli(r.quantity);
     const value = costOf(Math.max(0, quantity), r.cost_per_unit);
     return {
@@ -793,6 +1344,8 @@ export class StockService {
       daysLeft: daysLeftOf(quantity, perDay),
       value,
       usedIn,
+      hasHistory,
+      isSample: r.is_sample === 1,
     };
   }
 

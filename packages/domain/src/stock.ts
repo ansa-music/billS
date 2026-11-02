@@ -83,6 +83,68 @@ export function averageCost(
   return Math.round((s * costPerUnit + amount * QTY_SCALE) / (s + d));
 }
 
+/**
+ * The cost per unit as it would be without one delivery line — the line is deleted or corrected.
+ * `stock` and `costPerUnit` are the ingredient now, `delivered` and `amount` the line. The line's
+ * value comes off at its own price; a free line (amount 0) never changed the price, so it stays.
+ * When nothing (or less than nothing) would be left, or the value would turn negative (the stock
+ * was used and re-priced since), the price stays as it is: a guess would be worse than no change.
+ */
+export function costWithout(stock: number, costPerUnit: Minor | null, delivered: number, amount: Minor): Minor | null {
+  if (costPerUnit === null) return null;
+  if (amount <= 0) return costPerUnit;
+  const s = toMilli(stock);
+  const remaining = s - toMilli(delivered);
+  const value = s * costPerUnit - amount * QTY_SCALE;
+  if (remaining <= 0 || value <= 0) return costPerUnit;
+  return Math.round(value / remaining);
+}
+
+// ── Typing amounts the way an invoice says them ─────────────────────────────
+
+/** A unit an amount may be typed in, and how many base units (г, мл, шт) one of it is. */
+export interface QtyInputUnit {
+  label: string;
+  factor: number;
+}
+
+/**
+ * Invoices count coffee in kilograms and milk in litres, recipes in grams and millilitres:
+ * the screens offer both and send the base unit (2 кг → 2 000 г).
+ */
+export const QTY_INPUT_UNITS: Record<IngredientUnit, readonly QtyInputUnit[]> = {
+  г: [
+    { label: 'г', factor: 1 },
+    { label: 'кг', factor: 1000 },
+  ],
+  мл: [
+    { label: 'мл', factor: 1 },
+    { label: 'л', factor: 1000 },
+  ],
+  шт: [{ label: 'шт', factor: 1 }],
+};
+
+/** The unit deliveries and stock levels are usually counted in: кг, л, шт. */
+export function bigUnitOf(unit: IngredientUnit): QtyInputUnit {
+  const list = QTY_INPUT_UNITS[unit];
+  return list[list.length - 1]!;
+}
+
+/** 1,5 (кг, factor 1000) → 1 500 (г), to the thousandth, without float drift. */
+export function toBaseQty(value: number, factor: number): number {
+  return fromMilli(Math.round(value * factor * QTY_SCALE));
+}
+
+/** «3 кг», «12,5 л», «850 г», «−1,5 кг», «1 200 шт»: a stock level the way people say it. */
+export function formatStock(quantity: number, unit: IngredientUnit): string {
+  const q = fromMilli(toMilli(quantity));
+  if (unit !== 'шт' && Math.abs(q) >= 1000) {
+    const big = bigUnitOf(unit);
+    return `${qtyFormat.format(q / big.factor).replace('-', '−')} ${big.label}`;
+  }
+  return formatQty(q, unit);
+}
+
 /** «хватит на N дней»: whole days the stock lasts at `perDay`; 0 when nothing is left; null without sales. */
 export function daysLeftOf(quantity: number, perDay: number | null): number | null {
   if (quantity <= 0) return 0;
@@ -110,9 +172,9 @@ export const RECIPE_OPTION_MODES = ['add', 'set', 'swap'] as const;
 export type RecipeOptionMode = (typeof RECIPE_OPTION_MODES)[number];
 
 export const RECIPE_OPTION_MODE_LABEL: Record<RecipeOptionMode, string> = {
-  add: 'добавить',
-  set: 'вместо базы',
-  swap: 'заменить',
+  add: 'добавить сверху',
+  set: 'другое количество',
+  swap: 'заменить одно на другое',
 };
 
 export interface RecipeOptionLine {
@@ -151,6 +213,29 @@ export function recipeUsage(recipe: Recipe, choiceIds: readonly string[] = []): 
   return [...amounts]
     .filter(([, milli]) => milli > 0)
     .map(([ingredientId, milli]) => ({ ingredientId, quantity: fromMilli(milli) }));
+}
+
+/**
+ * What an option line does, in plain words for the recipe screen: «Молоко +100 мл»,
+ * «Молоко 350 мл вместо 200 мл», «без «Сахар»», «Овсяное молоко вместо «Молоко»».
+ * `ingredient` looks a name and unit up; `base` is the plain portion (for «вместо 200 мл»).
+ */
+export function describeOptionLine(
+  line: RecipeOptionLine,
+  ingredient: (id: string) => { name: string; unit: IngredientUnit } | undefined,
+  base: readonly RecipeLine[] = [],
+): string {
+  const ing = ingredient(line.ingredientId);
+  const name = ing?.name ?? '—';
+  const qty = (q: number) => (ing ? formatQty(q, ing.unit) : qtyFormat.format(q));
+  if (line.mode === 'add') return `${name} +${qty(line.quantity)}`;
+  if (line.mode === 'set') {
+    if (toMilli(line.quantity) === 0) return `без «${name}»`;
+    const was = base.find((b) => b.ingredientId === line.ingredientId);
+    return was ? `${name} ${qty(line.quantity)} вместо ${qty(was.quantity)}` : `${name} ${qty(line.quantity)}`;
+  }
+  const replaced = line.replacesId ? (ingredient(line.replacesId)?.name ?? '—') : '—';
+  return `${name} вместо «${replaced}»${toMilli(line.quantity) > 0 ? `, ${qty(line.quantity)}` : ''}`;
 }
 
 /** Cost of the lines at the ingredients' costs; `complete` is false when some cost is unknown. */
@@ -234,8 +319,22 @@ export function validateRecipe(
 
 // ── Movements ───────────────────────────────────────────────────────────────
 
-export const STOCK_MOVEMENT_KINDS = ['initial', 'sale', 'return', 'supply', 'inventory', 'writeoff'] as const;
-/** Why a stock level changed: every change leaves one movement per ingredient. */
+export const STOCK_MOVEMENT_KINDS = [
+  'initial',
+  'sale',
+  'return',
+  'supply',
+  'supply_undo',
+  'supply_fix',
+  'inventory',
+  'adjust',
+  'writeoff',
+] as const;
+/**
+ * Why a stock level changed: every change leaves one movement per ingredient. The log is never
+ * rewritten: a deleted delivery takes its stock back with `supply_undo`, a corrected one moves
+ * the difference with `supply_fix`, a level put right by hand is an `adjust` with its reason.
+ */
 export type StockMovementKind = (typeof STOCK_MOVEMENT_KINDS)[number];
 
 export const STOCK_MOVEMENT_LABEL: Record<StockMovementKind, string> = {
@@ -243,9 +342,78 @@ export const STOCK_MOVEMENT_LABEL: Record<StockMovementKind, string> = {
   sale: 'Продажа',
   return: 'Отмена заказа',
   supply: 'Поставка',
+  supply_undo: 'Поставка удалена',
+  supply_fix: 'Поставка исправлена',
   inventory: 'Инвентаризация',
+  adjust: 'Остаток исправлен',
   writeoff: 'Списание',
 };
+
+// ── Deleting or correcting a delivery ───────────────────────────────────────
+
+/** Whoever entered a delivery may delete or correct it themselves for this long. */
+export const SUPPLY_CHANGE_WINDOW_MS = 30 * 60 * 1000;
+
+/**
+ * May this person delete or correct this delivery now? The director and the administrator
+ * (`stock.edit`) — always; the one who entered it — within SUPPLY_CHANGE_WINDOW_MS (`until`).
+ * A deleted delivery is final.
+ */
+export function canChangeSupply(
+  supply: { at: number; createdById: string | null; deletedAt: number | null },
+  viewer: { id: string | null; mayEditStock: boolean },
+  now: number,
+): { ok: boolean; until: number | null } {
+  if (supply.deletedAt !== null) return { ok: false, until: null };
+  if (viewer.mayEditStock) return { ok: true, until: null };
+  const until = supply.at + SUPPLY_CHANGE_WINDOW_MS;
+  if (supply.createdById !== null && supply.createdById === viewer.id && now <= until) return { ok: true, until };
+  return { ok: false, until: null };
+}
+
+export interface SupplyAmount {
+  quantity: number;
+  amount: Minor;
+}
+
+export interface SupplyChange {
+  ingredientId: string;
+  before: SupplyAmount;
+  after: SupplyAmount;
+}
+
+/**
+ * What a correction changes, per ingredient (lines of the same ingredient add up): only the
+ * ingredients whose quantity or amount differ, in the order they appear (old lines first).
+ */
+export function supplyChanges(
+  before: ReadonlyArray<{ ingredientId: string } & SupplyAmount>,
+  after: ReadonlyArray<{ ingredientId: string } & SupplyAmount>,
+): SupplyChange[] {
+  const sums = new Map<string, { before: { q: number; a: number }; after: { q: number; a: number } }>();
+  const at = (id: string) => {
+    let s = sums.get(id);
+    if (!s) sums.set(id, (s = { before: { q: 0, a: 0 }, after: { q: 0, a: 0 } }));
+    return s;
+  };
+  for (const l of before) {
+    const s = at(l.ingredientId).before;
+    s.q += toMilli(l.quantity);
+    s.a += l.amount;
+  }
+  for (const l of after) {
+    const s = at(l.ingredientId).after;
+    s.q += toMilli(l.quantity);
+    s.a += l.amount;
+  }
+  return [...sums]
+    .filter(([, s]) => s.before.q !== s.after.q || s.before.a !== s.after.a)
+    .map(([ingredientId, s]) => ({
+      ingredientId,
+      before: { quantity: fromMilli(s.before.q), amount: s.before.a },
+      after: { quantity: fromMilli(s.after.q), amount: s.after.a },
+    }));
+}
 
 // ── HTTP API (HUB) ──────────────────────────────────────────────────────────
 
@@ -270,6 +438,10 @@ export interface IngredientView {
   value: Minor | null;
   /** Products whose recipe uses it. */
   usedIn: number;
+  /** Something happened to it already (movements, deliveries, counts): removing it archives it. */
+  hasHistory: boolean;
+  /** Put in by TS as an example (the trial's sample stock): the owner changes or removes it like their own. */
+  isSample: boolean;
 }
 
 /** GET /api/stock/ingredients — archived ones included (the screen hides them). */
@@ -296,6 +468,68 @@ export interface UpdateIngredientRequest {
   isArchived?: boolean;
 }
 
+/**
+ * GET /api/stock/ingredients/:id/removal — what «Удалить» will do: an ingredient nothing ever
+ * happened to is deleted; one with history is archived (hidden from lists and pickers, the
+ * history keeps its name). Recipes that use it are named: it leaves them only when asked.
+ */
+export interface IngredientRemovalView {
+  ingredientId: string;
+  name: string;
+  unit: IngredientUnit;
+  quantity: number;
+  /** Products whose recipe uses it (also as what an option replaces). */
+  recipes: Array<{ productId: string; name: string }>;
+  outcome: 'delete' | 'archive';
+  history: { movements: number; supplies: number; counts: number };
+}
+
+/** POST /api/stock/ingredients/:id/remove */
+export interface RemoveIngredientRequest {
+  /** Also take it out of the recipes that use it; without it such an ingredient is refused (409). */
+  fromRecipes?: boolean;
+}
+
+export interface RemoveIngredientResponse {
+  outcome: 'deleted' | 'archived';
+  /** Recipes it was taken out of. */
+  recipes: string[];
+}
+
+/** POST /api/stock/ingredients/:id/adjust — «Исправить остаток»: the level as it really is, with why. */
+export interface AdjustStockRequest {
+  /** The level after the change, in the ingredient's unit (≥ 0). */
+  quantity: number;
+  reason: string;
+}
+
+/** GET /api/stock/sample — the example TS put in, and what «Убрать пример» would do with it. */
+export interface StockSampleView {
+  ingredients: Array<{ id: string; name: string; outcome: 'delete' | 'archive' | 'keep'; why: string | null }>;
+  /** Products whose sample recipe was not changed by the owner: these recipes go. */
+  recipes: Array<{ productId: string; name: string }>;
+}
+
+/** POST /api/stock/sample/remove */
+export interface RemoveSampleResponse {
+  deleted: string[];
+  archived: string[];
+  kept: Array<{ name: string; why: string }>;
+  recipes: string[];
+}
+
+/** GET /api/stock/setup — the first-run checklist of «Склад». */
+export interface StockSetupView {
+  /** Active raw materials. */
+  ingredients: number;
+  /** Active products of the menu. */
+  products: number;
+  /** Active products without a recipe: their sales take nothing off the stock. */
+  withoutRecipe: Array<{ productId: string; name: string }>;
+  supplies: number;
+  sales: number;
+}
+
 /** GET /api/stock/recipes/:productId */
 export interface RecipeView extends Recipe {
   productId: string;
@@ -315,18 +549,26 @@ export interface RecipesView {
 }
 
 export interface SupplyLineInput {
-  ingredientId: string;
+  /** A known ingredient — or `newIngredient`: something not on the stock yet, created with the delivery. */
+  ingredientId?: string;
+  newIngredient?: { name: string; unit: IngredientUnit };
+  /** In the ingredient's unit (г, мл, шт): the screen converts кг and л. */
   quantity: number;
   /** What was paid for the whole line, minor units (from the invoice). */
   amount: Minor;
 }
 
-/** POST /api/stock/supplies */
+/** POST /api/stock/supplies; POST /api/stock/supplies/:id/update corrects one with the same body. */
 export interface CreateSupplyRequest {
   /** Free text: «Молочная ферма», «Метро». */
   supplier: string;
   note?: string;
   lines: SupplyLineInput[];
+}
+
+/** POST /api/stock/supplies/:id/delete */
+export interface DeleteSupplyRequest {
+  reason?: string;
 }
 
 export interface SupplyView {
@@ -337,6 +579,17 @@ export interface SupplyView {
   total: Minor;
   createdBy: string;
   lines: Array<{ ingredientId: string; name: string; unit: IngredientUnit; quantity: number; amount: Minor }>;
+  /** Deleted: its stock was taken back (movements «Поставка удалена»); it stays in the list. */
+  deletedAt: number | null;
+  deletedBy: string | null;
+  deleteReason: string | null;
+  /** Last correction. */
+  changedAt: number | null;
+  changedBy: string | null;
+  /** May the person asking delete or correct it now (canChangeSupply)? */
+  canChange: boolean;
+  /** Their own delivery: until when (else null). */
+  changeUntil: number | null;
 }
 
 /** GET /api/stock/supplies?from&to — newest first. */

@@ -47,7 +47,7 @@ export function seedSampleStock(hub: Hub, actor: string): SampleStockResult {
     const id = new Map(existing.map((i) => [i.name, i.id]));
     for (const [name, unit, quantity, costPerUnit, minLevel] of INGREDIENTS) {
       if (id.has(name)) continue;
-      id.set(name, hub.stock.createIngredient({ name, unit, quantity, costPerUnit, minLevel, actor }).id);
+      id.set(name, hub.stock.createIngredient({ name, unit, quantity, costPerUnit, minLevel, actor, sample: true }).id);
       result.ingredients++;
     }
     const ing = (name: string) => id.get(name)!;
@@ -119,6 +119,7 @@ export function seedSampleStock(hub: Hub, actor: string): SampleStockResult {
         productId: product.id,
         items: recipe.items,
         options: recipe.options.filter((o) => choices.has(o.choiceId)),
+        sample: true,
         actor,
       });
       result.recipes++;

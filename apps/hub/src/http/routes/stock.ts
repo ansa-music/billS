@@ -1,15 +1,19 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type {
+  AdjustStockRequest,
   CreateIngredientRequest,
   CreateStockCountRequest,
   CreateSupplyRequest,
+  DeleteSupplyRequest,
+  RemoveIngredientRequest,
   SetRecipeRequest,
   UpdateIngredientRequest,
   WriteOffRequest,
 } from '@bills/domain';
-import { RECIPE_MAX_LINES, RECIPE_MAX_OPTION_LINES, SUPPLY_MAX_LINES } from '@bills/domain';
+import { decide, RECIPE_MAX_LINES, RECIPE_MAX_OPTION_LINES, SUPPLY_MAX_LINES } from '@bills/domain';
 import type { Hub } from '../../hub.ts';
-import { guard, runCommand } from '../command.ts';
+import type { StockViewer } from '../../stock.ts';
+import { actorOf, businessOf, guard, runCommand } from '../command.ts';
 
 const id = { type: 'string', minLength: 1, maxLength: 100 } as const;
 const text = { type: 'string', maxLength: 400 } as const;
@@ -45,7 +49,47 @@ const recipeBody = {
   },
 } as const;
 
+const supplyBody = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['supplier', 'lines'],
+  properties: {
+    supplier: text,
+    note: text,
+    lines: {
+      type: 'array',
+      maxItems: SUPPLY_MAX_LINES * 2,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['quantity', 'amount'],
+        properties: {
+          ingredientId: id,
+          // Something not on the stock yet, created with the delivery.
+          newIngredient: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['name', 'unit'],
+            properties: { name: text, unit },
+          },
+          quantity: num,
+          amount: num,
+        },
+      },
+    },
+  },
+} as const;
+
 type Range = { from?: string; to?: string; ingredientId?: string };
+
+/**
+ * Who asks, for the deliveries: may they change any (`stock.edit` — the director, the administrator)
+ * or only their own, for a while (canChangeSupply).
+ */
+function viewerOf(req: FastifyRequest): StockViewer {
+  const actor = actorOf(req);
+  return { id: actor.id, mayEditStock: decide(actor.roles, 'stock.edit', req.license?.gate() ?? null, businessOf(req)) === 'ok' };
+}
 
 function rangeOf(q: Range): { from?: number; to?: number } {
   const out: { from?: number; to?: number } = {};
@@ -98,6 +142,44 @@ export function registerStockRoutes(app: FastifyInstance, hub: Hub): void {
       ),
   );
 
+  app.get<{ Params: { id: string } }>('/api/stock/ingredients/:id/removal', { preHandler: guard('stock.edit') }, async (req) =>
+    hub.stock.removal(req.params.id),
+  );
+
+  app.post<{ Params: { id: string }; Body: RemoveIngredientRequest }>(
+    '/api/stock/ingredients/:id/remove',
+    { schema: { body: { type: 'object', additionalProperties: false, properties: { fromRecipes: { type: 'boolean' } } } } },
+    async (req, reply) =>
+      runCommand(
+        req,
+        reply,
+        hub,
+        (actor) => ({ status: 200, body: hub.stock.removeIngredient({ id: req.params.id, fromRecipes: req.body?.fromRecipes === true, actor }) }),
+        'stock.edit',
+      ),
+  );
+
+  app.post<{ Params: { id: string }; Body: AdjustStockRequest }>(
+    '/api/stock/ingredients/:id/adjust',
+    {
+      schema: {
+        body: { type: 'object', additionalProperties: false, required: ['quantity', 'reason'], properties: { quantity: num, reason: text } },
+      },
+    },
+    async (req, reply) =>
+      runCommand(req, reply, hub, (actor) => ({ status: 200, body: hub.stock.adjust({ ...req.body, id: req.params.id, actor }) }), 'stock.edit'),
+  );
+
+  // The example TS put in (the trial's sample stock) and «Убрать пример со склада».
+  app.get('/api/stock/sample', { preHandler: guard('stock.view') }, async () => hub.stock.sample());
+
+  app.post('/api/stock/sample/remove', async (req, reply) =>
+    runCommand(req, reply, hub, (actor) => ({ status: 200, body: hub.stock.removeSample({ actor }) }), 'stock.edit'),
+  );
+
+  // The first-run checklist: raw materials → recipes → deliveries → sales.
+  app.get('/api/stock/setup', { preHandler: guard('stock.view') }, async () => hub.stock.setup());
+
   app.get('/api/stock/recipes', { preHandler: guard('stock.view') }, async () => hub.stock.recipes());
 
   app.get<{ Params: { productId: string } }>(
@@ -128,36 +210,44 @@ export function registerStockRoutes(app: FastifyInstance, hub: Hub): void {
   );
 
   app.get<{ Querystring: Range }>('/api/stock/supplies', { preHandler: guard('stock.supply') }, async (req) =>
-    hub.stock.supplies(rangeOf(req.query)),
+    hub.stock.supplies(rangeOf(req.query), viewerOf(req)),
   );
 
-  app.post<{ Body: CreateSupplyRequest }>(
-    '/api/stock/supplies',
-    {
-      schema: {
-        body: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['supplier', 'lines'],
-          properties: {
-            supplier: text,
-            note: text,
-            lines: {
-              type: 'array',
-              maxItems: SUPPLY_MAX_LINES * 2,
-              items: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['ingredientId', 'quantity', 'amount'],
-                properties: { ingredientId: id, quantity: num, amount: num },
-              },
-            },
-          },
-        },
-      },
-    },
+  app.post<{ Body: CreateSupplyRequest }>('/api/stock/supplies', { schema: { body: supplyBody } }, async (req, reply) =>
+    runCommand(
+      req,
+      reply,
+      hub,
+      (actor, who) => ({ status: 201, body: hub.stock.createSupply({ ...req.body, actor, actorId: who.id, viewer: viewerOf(req) }) }),
+      'stock.supply',
+    ),
+  );
+
+  // Delete or correct a delivery: the director and the administrator always, whoever entered it for 30 minutes.
+  app.post<{ Params: { id: string }; Body: DeleteSupplyRequest }>(
+    '/api/stock/supplies/:id/delete',
+    { schema: { body: { type: 'object', additionalProperties: false, properties: { reason: text } } } },
     async (req, reply) =>
-      runCommand(req, reply, hub, (actor) => ({ status: 201, body: hub.stock.createSupply({ ...req.body, actor }) }), 'stock.supply'),
+      runCommand(
+        req,
+        reply,
+        hub,
+        (actor) => ({ status: 200, body: hub.stock.deleteSupply({ id: req.params.id, reason: req.body?.reason, actor, viewer: viewerOf(req) }) }),
+        'stock.supply',
+      ),
+  );
+
+  app.post<{ Params: { id: string }; Body: CreateSupplyRequest }>(
+    '/api/stock/supplies/:id/update',
+    { schema: { body: supplyBody } },
+    async (req, reply) =>
+      runCommand(
+        req,
+        reply,
+        hub,
+        (actor) => ({ status: 200, body: hub.stock.updateSupply({ ...req.body, id: req.params.id, actor, viewer: viewerOf(req) }) }),
+        'stock.supply',
+      ),
   );
 
   app.get<{ Querystring: Range }>('/api/stock/counts', { preHandler: guard('stock.view') }, async (req) =>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type {
+  IngredientUnit,
   IngredientView,
   Minor,
   ProductOptionChoice,
@@ -11,14 +12,23 @@ import type {
   RecipesView,
   RecipeView,
 } from '@bills/domain';
-import { formatMoney, marginPercent, RECIPE_OPTION_MODE_LABEL, RECIPE_OPTION_MODES, recipeCost, recipeUsage } from '@bills/domain';
+import {
+  describeOptionLine,
+  formatMoney,
+  INGREDIENT_UNITS,
+  marginPercent,
+  RECIPE_OPTION_MODE_LABEL,
+  RECIPE_OPTION_MODES,
+  recipeCost,
+  recipeUsage,
+} from '@bills/domain';
 import { fetchJson } from '../api.ts';
 import { FormError } from '../cash/Modal.tsx';
 import { EmptyState, SectionCard } from '../components.tsx';
 import { Icon } from '../icons.tsx';
 import { sortCatalog, useCatalog } from '../pages/bar/useCatalog.tsx';
 import { useHub, useLive } from '../useHub.tsx';
-import { byName, matches, parseQty, qtyText } from './stock.ts';
+import { byName, matches, parseQty, plural, qtyText } from './stock.ts';
 
 type Run = <T>(key: string, path: string, body?: object) => Promise<T | undefined>;
 
@@ -36,32 +46,55 @@ interface OptionDraft extends ItemDraft {
 
 let nextKey = 1;
 
-/** «Тех. карты»: pick a product, edit its граммовка and what each option changes; cost and margin live. */
+/** The «new ingredient» choice at the end of every ingredient picker. */
+const NEW = '__new__';
+
+/**
+ * «Состав»: pick a menu item, say what one portion takes (граммовка) and what each option changes —
+ * in a couple of taps, with a missing ingredient created right here. Items without a recipe are
+ * marked: their sales take nothing off the stock.
+ */
 export function RecipesTab({ ingredients, run, busy, notify }: { ingredients: IngredientView[]; run: Run; busy: boolean; notify: (m: string) => void }) {
   const { state, version, canNow } = useHub();
   const currency = state.club.currency;
   const { catalog } = useCatalog();
   const summaries = useLive(() => fetchJson<RecipesView>('/api/stock/recipes'), [], version);
   const [query, setQuery] = useState('');
+  const [onlyMissing, setOnlyMissing] = useState(false);
   const [productId, setProductId] = useState<string | null>(null);
 
   const sorted = useMemo(() => (catalog ? sortCatalog(catalog) : null), [catalog]);
   const summary = useMemo(() => new Map((summaries.data?.recipes ?? []).map((r) => [r.productId, r])), [summaries.data]);
-  const products = (sorted?.products ?? []).filter((p) => p.isActive && matches(p.name, query));
   const categories = (sorted?.categories ?? []).filter((c) => c.isActive);
+  const activeCats = new Set(categories.map((c) => c.id));
+  const menu = (sorted?.products ?? []).filter((p) => p.isActive && activeCats.has(p.categoryId));
+  const missing = summaries.data ? menu.filter((p) => !summary.has(p.id)) : [];
+  const products = menu.filter((p) => matches(p.name, query) && (!onlyMissing || !summary.has(p.id)));
   const product = sorted?.products.find((p) => p.id === productId) ?? null;
 
   return (
     <div className="stock-tab stock-recipes" data-open={product ? '' : undefined}>
       <SectionCard title="Меню" className="stock-recipe-list">
-        <label className="stock-search">
-          <Icon name="search" size={18} />
-          <input type="search" placeholder="Найти товар" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Найти товар" />
-        </label>
+        {missing.length > 0 && (
+          <p className="warn-note">
+            {missing.length} {plural(missing.length, 'позиция', 'позиции', 'позиций')} без состава — их продажи не списывают склад.
+          </p>
+        )}
+        <div className="stock-toolbar">
+          <label className="stock-search">
+            <Icon name="search" size={18} />
+            <input type="search" placeholder="Найти позицию" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Найти позицию меню" />
+          </label>
+          {missing.length > 0 && (
+            <button type="button" className="chip" aria-pressed={onlyMissing} onClick={() => setOnlyMissing((v) => !v)}>
+              Без состава
+            </button>
+          )}
+        </div>
         {!sorted ? (
           <p className="muted">Загрузка…</p>
         ) : products.length === 0 ? (
-          <EmptyState icon="bar" title="Товаров не нашлось" />
+          <EmptyState icon="bar" title={onlyMissing ? 'У всех позиций есть состав' : 'Позиций не нашлось'} />
         ) : (
           categories.map((c) => {
             const inCat = products.filter((p) => p.categoryId === c.id);
@@ -87,7 +120,7 @@ export function RecipesTab({ ingredients, run, busy, notify }: { ingredients: In
                           {margin !== null && <span className="tag tag-ok">{margin}%</span>}
                         </span>
                       ) : (
-                        <span className="tag tag-muted">нет карты</span>
+                        <span className="tag tag-warn">нет состава</span>
                       )}
                     </button>
                   );
@@ -105,17 +138,19 @@ export function RecipesTab({ ingredients, run, busy, notify }: { ingredients: In
           ingredients={ingredients}
           canEdit={canNow('stock.edit')}
           busy={busy}
+          run={run}
+          notify={notify}
           onBack={() => setProductId(null)}
           onSave={async (recipe) => {
             const saved = await run<RecipeView>(`recipe:${product.id}`, `/api/stock/recipes/${product.id}`, recipe);
-            if (saved) notify(`Тех. карта «${product.name}» сохранена`);
+            if (saved) notify(saved.items.length || saved.options.length ? `Состав «${product.name}» сохранён` : `Состав «${product.name}» удалён`);
             return saved;
           }}
         />
       ) : (
         <SectionCard className="stock-recipe-empty">
-          <EmptyState icon="cup" title="Выберите товар из меню">
-            Укажите, сколько сырья уходит на одну порцию — склад будет списывать его с каждой продажей.
+          <EmptyState icon="cup" title="Выберите позицию меню">
+            Укажите, сколько сырья уходит на одну порцию (капучино = зерно 18 г + молоко 150 мл) — каждая продажа спишет это со склада, отмена вернёт.
           </EmptyState>
         </SectionCard>
       )}
@@ -128,6 +163,8 @@ function RecipeEditor({
   ingredients,
   canEdit,
   busy,
+  run,
+  notify,
   onBack,
   onSave,
 }: {
@@ -135,6 +172,8 @@ function RecipeEditor({
   ingredients: IngredientView[];
   canEdit: boolean;
   busy: boolean;
+  run: Run;
+  notify: (m: string) => void;
   onBack: () => void;
   onSave: (recipe: Recipe) => Promise<RecipeView | undefined>;
 }) {
@@ -144,6 +183,11 @@ function RecipeEditor({
   const [options, setOptions] = useState<OptionDraft[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [hadRecipe, setHadRecipe] = useState(false);
+  // Ingredients created here, until the list from the HUB has them.
+  const [created, setCreated] = useState<IngredientView[]>([]);
+  // A picker asked for a new ingredient: which line gets it.
+  const [creatingFor, setCreatingFor] = useState<((id: string) => void) | null>(null);
 
   const load = (r: RecipeView) => {
     setItems(r.items.map((i) => ({ key: nextKey++, ingredientId: i.ingredientId, quantity: qtyText(i.quantity) })));
@@ -157,6 +201,7 @@ function RecipeEditor({
         quantity: o.quantity ? qtyText(o.quantity) : '',
       })),
     );
+    setHadRecipe(r.items.length + r.options.length > 0);
     setDirty(false);
   };
 
@@ -172,9 +217,10 @@ function RecipeEditor({
     };
   }, [product.id]);
 
-  const active = useMemo(() => byName(ingredients.filter((i) => !i.isArchived)), [ingredients]);
-  const byId = useMemo(() => new Map(ingredients.map((i) => [i.id, i])), [ingredients]);
-  const costs = useMemo(() => new Map(ingredients.map((i) => [i.id, i.costPerUnit])), [ingredients]);
+  const all = useMemo(() => [...ingredients, ...created.filter((c) => !ingredients.some((i) => i.id === c.id))], [ingredients, created]);
+  const active = useMemo(() => byName(all.filter((i) => !i.isArchived)), [all]);
+  const byId = useMemo(() => new Map(all.map((i) => [i.id, i])), [all]);
+  const costs = useMemo(() => new Map(all.map((i) => [i.id, i.costPerUnit])), [all]);
 
   if (!items) {
     return (
@@ -206,36 +252,73 @@ function RecipeEditor({
   };
   const setItem = change((p: Partial<ItemDraft> & { key: number }) => setItems((list) => list!.map((i) => (i.key === p.key ? { ...i, ...p } : i))));
   const setOption = change((p: Partial<OptionDraft> & { key: number }) => setOptions((list) => list.map((o) => (o.key === p.key ? { ...o, ...p } : o))));
+  const nameOf = (id: string) => {
+    const i = byId.get(id);
+    return i ? { name: i.name, unit: i.unit } : undefined;
+  };
 
   const submit = async () => {
     const badItem = items.findIndex((i) => !i.ingredientId || !parseQty(i.quantity));
     if (badItem >= 0) return setError(`Состав, строка ${badItem + 1}: выберите сырьё и количество больше нуля`);
+    const seen = new Set<string>();
+    const twice = items.find((i) => (seen.has(i.ingredientId) ? true : (seen.add(i.ingredientId), false)));
+    if (twice) return setError(`«${byId.get(twice.ingredientId)?.name ?? ''}» в составе дважды — оставьте одну строку`);
     const badOption = options.findIndex((o) => !o.ingredientId || (o.mode === 'swap' && !o.replacesId) || (o.mode === 'add' && !parseQty(o.quantity)));
-    if (badOption >= 0) return setError('Добавки: в каждой строке выберите сырьё, количество и что заменить');
+    if (badOption >= 0) return setError('Добавки: в каждой строке выберите сырьё и количество (для замены — что на что)');
     setError(null);
     const saved = await onSave(recipe);
     if (saved) load(saved);
   };
 
+  const clear = async () => {
+    setError(null);
+    const saved = await onSave({ items: [], options: [] });
+    if (saved) load(saved);
+  };
+
+  const createIngredient = async (name: string, unit: IngredientUnit) => {
+    const res = await run<IngredientView>('ingredient:new', '/api/stock/ingredients', { name, unit });
+    if (res) {
+      setCreated((c) => [...c, res]);
+      creatingFor?.(res.id);
+      setCreatingFor(null);
+      notify(`Сырьё «${res.name}» добавлено`);
+    }
+  };
+
   const ingredientSelect = (value: string, onChange: (id: string) => void, label: string, extra?: IngredientView[], className?: string) => (
-    <select className={className} value={value} onChange={(e) => onChange(e.target.value)} aria-label={label} disabled={!canEdit}>
-      <option value="">— сырьё —</option>
+    <select
+      className={className}
+      value={value}
+      onChange={(e) => {
+        if (e.target.value === NEW) setCreatingFor(() => onChange);
+        else onChange(e.target.value);
+      }}
+      aria-label={label}
+      disabled={!canEdit}
+    >
+      <option value="">— выберите сырьё —</option>
       {[...active, ...(extra ?? [])].map((i) => (
         <option key={i.id} value={i.id}>
           {i.name}, {i.unit}
         </option>
       ))}
+      {canEdit && <option value={NEW}>＋ Новое сырьё…</option>}
     </select>
   );
   // Archived ingredients still in the recipe stay selectable so the line does not go blank.
   const archivedIn = (id: string) => (byId.get(id)?.isArchived ? [byId.get(id)!] : []);
+  const addOption = (choiceId: string, mode: RecipeOptionMode) => {
+    setOptions((l) => [...l, { key: nextKey++, choiceId, mode, ingredientId: '', replacesId: '', quantity: '' }]);
+    setDirty(true);
+  };
 
   return (
     <SectionCard
       className="stock-recipe-editor"
       title={
         <span className="stock-recipe-title">
-          <button type="button" className="btn btn-small stock-back" onClick={onBack} aria-label="К списку товаров">
+          <button type="button" className="btn btn-small stock-back" onClick={onBack} aria-label="К списку позиций">
             <Icon name="back" size={18} />
           </button>
           {product.name}
@@ -258,10 +341,11 @@ function RecipeEditor({
           </strong>
         </div>
       </div>
-      {!base.complete && <p className="warn-note">У части сырья нет цены — себестоимость будет точной после первой поставки.</p>}
+      {!base.complete && <p className="warn-note">У части сырья нет цены — себестоимость станет точной после первой поставки.</p>}
 
       <h3 className="stock-h3">Состав одной порции</h3>
-      {items.length === 0 && <p className="muted">Пока пусто: добавьте сырьё, из которого готовится {product.name.toLocaleLowerCase('ru')}.</p>}
+      <p className="muted">Сколько сырья уходит на одну {product.name.toLocaleLowerCase('ru')} — каждая продажа спишет это со склада.</p>
+      {items.length === 0 && !hadRecipe && <p className="warn-note">Состава нет — продажи «{product.name}» не списывают склад.</p>}
       <ul className="stock-recipe-lines">
         {items.map((i) => {
           const ing = byId.get(i.ingredientId);
@@ -276,14 +360,14 @@ function RecipeEditor({
                   value={i.quantity}
                   onChange={(e) => setItem({ key: i.key, quantity: e.target.value })}
                   placeholder="0"
-                  aria-label="Количество на порцию"
+                  aria-label={`Сколько на порцию${ing ? `: ${ing.name}` : ''}`}
                   disabled={!canEdit}
                 />
                 <span>{ing?.unit ?? ''}</span>
               </label>
               <span className="stock-line-cost money">{cost && cost.complete ? formatMoney(cost.cost, currency) : '—'}</span>
               {canEdit && (
-                <button type="button" className="btn btn-small" aria-label="Убрать" onClick={change(() => setItems((l) => l!.filter((x) => x.key !== i.key)))}>
+                <button type="button" className="btn btn-small" aria-label="Убрать из состава" onClick={change(() => setItems((l) => l!.filter((x) => x.key !== i.key)))}>
                   <Icon name="trash" size={16} />
                 </button>
               )}
@@ -296,74 +380,91 @@ function RecipeEditor({
           <Icon name="plus" size={18} /> Добавить сырьё
         </button>
       )}
+      {creatingFor && (
+        <NewIngredient busy={busy} onCancel={() => setCreatingFor(null)} onCreate={(name, unit) => void createIngredient(name, unit)} />
+      )}
 
       {product.options.length > 0 && (
         <>
           <h3 className="stock-h3">Что меняют добавки</h3>
-          <p className="muted">
-            «Добавить» — сверх состава (сироп +20 мл). «Вместо базы» — другое количество (размер L: молоко 350 мл). «Заменить» — одно сырьё на другое (овсяное вместо обычного).
-          </p>
+          <div className="stock-option-help">
+            <span>
+              <strong>Добавить сверху</strong> — «L: молоко +100 мл», «Сироп: +20 мл»
+            </span>
+            <span>
+              <strong>Другое количество</strong> — «L: молоко 350 мл вместо 200»
+            </span>
+            <span>
+              <strong>Заменить</strong> — «Овсяное: вместо обычного молока», «L: стакан 0,5 вместо 0,3»
+            </span>
+          </div>
           {product.options.map((g) => (
             <div key={g.id} className="stock-option-group">
               <h4>{g.name}</h4>
-              {g.choices.map((c) => (
-                <ChoiceBlock
-                  key={c.id}
-                  choice={c}
-                  lines={options.filter((o) => o.choiceId === c.id)}
-                  price={product.price + c.priceDelta}
-                  cost={recipeCost(recipeUsage(recipe, [c.id]), costs).cost}
-                  currency={currency}
-                  canEdit={canEdit}
-                  onAdd={() => {
-                    setOptions((l) => [...l, { key: nextKey++, choiceId: c.id, mode: 'add', ingredientId: '', replacesId: '', quantity: '' }]);
-                    setDirty(true);
-                  }}
-                  renderLine={(o) => {
-                    const ing = byId.get(o.ingredientId);
-                    return (
-                      <li key={o.key} className="stock-option-line">
-                        <select
-                          className="stock-opt-mode"
-                          value={o.mode}
-                          onChange={(e) => setOption({ key: o.key, mode: e.target.value as RecipeOptionMode })}
-                          aria-label="Что сделать"
-                          disabled={!canEdit}
-                        >
-                          {RECIPE_OPTION_MODES.map((m) => (
-                            <option key={m} value={m}>
-                              {RECIPE_OPTION_MODE_LABEL[m]}
-                            </option>
-                          ))}
-                        </select>
-                        {o.mode === 'swap' && (
-                          <>
-                            {ingredientSelect(o.replacesId, (id) => setOption({ key: o.key, replacesId: id }), 'Что заменить', archivedIn(o.replacesId), 'stock-opt-from')}
-                            <span className="stock-arrow" aria-hidden="true">→</span>
-                          </>
-                        )}
-                        {ingredientSelect(o.ingredientId, (id) => setOption({ key: o.key, ingredientId: id }), 'Сырьё', archivedIn(o.ingredientId), 'stock-opt-to')}
-                        <label className="stock-qty-input stock-opt-qty">
-                          <input
-                            inputMode="decimal"
-                            value={o.quantity}
-                            onChange={(e) => setOption({ key: o.key, quantity: e.target.value })}
-                            placeholder={o.mode === 'swap' ? 'то же' : '0'}
-                            aria-label="Количество"
+              {g.choices.map((c) => {
+                const lines = options.filter((o) => o.choiceId === c.id);
+                const said = recipe.options
+                  .filter((o) => o.choiceId === c.id)
+                  .map((o) => describeOptionLine(o, nameOf, recipe.items));
+                return (
+                  <ChoiceBlock
+                    key={c.id}
+                    choice={c}
+                    lines={lines}
+                    said={said}
+                    price={product.price + c.priceDelta}
+                    cost={recipeCost(recipeUsage(recipe, [c.id]), costs).cost}
+                    currency={currency}
+                    canEdit={canEdit}
+                    onAdd={(mode) => addOption(c.id, mode)}
+                    renderLine={(o) => {
+                      const ing = byId.get(o.ingredientId);
+                      return (
+                        <li key={o.key} className="stock-option-line">
+                          <select
+                            className="stock-opt-mode"
+                            value={o.mode}
+                            onChange={(e) => setOption({ key: o.key, mode: e.target.value as RecipeOptionMode })}
+                            aria-label="Что делает добавка"
                             disabled={!canEdit}
-                          />
-                          <span>{ing?.unit ?? ''}</span>
-                        </label>
-                        {canEdit && (
-                          <button type="button" className="btn btn-small stock-opt-del" aria-label="Убрать" onClick={change(() => setOptions((l) => l.filter((x) => x.key !== o.key)))}>
-                            <Icon name="trash" size={16} />
-                          </button>
-                        )}
-                      </li>
-                    );
-                  }}
-                />
-              ))}
+                          >
+                            {RECIPE_OPTION_MODES.map((m) => (
+                              <option key={m} value={m}>
+                                {RECIPE_OPTION_MODE_LABEL[m]}
+                              </option>
+                            ))}
+                          </select>
+                          {o.mode === 'swap' && (
+                            <>
+                              {ingredientSelect(o.replacesId, (id) => setOption({ key: o.key, replacesId: id }), 'Что заменить', archivedIn(o.replacesId), 'stock-opt-from')}
+                              <span className="stock-arrow" aria-hidden="true">
+                                →
+                              </span>
+                            </>
+                          )}
+                          {ingredientSelect(o.ingredientId, (id) => setOption({ key: o.key, ingredientId: id }), o.mode === 'swap' ? 'На что заменить' : 'Сырьё', archivedIn(o.ingredientId), 'stock-opt-to')}
+                          <label className="stock-qty-input stock-opt-qty">
+                            <input
+                              inputMode="decimal"
+                              value={o.quantity}
+                              onChange={(e) => setOption({ key: o.key, quantity: e.target.value })}
+                              placeholder={o.mode === 'swap' ? 'столько же' : o.mode === 'set' ? '0 = без' : '0'}
+                              aria-label="Количество"
+                              disabled={!canEdit}
+                            />
+                            <span>{ing?.unit ?? ''}</span>
+                          </label>
+                          {canEdit && (
+                            <button type="button" className="btn btn-small stock-opt-del" aria-label="Убрать" onClick={change(() => setOptions((l) => l.filter((x) => x.key !== o.key)))}>
+                              <Icon name="trash" size={16} />
+                            </button>
+                          )}
+                        </li>
+                      );
+                    }}
+                  />
+                );
+              })}
             </div>
           ))}
         </>
@@ -371,17 +472,63 @@ function RecipeEditor({
 
       <FormError error={error} />
       {canEdit && (
-        <button type="button" className="btn btn-primary btn-large" disabled={busy || !dirty} onClick={() => void submit()}>
-          {dirty ? 'Сохранить тех. карту' : 'Сохранено'}
-        </button>
+        <div className="stock-recipe-actions">
+          {hadRecipe && (
+            <button type="button" className="btn btn-outline-danger" disabled={busy} onClick={() => void clear()}>
+              <Icon name="trash" size={16} /> Удалить состав
+            </button>
+          )}
+          <button type="button" className="btn btn-primary btn-large" disabled={busy || !dirty} onClick={() => void submit()}>
+            {dirty ? 'Сохранить состав' : 'Сохранено'}
+          </button>
+        </div>
       )}
     </SectionCard>
+  );
+}
+
+/** A missing ingredient, created without leaving the recipe: a name and how it is counted. */
+function NewIngredient({ busy, onCancel, onCreate }: { busy: boolean; onCancel: () => void; onCreate: (name: string, unit: IngredientUnit) => void }) {
+  const [name, setName] = useState('');
+  const [unit, setUnit] = useState<IngredientUnit>('г');
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="stock-new-ingredient" role="group" aria-label="Новое сырьё">
+      <strong>Новое сырьё</strong>
+      <input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="Например, Сливки 33%" aria-label="Название нового сырья" autoFocus />
+      <div className="seg-chips" role="group" aria-label="Как считаем">
+        {INGREDIENT_UNITS.map((u) => (
+          <button key={u} type="button" className="chip" aria-pressed={u === unit} onClick={() => setUnit(u)}>
+            {u === 'г' ? 'граммы' : u === 'мл' ? 'миллилитры' : 'штуки'}
+          </button>
+        ))}
+      </div>
+      <FormError error={error} />
+      <div className="row wrap">
+        <button type="button" className="btn" onClick={onCancel}>
+          Отмена
+        </button>
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={busy}
+          onClick={() => {
+            if (!name.trim()) return setError('Укажите название');
+            setError(null);
+            onCreate(name.trim(), unit);
+          }}
+        >
+          Добавить и выбрать
+        </button>
+      </div>
+    </div>
   );
 }
 
 function ChoiceBlock({
   choice,
   lines,
+  said,
   price,
   cost,
   currency,
@@ -391,11 +538,13 @@ function ChoiceBlock({
 }: {
   choice: ProductOptionChoice;
   lines: OptionDraft[];
+  /** What the lines do, in words («Молоко +100 мл»). */
+  said: string[];
   price: Minor;
   cost: Minor;
   currency: string;
   canEdit: boolean;
-  onAdd: () => void;
+  onAdd: (mode: RecipeOptionMode) => void;
   renderLine: (o: OptionDraft) => ReactNode;
 }) {
   const margin = marginPercent(price, cost);
@@ -404,15 +553,24 @@ function ChoiceBlock({
       <div className="stock-choice-head">
         <span className="stock-choice-name">{choice.name}</span>
         <span className="muted">
-          {lines.length ? `себестоимость ${formatMoney(cost, currency)}${margin !== null ? ` · наценка ${margin}%` : ''}` : 'как в составе'}
+          {said.length ? said.join(' · ') : 'состав как обычно'}
+          {lines.length ? ` · себестоимость ${formatMoney(cost, currency)}${margin !== null ? `, наценка ${margin}%` : ''}` : ''}
         </span>
-        {canEdit && (
-          <button type="button" className="btn btn-small" onClick={onAdd} aria-label={`Изменение для «${choice.name}»`}>
-            <Icon name="plus" size={16} />
-          </button>
-        )}
       </div>
       {lines.length > 0 && <ul className="stock-option-lines">{lines.map(renderLine)}</ul>}
+      {canEdit && (
+        <div className="stock-choice-add" role="group" aria-label={`Что меняет «${choice.name}»`}>
+          <button type="button" className="chip" onClick={() => onAdd('add')}>
+            <Icon name="plus" size={14} /> сверху
+          </button>
+          <button type="button" className="chip" onClick={() => onAdd('set')}>
+            другое кол-во
+          </button>
+          <button type="button" className="chip" onClick={() => onAdd('swap')}>
+            замена
+          </button>
+        </div>
+      )}
     </div>
   );
 }

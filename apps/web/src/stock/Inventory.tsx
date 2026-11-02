@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react';
 import type { IngredientView, StockCountsView, StockCountView } from '@bills/domain';
-import { formatMoney } from '@bills/domain';
+import { bigUnitOf, formatMoney } from '@bills/domain';
 import { fetchJson } from '../api.ts';
 import { FormError } from '../cash/Modal.tsx';
 import { EmptyState, SectionCard } from '../components.tsx';
 import { Icon } from '../icons.tsx';
 import { formatDateTime } from '../ui.tsx';
 import { useHub, useLive } from '../useHub.tsx';
-import { byName, matches, parseQty, qtyLabel, valueOf } from './stock.ts';
+import { QtyInput } from './QtyInput.tsx';
+import { byName, matches, qtyLabel, typedQty, valueOf } from './stock.ts';
 
 type Run = <T>(key: string, path: string, body?: object) => Promise<T | undefined>;
 
@@ -22,7 +23,8 @@ export function InventoryTab({ ingredients, run, busy, notify }: { ingredients: 
   const tz = state.club.timezone;
   const history = useLive(() => fetchJson<StockCountsView>('/api/stock/counts'), [], version);
   const [counting, setCounting] = useState(false);
-  const [counted, setCounted] = useState<Record<string, string>>({});
+  // What was typed per ingredient and in which unit (кг or г, л or мл).
+  const [counted, setCounted] = useState<Record<string, { text: string; factor: number }>>({});
   const [note, setNote] = useState('');
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -30,10 +32,13 @@ export function InventoryTab({ ingredients, run, busy, notify }: { ingredients: 
 
   const active = useMemo(() => byName(ingredients.filter((i) => !i.isArchived)), [ingredients]);
   const rows = active.map((i) => {
-    const text = counted[i.id] ?? '';
-    const value = text.trim() ? parseQty(text) : null;
+    const text = counted[i.id]?.text ?? '';
+    // Counted in the unit the level reads in: 1,4 кг of beans, 50 г of cinnamon.
+    const big = bigUnitOf(i.unit).factor;
+    const factor = counted[i.id]?.factor ?? (Math.abs(i.quantity) >= big ? big : 1);
+    const value = text.trim() ? typedQty(text, factor) : null;
     const difference = value === null ? null : Math.round((value - i.quantity) * 1000) / 1000;
-    return { i, text, value, difference, cost: difference === null ? null : valueOf(difference, i.costPerUnit) };
+    return { i, text, factor, value, difference, cost: difference === null ? null : valueOf(difference, i.costPerUnit) };
   });
   const filled = rows.filter((r) => r.value !== null);
   const invalid = rows.filter((r) => r.text.trim() && r.value === null);
@@ -89,17 +94,17 @@ export function InventoryTab({ ingredients, run, busy, notify }: { ingredients: 
                   <span role="cell" className="stock-count-expected">
                     {qtyLabel(r.i.quantity, r.i.unit)}
                   </span>
-                  <label role="cell" className="stock-qty-input">
-                    <input
-                      inputMode="decimal"
+                  <span role="cell" className="stock-count-input">
+                    <QtyInput
                       value={r.text}
-                      onChange={(e) => setCounted((c) => ({ ...c, [r.i.id]: e.target.value }))}
+                      factor={r.factor}
+                      unit={r.i.unit}
                       placeholder="—"
-                      aria-label={`Посчитали: ${r.i.name}`}
-                      aria-invalid={r.text.trim() && r.value === null ? true : undefined}
+                      label={`Посчитали: ${r.i.name}`}
+                      invalid={r.text.trim() !== '' && r.value === null}
+                      onChange={(text, factor) => setCounted((c) => ({ ...c, [r.i.id]: { text, factor } }))}
                     />
-                    <span>{r.i.unit}</span>
-                  </label>
+                  </span>
                   <span role="cell" className="stock-count-diff">
                     {r.difference === null ? (
                       <span className="muted">—</span>

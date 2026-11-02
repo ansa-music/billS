@@ -596,6 +596,299 @@
   color: var(--muted);
 }
 
+/* An amount with its unit beside it (QtyInput): «2 [кг|г]», one tap switches кг ↔ г, л ↔ мл. */
+
+.stock-qty-field {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.stock-qty-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 30%, transparent);
+}
+
+.stock-qty-field input {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-lg);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.stock-qty-field input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.stock-qty-field input[aria-invalid='true'] {
+  color: var(--danger);
+}
+
+.stock-unit-switch {
+  display: flex;
+  flex: 0 0 auto;
+  border-left: 1px solid var(--border);
+}
+
+.stock-unit-switch button {
+  min-width: 44px;
+  min-height: var(--control-lg);
+  padding: 0 var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.stock-unit-switch button[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.stock-unit-static {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-3);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  border-left: 1px solid var(--border);
+}
+
+/* «Склад за 4 шага» */
+
+.stock-checklist {
+  display: grid;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--accent) 7%, var(--surface));
+}
+
+.stock-checklist header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.stock-checklist h2 {
+  margin: 0;
+  font-size: var(--fs-lg);
+}
+
+.stock-checklist ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.stock-checklist li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.stock-checklist li > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stock-checklist li > div span {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.stock-checklist li .btn {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.stock-step-num {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.stock-checklist li[data-done] .stock-step-num {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.stock-checklist li[data-done] strong {
+  color: var(--text-2);
+}
+
+/* The example TS put in */
+
+.stock-sample-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.stock-sample-note > div {
+  display: grid;
+  gap: 2px;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.stock-sample-note span {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.stock-item-name .tag,
+.stock-line-name .tag,
+.stock-doc-title .tag {
+  margin-left: var(--space-2);
+  vertical-align: middle;
+}
+
+/* Deliveries: a new ingredient from the invoice, actions, deleted ones */
+
+.stock-new-inline {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-md);
+}
+
+.stock-doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.stock-doc-actions .hint {
+  flex: 1 1 100%;
+  text-align: right;
+}
+
+.stock-docs > li[data-deleted] summary,
+.stock-docs > li[data-deleted] .stock-doc-lines {
+  color: var(--muted);
+}
+
+.stock-docs > li[data-deleted] .money {
+  text-decoration: line-through;
+}
+
+.stock-confirm-lines {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.stock-minus {
+  color: var(--danger);
+  font-variant-numeric: tabular-nums;
+}
+
+.stock-modal-foot .row .btn-large {
+  flex: 2;
+}
+
+/* «Сколько есть на самом деле»: why the level changes */
+
+.stock-adjust {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--warn) 10%, var(--surface));
+}
+
+/* Recipes: options in plain words, a new ingredient on the spot */
+
+.stock-option-help {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.stock-choice-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.stock-choice-add .chip {
+  min-height: var(--control);
+  font-size: var(--fs-sm);
+}
+
+.stock-recipe-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.stock-recipe-actions .btn-large {
+  flex: 1 1 220px;
+}
+
+.stock-new-ingredient {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--accent) 6%, var(--surface));
+}
+
+.stock-new-ingredient input {
+  width: 100%;
+  min-height: var(--control-lg);
+}
+
+.stock-count-input {
+  min-width: 0;
+}
+
 /* Inventory */
 
 .stock-count-start {
@@ -932,5 +1225,48 @@
 
   .stock-doc-lines li > span:last-child {
     grid-column: 2;
+  }
+}
+
+/* The checklist: four steps in a row on a PC, two by two on a tablet, one under another on a phone. */
+@media (max-width: 1100px) {
+  .stock-checklist ol {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .stock-checklist {
+    padding: var(--space-3);
+  }
+
+  .stock-checklist ol {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stock-count-row .stock-count-input {
+    grid-area: input;
+  }
+
+  .stock-doc-actions .btn {
+    flex: 1 1 100%;
+  }
+
+  .stock-doc-actions .hint {
+    text-align: left;
+  }
+}
+
+/* Narrow phones: quantity (with its кг | г switch) and sum one under the other, each full width. */
+@media (max-width: 480px) {
+  .stock-line-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The count: the «Посчитали» cell holds an input with its кг | г switch, so it gets the room. */
+@media (min-width: 641px) {
+  .stock-count-row {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr) minmax(190px, 1.3fr) minmax(0, 0.8fr);
   }
 }

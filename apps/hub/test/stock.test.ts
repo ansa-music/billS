@@ -386,7 +386,8 @@ test('a delivery adds stock, keeps the invoice amounts and averages the cost', a
     422,
     'AMOUNT_INVALID',
   );
-  await send(hub, `/api/stock/ingredients/${cups.id}/update`, { isArchived: true });
+  // The 0,4 cup is in the size options of the sample recipes: removing it takes it out of them too.
+  await send(hub, `/api/stock/ingredients/${cups.id}/remove`, { fromRecipes: true });
   assertError(
     await send(hub, '/api/stock/supplies', { supplier: 'Ферма', lines: [{ ingredientId: cups.id, quantity: 1, amount: 1 }] }),
     422,

@@ -396,13 +396,14 @@ test('coffee shop: a waiter sends orders to the barista with or without payment'
 function migrationsWithout020(h: Harness): { dir: string; url: URL } {
   const dir = join(h.dir, 'migrations');
   mkdirSync(dir);
-  for (const f of readdirSync(MIGRATIONS_DIR)) if (!f.startsWith('020_')) copyFileSync(new URL(f, MIGRATIONS_DIR), join(dir, f));
+  // The old build: everything before 020 (later migrations need 020 first).
+  for (const f of readdirSync(MIGRATIONS_DIR)) if (Number.parseInt(f, 10) < 20) copyFileSync(new URL(f, MIGRATIONS_DIR), join(dir, f));
   return { dir, url: pathToFileURL(dir + '/') };
 }
 
 function addMigration020(dir: string): void {
-  const file = readdirSync(MIGRATIONS_DIR).find((f) => f.startsWith('020_'))!;
-  copyFileSync(new URL(file, MIGRATIONS_DIR), join(dir, file));
+  // The update: 020 and whatever came after it.
+  for (const f of readdirSync(MIGRATIONS_DIR)) if (Number.parseInt(f, 10) >= 20) copyFileSync(new URL(f, MIGRATIONS_DIR), join(dir, f));
 }
 
 test('update: people switched off in a coffee shop before are deleted by the migration; a billiard club keeps them', async (t) => {

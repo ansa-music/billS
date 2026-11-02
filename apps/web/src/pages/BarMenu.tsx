@@ -299,6 +299,7 @@ export function BarMenuPage() {
           categories={categories}
           currency={currency}
           busy={locked}
+          cafe={cafe}
           onClose={() => setProductDraft(null)}
           onSave={async (body) => {
             const res =
@@ -411,6 +412,7 @@ function ProductModal({
   categories,
   currency,
   busy,
+  cafe = false,
   onClose,
   onSave,
 }: {
@@ -418,6 +420,8 @@ function ProductModal({
   categories: CategoryView[];
   currency: string;
   busy: boolean;
+  /** A coffee shop: drinks take raw materials by their recipe, the piece count is for ready goods. */
+  cafe?: boolean;
   onClose: () => void;
   onSave: (body: ProductBody) => Promise<void>;
 }) {
@@ -491,7 +495,16 @@ function ProductModal({
           </Field>
         </div>
         <div className="form-row">
-          <Block label="Остаток" hint={tracked ? 'Списывается с каждым заказом' : 'Без учёта остатков'}>
+          <Block
+            label={cafe ? 'Остаток штук' : 'Остаток'}
+            hint={
+              tracked
+                ? 'Списывается с каждым заказом'
+                : cafe
+                  ? 'Для готового товара (круассан, вода). Напитки списывают сырьё по составу: «Склад» → «Состав»'
+                  : 'Без учёта остатков'
+            }
+          >
             <div className="row wrap">
               <label className="bar-switch" data-on={tracked ? '' : undefined}>
                 <input type="checkbox" checked={tracked} onChange={(e) => setTracked(e.target.checked)} />

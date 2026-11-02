@@ -1,5 +1,5 @@
 import type { IngredientUnit, IngredientsView, IngredientView, Minor } from '@bills/domain';
-import { formatMoney, formatQty, toMilli } from '@bills/domain';
+import { bigUnitOf, formatMoney, formatStock, QTY_INPUT_UNITS, toBaseQty, toMilli } from '@bills/domain';
 import { fetchJson } from '../api.ts';
 import { useHub, useLive } from '../useHub.tsx';
 
@@ -41,9 +41,27 @@ export function packPrice(costPerUnit: Minor | null, unit: IngredientUnit, curre
   return `${formatMoney(costPerUnit * pack.size, currency)} / ${pack.label}`;
 }
 
-/** Quantity with its unit, big amounts of grams and millilitres in kilograms and litres too. */
+/** Quantity with its unit, big amounts of grams and millilitres in kilograms and litres («3 кг», «12,5 л»). */
 export function qtyLabel(quantity: number, unit: IngredientUnit): string {
-  return formatQty(quantity, unit);
+  return formatStock(quantity, unit);
+}
+
+/** A typed amount in the unit chosen next to it (кг / г, л / мл) → base units; null when not a number. */
+export function typedQty(text: string, factor: number): number | null {
+  const n = parseQty(text);
+  return n === null ? null : toBaseQty(n, factor);
+}
+
+/** How a known amount is shown in an input: 2 000 г → «2» кг, 18 г → «18» г. */
+export function qtyInput(quantity: number, unit: IngredientUnit): { text: string; factor: number } {
+  const big = bigUnitOf(unit);
+  if (big.factor > 1 && quantity !== 0 && Math.abs(quantity) >= big.factor) return { text: qtyText(quantity / big.factor), factor: big.factor };
+  return { text: quantity === 0 ? '' : qtyText(quantity), factor: 1 };
+}
+
+/** The input units of an ingredient's unit: «кг / г», «л / мл», «шт». */
+export function inputUnits(unit: IngredientUnit) {
+  return QTY_INPUT_UNITS[unit];
 }
 
 /** Money of a quantity at a cost per unit, rounded; null without a cost. */
