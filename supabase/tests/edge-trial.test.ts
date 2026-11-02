@@ -94,7 +94,7 @@ test('trial: a request (pending) → the platform owner approves → report → 
   assert.deepEqual(terms.body, { status: 'active', endsAt: approvedAt + 14 * DAY });
 
   const owner = await platformToken(e, DEMO_PLATFORM[0].key);
-  const list = await e.call<{ trials: TrialView[] }>(handlePlatform, 'GET', '/platform/platform/trials', { headers: owner });
+  const list = await e.call<{ trials: TrialView[]; cloudHub: unknown }>(handlePlatform, 'GET', '/platform/platform/trials', { headers: owner });
   assert.equal(list.status, 200);
   assert.deepEqual(list.body.trials, [
     {
@@ -113,8 +113,11 @@ test('trial: a request (pending) → the platform owner approves → report → 
       decidedAt: approvedAt,
       ownerMessage: null,
       duplicateOf: null,
+      cloud: null,
+      paid: null,
     },
   ]);
+  assert.deepEqual(list.body.cloudHub, { configured: false, url: null }, 'no CLOUD_HUB_URL / CLOUD_HUB_ADMIN_TOKEN here');
 });
 
 test('trial: bad input, bad token (401), unknown id (404), stats validation, CORS on OPTIONS and on errors', async (t) => {

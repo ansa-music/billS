@@ -23,6 +23,7 @@ import {
   cafeCodeFromBytes,
   cafeCodeHashInput,
   CAFE_CODE_WRONG_MESSAGE,
+  cloudCafeUrl,
   MOVE_EXPIRED_MESSAGE,
   MOVE_NO_SNAPSHOT_MESSAGE,
   MOVE_SUPERSEDED_MESSAGE,
@@ -30,6 +31,7 @@ import {
   normalizeCafeCode,
   TRIAL_MOVE,
   TRIAL_MOVE_RATE,
+  TRIAL_IN_CLOUD_MESSAGE,
   TRIAL_MOVED_MESSAGE,
   trialTerms,
   trialWaiting,
@@ -100,12 +102,16 @@ async function authorizedTrial(db: SqlDriver, id: unknown, token: string | null)
   return { id: row.id, status: row.status };
 }
 
-/** A new café code for the trial: drawn at random, stored as sha256 (a clash with another trial's code is drawn again). */
+/**
+ * A new café code for the trial: drawn at random, found by its sha256 (a clash with another trial's code is drawn
+ * again). The code itself goes only to the service-only cafe_code column, for the platform owner's «Показать»
+ * (apps/cloud/src/trial-codes.ts) — never to a URL or a log.
+ */
 async function issueCode(db: SqlDriver, now: number, trialId: string): Promise<string> {
   for (let i = 0; ; i++) {
     const code = cafeCodeFromBytes(randomBytes(CAFE_CODE_BYTES));
     try {
-      await db.run('UPDATE trials SET code_hash = ?, code_at = ?::timestamptz WHERE id = ?::uuid', [codeHash(code), iso(now), trialId]);
+      await db.run('UPDATE trials SET code_hash = ?, code_at = ?::timestamptz, cafe_code = ? WHERE id = ?::uuid', [codeHash(code), iso(now), code, trialId]);
       return code;
     } catch (e) {
       if (i < 3 && (e as { code?: unknown }).code === '23505') continue;
@@ -133,12 +139,13 @@ export async function withMove<T extends TrialTerms>(db: SqlDriver, now: number,
   const body = isObject(raw) ? raw : {};
   const id = body.id;
   if (typeof id !== 'string' || !UUID_RE.test(id)) return answer;
-  const rows = await db.all<{ code_hash: string | null; status: string; wanted: number | string | null; snapshot_at: number | string | null }>(
-    `SELECT code_hash, status, ${ms('snapshot_wanted_at')} AS wanted, ${ms('snapshot_at')} AS snapshot_at FROM trials WHERE id = ?::uuid`,
+  const rows = await db.all<{ code_hash: string | null; status: string; wanted: number | string | null; snapshot_at: number | string | null; cloud_code: string | null }>(
+    `SELECT code_hash, status, ${ms('snapshot_wanted_at')} AS wanted, ${ms('snapshot_at')} AS snapshot_at, cloud_code FROM trials WHERE id = ?::uuid`,
     [id],
   );
   const row = rows[0];
-  if (!row) return answer;
+  // A café in the cloud cash desk has nothing to move any more: no café code, no fresh copies.
+  if (!row || row.cloud_code) return answer;
   const out: T & TrialReportMoveAnswer = { ...answer };
   const wanted = num(row.wanted);
   if (wanted !== null) {
@@ -161,12 +168,22 @@ export async function withMove<T extends TrialTerms>(db: SqlDriver, now: number,
 
 /**
  * A refused /trial/report or /trial/terms whose token was retired by a move becomes 410 TRIAL_MOVED
- * («Касса перенесена на другой компьютер») instead of «wrong key»; anything else is passed on.
+ * («Касса перенесена на другой компьютер») instead of «wrong key»; anything else is passed on. When the café is in
+ * the cloud cash desk now (apps/cloud/src/cloud-cafe.ts) the answer says so — the same code, so an old page without
+ * the cloud code still locks itself read-only — with `error.cloud` {code, url} for a current page.
  */
-export async function movedError(db: SqlDriver, err: unknown, token: string | null, id: unknown): Promise<unknown> {
+export async function movedError(db: SqlDriver, err: unknown, token: string | null, id: unknown, cloudBase: string | null = null): Promise<unknown> {
   if (!(err instanceof CloudError) || err.status !== 401 || !token || typeof id !== 'string' || !UUID_RE.test(id)) return err;
-  const rows = await db.all<{ x: number }>('SELECT 1 AS x FROM trial_retired_tokens WHERE token_hash = ? AND trial_id = ?::uuid', [sha256(token), id]);
-  return rows.length ? new CloudError(410, 'TRIAL_MOVED', TRIAL_MOVED_MESSAGE) : err;
+  const rows = await db.all<{ cloud_code: string | null }>(
+    `SELECT t.cloud_code FROM trial_retired_tokens r JOIN trials t ON t.id = r.trial_id WHERE r.token_hash = ? AND r.trial_id = ?::uuid`,
+    [sha256(token), id],
+  );
+  const row = rows[0];
+  if (!row) return err;
+  if (!row.cloud_code) return new CloudError(410, 'TRIAL_MOVED', TRIAL_MOVED_MESSAGE);
+  return new CloudError(410, 'TRIAL_MOVED', TRIAL_IN_CLOUD_MESSAGE, {
+    cloud: { code: row.cloud_code, url: cloudBase ? cloudCafeUrl(cloudBase, row.cloud_code) : null },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -186,11 +203,17 @@ interface TrialMoveRow {
   code_hash: string | null;
   token_hash: string;
   owner_message: string | null;
+  cloud_code: string | null;
+  cloud_busy_at: number | string | null;
 }
 
 const TRIAL_MOVE_COLUMNS = `id::text AS id, venue, manager_name, status, ${ms('started_at')} AS started_at, ${ms('ends_at')} AS ends_at,
   ${ms('last_seen_at')} AS last_seen_at, ${ms('snapshot_at')} AS snapshot_at, ${ms('snapshot_wanted_at')} AS snapshot_wanted_at,
-  desk_gen, code_hash, token_hash, owner_message`;
+  desk_gen, code_hash, token_hash, owner_message, cloud_code, ${ms('cloud_busy_at')} AS cloud_busy_at`;
+
+/** The café went (or is going right now) to the cloud cash desk: no browser can take the cash desk any more. */
+const inCloud = (row: Pick<TrialMoveRow, 'cloud_code' | 'cloud_busy_at'>, now: number): boolean =>
+  row.cloud_code !== null || (row.cloud_busy_at !== null && now - Number(row.cloud_busy_at) < 5 * 60_000);
 
 /**
  * POST /trial/move/start {code}: the café code typed on the new computer. 429 past 30 attempts or 10 wrong
@@ -310,6 +333,7 @@ export async function finishMove(db: SqlDriver, now: number, token: string | nul
     ]);
     if (!again[0] || num(again[0].finished_at) !== null) throw new CloudError(410, 'MOVE_EXPIRED', MOVE_EXPIRED_MESSAGE);
     if (Number(row.desk_gen) !== Number(t.desk_gen)) throw new CloudError(409, 'MOVE_SUPERSEDED', MOVE_SUPERSEDED_MESSAGE);
+    if (inCloud(row, now)) throw new CloudError(409, 'TRIAL_IN_CLOUD', TRIAL_IN_CLOUD_MESSAGE);
     const snapshotAt = num(row.snapshot_at);
     if (snapshotAt === null) throw new CloudError(404, 'SNAPSHOT_NOT_FOUND', MOVE_NO_SNAPSHOT_MESSAGE);
     const requestedAt = num(t.requested_at);

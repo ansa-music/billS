@@ -2,6 +2,8 @@ import type { BusinessType } from './cafe.ts';
 import { BUSINESS_TYPES } from './cafe.ts';
 import type { LoyaltySettings } from './loyalty.ts';
 import { DEFAULT_LOYALTY_SETTINGS, normalizeLoyaltySettings } from './loyalty.ts';
+import type { ReceiptSettings } from './receipt.ts';
+import { DEFAULT_RECEIPT_SETTINGS, normalizeReceiptSettings } from './receipt.ts';
 
 /**
  * Club settings beyond name, time zone and currency: how the hall screen looks
@@ -56,6 +58,8 @@ export interface ClubSettings {
   business: BusinessSettings;
   /** «Лояльность без приложения» (loyalty.ts): off by default, the manager switches it on. */
   loyalty: LoyaltySettings;
+  /** «Чек» (receipt.ts): what the venue puts on its receipt. Saved through POST /api/receipt/settings only. */
+  receipt: ReceiptSettings;
 }
 
 export const DEFAULT_CLUB_SETTINGS: ClubSettings = {
@@ -69,6 +73,7 @@ export const DEFAULT_CLUB_SETTINGS: ClubSettings = {
   },
   business: { type: 'billiards' },
   loyalty: DEFAULT_LOYALTY_SETTINGS,
+  receipt: DEFAULT_RECEIPT_SETTINGS,
 };
 
 /** What a screen may send: any subset; null clears a nullable text. */
@@ -77,6 +82,7 @@ export interface ClubSettingsPatch {
   rules?: Partial<RuleSettings>;
   business?: Partial<BusinessSettings>;
   loyalty?: Partial<LoyaltySettings>;
+  receipt?: Partial<ReceiptSettings>;
 }
 
 function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
@@ -137,6 +143,7 @@ export function normalizeClubSettings(input: unknown, base: ClubSettings = DEFAU
     },
     business: { type: pick(b.type, BUSINESS_TYPES, base.business.type) },
     loyalty: normalizeLoyaltySettings(src.loyalty, base.loyalty ?? DEFAULT_LOYALTY_SETTINGS),
+    receipt: normalizeReceiptSettings(src.receipt, base.receipt ?? DEFAULT_RECEIPT_SETTINGS),
   };
 }
 

@@ -12,15 +12,37 @@
  *   GET  /terms?id=&v=2  Bearer token                         → {status, endsAt, message?}  (while waiting: every 30 s)
  *   POST /report Bearer token, {id, v: 2, stats, snapshot?, needCode?} → {status, endsAt, message?, watching?, cafeCode?, sendSnapshot?}
  *                (needCode / cafeCode / sendSnapshot and 410 TRIAL_MOVED: moving the cash desk, trial-move.ts)
+ *   POST /cloud/seen Bearer token, {id}                       → {ok}  (the page kept the director's key of its cloud café)
+ * The report also carries `codes` (packages/domain/src/trial-codes.ts: the café code and the director's code for the
+ * platform owner, only when one changed since the cloud last accepted them) and its answer may carry
+ * `directorKeyNext` (TS's new director's code: installed here, trial-director.ts).
+ * «Облачная касса» (packages/domain/src/cloud-cafe.ts): an answer's `cloud` (or a retired token's 410 TRIAL_MOVED
+ * with `error.cloud`) means the café now lives in the TS cloud — kept on the record (TrialInfo.cloud), this browser
+ * turns read-only and never calls again (except once, POST /cloud/seen, after keeping a new café's director's key).
  * Without VITE_SUPABASE_URL everything here is off. Nothing waits on the network: a failed
  * call is tried again on the next tick.
  */
-import type { TrialReportRequest, TrialStartRequest, TrialStartResponse, TrialStats, TrialTerms } from '@bills/domain';
-import { parseTrialTerms, TRIAL_SNAPSHOT_MAX_BYTES, TRIAL_TERMS_VERSION, trialCheckEveryMs, trialGoneTerms, trialWaiting, workingDay } from '@bills/domain';
+import type { TrialCloudInfo, TrialReportRequest, TrialStartRequest, TrialStartResponse, TrialStats, TrialTerms } from '@bills/domain';
+import {
+  codesToReport,
+  directorKeyNextOf,
+  mergeReportedCodes,
+  movedToCloudOf,
+  parseTrialCloudInfo,
+  parseTrialTerms,
+  TRIAL_SNAPSHOT_MAX_BYTES,
+  TRIAL_TERMS_VERSION,
+  trialCheckEveryMs,
+  trialCloudKeyToAck,
+  trialCloudRecord,
+  trialGoneTerms,
+  trialWaiting,
+  workingDay,
+} from '@bills/domain';
 import type { DatabaseSync } from './shims/sqlite.ts';
 import type { TrialInfo } from './trial-store.ts';
 import { newInstallId, noteTrialCheck } from './trial-store.ts';
-import type { TrialReportAnswer, TrialReportMoveFields } from '@bills/domain';
+import type { TrialReportAnswer, TrialReportCodeFields, TrialReportCodes, TrialReportMoveFields } from '@bills/domain';
 import { TRIAL_SNAPSHOT, TRIAL_WATCH, trialReportEveryMs, trialSnapshotDueNow } from '@bills/domain';
 import type { ForcedCopy } from './trial-move.ts';
 import { deskMove } from './trial-move.ts';
@@ -46,12 +68,16 @@ const SNAPSHOT_MAX_BYTES = TRIAL_SNAPSHOT_MAX_BYTES;
 const STATS_DAYS = 14;
 const TIMEOUT_MS = 20_000;
 
-/** A call the cloud answered with an error: its HTTP status and code (TRIAL_NOT_FOUND after a deletion). */
+/**
+ * A call the cloud answered with an error: its HTTP status and code (TRIAL_NOT_FOUND after a deletion), and the
+ * café in the cloud a retired token's 410 TRIAL_MOVED names (null: moved to another computer, or another error).
+ */
 export class TrialCloudError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
     message: string,
+    readonly cloud: TrialCloudInfo | null = null,
   ) {
     super(message);
   }
@@ -69,7 +95,7 @@ async function call(path: string, init: RequestInit & { token?: string | undefin
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as { error?: { code?: unknown } } | null;
       const code = typeof body?.error?.code === 'string' ? body.error.code : '';
-      throw new TrialCloudError(res.status, code, `trial ${path}: HTTP ${res.status}${code ? ` ${code}` : ''}`);
+      throw new TrialCloudError(res.status, code, `trial ${path}: HTTP ${res.status}${code ? ` ${code}` : ''}`, movedToCloudOf(body));
     }
     return await res.json();
   } finally {
@@ -77,11 +103,17 @@ async function call(path: string, init: RequestInit & { token?: string | undefin
   }
 }
 
+/** The terms with the answer's `cloud` (the café now lives in the TS cloud), when it carries one. */
+function withCloud<T extends TrialTerms>(terms: T, body: unknown): T {
+  const cloud = parseTrialCloudInfo((body as { cloud?: unknown } | null)?.cloud);
+  return cloud ? { ...terms, cloud } : terms;
+}
+
 export async function cloudStart(body: TrialStartRequest): Promise<TrialStarted> {
   const o = (await call('/start', { method: 'POST', body: JSON.stringify(body) })) as Record<string, unknown>;
   const terms = parseTrialTerms(o);
   if (!terms || typeof o.id !== 'string' || typeof o.token !== 'string') throw new Error('trial /start: unexpected answer');
-  return { ...terms, id: o.id, token: o.token, startedAt: typeof o.startedAt === 'number' ? o.startedAt : Date.now() };
+  return withCloud({ ...terms, id: o.id, token: o.token, startedAt: typeof o.startedAt === 'number' ? o.startedAt : Date.now() }, o);
 }
 
 export async function cloudReport(id: string, token: string, stats: TrialStats, snapshot?: string): Promise<TrialTerms> {
@@ -89,9 +121,15 @@ export async function cloudReport(id: string, token: string, stats: TrialStats, 
 }
 
 export async function cloudTerms(id: string, token: string): Promise<TrialTerms> {
-  const terms = parseTrialTerms(await call(`/terms?id=${encodeURIComponent(id)}&v=${TRIAL_TERMS_VERSION}`, { method: 'GET', token }));
+  const body = await call(`/terms?id=${encodeURIComponent(id)}&v=${TRIAL_TERMS_VERSION}`, { method: 'GET', token });
+  const terms = parseTrialTerms(body);
   if (!terms) throw new Error('trial /terms: unexpected answer');
-  return terms;
+  return withCloud(terms, body);
+}
+
+/** POST /cloud/seen: the page kept its cloud café's director's key — the cloud forgets it (and retires this token). */
+export async function cloudSeen(id: string, token: string): Promise<void> {
+  await call('/cloud/seen', { method: 'POST', token, body: JSON.stringify({ id }) });
 }
 
 /** The YYYY-MM-DD `n` calendar days before `day`. */
@@ -184,15 +222,16 @@ async function cloudReportWatching(
   token: string,
   stats: TrialStats,
   snapshot?: string,
-  extra: TrialReportMoveFields = {},
+  extra: TrialReportMoveFields & TrialReportCodeFields = {},
   onBody?: (body: unknown) => void,
 ): Promise<TrialReportAnswer> {
-  const req: TrialReportRequest & TrialReportMoveFields = { id, v: TRIAL_TERMS_VERSION, stats, ...(snapshot ? { snapshot } : {}), ...extra };
+  const req: TrialReportRequest & TrialReportMoveFields & TrialReportCodeFields = { id, v: TRIAL_TERMS_VERSION, stats, ...(snapshot ? { snapshot } : {}), ...extra };
   const body = await call('/report', { method: 'POST', token, body: JSON.stringify(req) });
   onBody?.(body);
   const terms = parseTrialTerms(body);
   if (!terms) throw new Error('trial /report: unexpected answer');
-  return (body as { watching?: unknown }).watching === true ? { ...terms, watching: true } : terms;
+  const answer: TrialReportAnswer = (body as { watching?: unknown }).watching === true ? { ...terms, watching: true } : terms;
+  return withCloud(answer, body);
 }
 
 export interface TrialCloudLink {
@@ -214,6 +253,12 @@ export interface TrialCloudDeps {
   applyTerms(terms: TrialTerms): void;
   /** Another computer took the cash desk over (trial-move.ts): lock this one read-only. */
   onMoved?(): void;
+  /** The café moved to the TS cloud (TrialInfo.cloud is set): lock this one read-only. */
+  onCloud?(): void;
+  /** The café's codes as they are now (trial-director.ts): only what changed since the last accepted report is sent. */
+  codes?(): TrialReportCodes;
+  /** TS's new director's code (the report's `directorKeyNext`): install it in the in-page HUB. */
+  installDirectorKey?(key: string): 'installed' | 'refused';
 }
 
 /** A waiting page asks again at most this often when it comes back on screen. */
@@ -240,10 +285,14 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
   let lastAttempt = 0;
 
   const take = (terms: TrialTerms) => {
+    // In the cloud: this browser's terms no longer change.
+    if (info.cloud) return;
     const message = terms.message ?? null;
     if (terms.endsAt === info.endsAt && terms.status === info.status && message === (info.message ?? null)) return;
     const licenseChanged = terms.endsAt !== info.endsAt || terms.status !== info.status;
-    void deps.persist({ endsAt: terms.endsAt, status: terms.status, message });
+    // «Купили»: remembered, so a paid term that ran out says so even when the cloud's words are not here.
+    const everPaid = terms.status === 'paid' ? true : terms.status === 'expired' ? info.everPaid : undefined;
+    void deps.persist({ endsAt: terms.endsAt, status: terms.status, message, everPaid });
     if (licenseChanged) deps.applyTerms(terms);
   };
 
@@ -270,9 +319,71 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
     // Changed after the last copy was taken (not mere background writes such as sessions).
     unsynced: () => (info.changedAt ?? 0) > (info.snapshotAt ?? 0),
     onMoved: () => deps.onMoved?.(),
+    // The signal said «this token was retired»: by a move to another computer, or to the cloud? One terms call tells.
+    whyMoved: async () => {
+      if (!info.cloudId || !info.cloudToken) return 'moved';
+      try {
+        await cloudTerms(info.cloudId, info.cloudToken);
+      } catch (err) {
+        if (err instanceof TrialCloudError && err.cloud) {
+          await toCloud(err.cloud, null);
+          return 'cloud';
+        }
+      }
+      return 'moved';
+    },
   });
 
+  /** Tells the cloud the director's key of the new cloud café is kept here (then the cloud forgets it). */
+  let acking = false;
+  const ackKey = async (): Promise<void> => {
+    if (acking || !trialCloudKeyToAck(info.cloud) || !info.cloudId || !info.cloudToken) return;
+    acking = true;
+    try {
+      await cloudSeen(info.cloudId, info.cloudToken);
+      await deps.persist({ cloud: { ...info.cloud!, keyAcked: true } });
+    } catch (err) {
+      // Already retired (or gone): the cloud does not hold the key for this page any more.
+      if (err instanceof TrialCloudError && (err.status === 401 || err.status === 404 || err.status === 410)) {
+        await deps.persist({ cloud: { ...info.cloud!, keyAcked: true } });
+      }
+      // Off line: the next tick tries again.
+    } finally {
+      acking = false;
+    }
+  };
+
+  /**
+   * The café lives in the TS cloud now: where it is (and a new café's director's key) is kept first — the key on
+   * disk before the cloud is told it may forget it — then this browser locks read-only and stops calling.
+   */
+  const toCloud = async (cloud: TrialCloudInfo, terms: TrialTerms | null): Promise<void> => {
+    if (info.cloud) return;
+    move.stop();
+    const record = trialCloudRecord(cloud, trialWaiting(info.status), Date.now());
+    await deps.persist({ cloud: record, ...(terms ? { status: terms.status, endsAt: terms.endsAt, message: terms.message ?? null } : {}) });
+    deps.onCloud?.();
+    await ackKey();
+  };
+
+  /**
+   * TS issued a new director's code («Выдать новый код директора»): installed once (it comes with every answer
+   * until the cloud sees it reported); the next report, a few seconds later, says it works — or that it could not
+   * be installed here (another person has those digits), and TS issues another.
+   */
+  const takeDirectorKey = (key: string) => {
+    if (!deps.installDirectorKey || key === info.managerKey || key === info.directorKeyRefused) return;
+    const result = deps.installDirectorKey(key);
+    if (result === 'refused') void deps.persist({ directorKeyRefused: key });
+    setTimeout(() => void reportNow(), 2000);
+  };
+
   const tick = async (): Promise<TrialTerms | null> => {
+    // In the cloud: nothing more to say, except (once) that the director's key is kept.
+    if (info.cloud) {
+      await ackKey();
+      return null;
+    }
     // Moved away: this computer is no longer the cash desk and never reports again.
     if (move.stopped) return null;
     try {
@@ -285,8 +396,14 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
           timezone: deps.timezone,
           startedAt: info.startedAt,
           installId: info.installId!,
+          ...(info.withMenu !== undefined ? { withMenu: info.withMenu } : {}),
         });
         await deps.persist({ cloudId: started.id, cloudToken: started.token });
+        if (started.cloud) {
+          noteTrialCheck(true);
+          await toCloud(started.cloud, started);
+          return started;
+        }
         take(started);
         if (trialWaiting(started.status)) {
           noteTrialCheck(true);
@@ -297,6 +414,11 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
         // A request: no reports until TS approves it, only its terms.
         const terms = await cloudTerms(info.cloudId!, info.cloudToken!);
         noteTrialCheck(true);
+        // Approved straight into the TS cloud: «Ваша касса готова — она в облаке» instead of this browser's café.
+        if (terms.cloud) {
+          await toCloud(terms.cloud, terms);
+          return terms;
+        }
         take(terms);
         // Approved: the first report (with it the café code, trial-move.ts) in a few seconds, not 5 minutes later.
         if (!trialWaiting(terms.status)) setTimeout(() => void reportNow(), 3000);
@@ -305,14 +427,38 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
       const force = forceCopy;
       forceCopy = false;
       const snap = snapshot(force);
-      const terms = await cloudReportWatching(info.cloudId!, info.cloudToken!, collectStats(db), snap?.data, move.fields(), (body) => move.onAnswer(body));
+      // The codes for the platform owner: only what changed since the cloud last accepted them.
+      const codes = deps.codes ? codesToReport(deps.codes(), info.codesReported) : null;
+      let nextKey: string | null = null;
+      const terms = await cloudReportWatching(
+        info.cloudId!,
+        info.cloudToken!,
+        collectStats(db),
+        snap?.data,
+        { ...move.fields(), ...(codes ? { codes } : {}) },
+        (body) => {
+          move.onAnswer(body);
+          nextKey = directorKeyNextOf(body);
+        },
+      );
       noteTrialCheck(true);
       watchedByCloud = terms.watching === true;
       if (snap) void deps.persist({ snapshotAt: snap.takenAt, snapshotHash: snap.hash });
+      if (codes) void deps.persist({ codesReported: mergeReportedCodes(info.codesReported, codes) });
+      if (nextKey) takeDirectorKey(nextKey);
+      if (terms.cloud) {
+        await toCloud(terms.cloud, terms);
+        return terms;
+      }
       take(terms);
       return terms;
     } catch (err) {
       noteTrialCheck(false);
+      // The café moved to the TS cloud (410 TRIAL_MOVED with `cloud`): «Касса переехала в облако», no more calls.
+      if (err instanceof TrialCloudError && err.cloud) {
+        await toCloud(err.cloud, null).catch((e: unknown) => console.warn('[trial] could not keep the cloud link', e));
+        return null;
+      }
       // Another computer took the cash desk over (410 TRIAL_MOVED): «Касса перенесена», no more calls.
       if (move.onError(err)) return null;
       // The platform owner deleted a request that was waiting: «Заявка удалена», and no more asking.
@@ -377,7 +523,7 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
     setTimeout(() => void reportNow(), FIRST_CHANGE_DELAY_MS);
   });
   window.addEventListener('pagehide', () => {
-    if (!info.cloudId || !info.cloudToken || trialWaiting(info.status) || move.stopped) return;
+    if (!info.cloudId || !info.cloudToken || trialWaiting(info.status) || move.stopped || info.cloud) return;
     try {
       void fetch(`${TRIAL_CLOUD_URL}/report`, {
         method: 'POST',

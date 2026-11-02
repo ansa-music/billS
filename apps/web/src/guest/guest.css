@@ -647,15 +647,17 @@
   flex: none;
 }
 
+/* Printing the QR sheet: only while it is on the page and no receipt is being printed. This CSS is
+   in every screen's bundle: an unscoped `body *` blanked every receipt, X/Z report and key slip. */
 @media print {
-  body * {
+  body:has(.guest-qr-print):not(:has(> #print-root)) * {
     visibility: hidden;
   }
-  .guest-qr-print,
-  .guest-qr-print * {
+  body:not(:has(> #print-root)) .guest-qr-print,
+  body:not(:has(> #print-root)) .guest-qr-print * {
     visibility: visible;
   }
-  .guest-qr-print {
+  body:not(:has(> #print-root)) .guest-qr-print {
     position: absolute;
     inset: 0;
   }

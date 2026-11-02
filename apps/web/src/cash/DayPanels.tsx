@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ArchiveEntry, ArchiveView, CheckView, DayChecksView, Minor } from '@bills/domain';
-import { ARCHIVE_KIND_LABEL, formatMoney } from '@bills/domain';
+import { ARCHIVE_KIND_LABEL, formatMoney, PAYMENT_METHOD_LABEL } from '@bills/domain';
 import { getJson } from '../api.ts';
 import type { CancelTarget } from '../cafe/CounterCancelDialog.tsx';
 import { CounterCancelDialog } from '../cafe/CounterCancelDialog.tsx';
@@ -8,6 +8,7 @@ import { EmptyState, SectionCard } from '../components.tsx';
 import { formatClock } from '../format.ts';
 import { useHub, useLive } from '../useHub.tsx';
 import { checkSummary } from './lines.ts';
+import { ReceiptDialog } from './ReceiptDialog.tsx';
 
 const dayQuery = (date: string) => (date ? `?date=${encodeURIComponent(date)}` : '');
 
@@ -30,6 +31,25 @@ function checkStatus(c: CheckView): { text: string; tone: string } {
   return { text: c.paid > 0 ? 'оплачен частично' : 'ждёт оплаты', tone: 'warn' };
 }
 
+/** «Наличные 2 000 ₸, сдача 300 ₸ · Карта 1 600 ₸» — how the check was paid. */
+function paymentsSummary(c: CheckView, money: (a: Minor) => string): string {
+  return c.payments
+    .filter((p) => p.kind === 'PAYMENT')
+    .map((p) => {
+      const change = p.change != null && p.change > 0 ? `, сдача ${money(p.change)}` : '';
+      return `${PAYMENT_METHOD_LABEL[p.method]} ${money(p.amount)}${change}`;
+    })
+    .join(' · ');
+}
+
+/** «Капучино (L · Овсяное) ×2, Круассан» — the lines of a counter check. */
+function linesSummary(c: CheckView): string {
+  return c.items
+    .filter((i) => i.kind === 'ORDER')
+    .map((i) => (i.qty && i.qty > 1 ? `${i.title} ×${i.qty}` : i.title))
+    .join(', ');
+}
+
 /**
  * «Чеки за день»: every check of the working day one by one — number, time, what, sum, status.
  * No day totals (revenue is `stats.view`), so the barista sees it too. The manager and the
@@ -44,6 +64,7 @@ export function DayChecksPanel() {
   const day = useLive(() => getJson<DayChecksView>(`/api/checks/day${dayQuery(date)}`), [date], hub.version);
   const canCancel = hub.canNow('counter.cancel');
   const [cancelling, setCancelling] = useState<CancelTarget | null>(null);
+  const [receipt, setReceipt] = useState<CheckView | null>(null);
   const names = new Map(state.tables.map((t) => [t.id, t.name]));
   const rows = day.data?.checks ?? [];
 
@@ -66,12 +87,9 @@ export function DayChecksPanel() {
             const counter = orders.filter((o) => o.number !== null);
             const live = counter.filter((o) => o.status !== 'CANCELLED');
             const net = c.paid - c.refunded;
-            const what = counter.length
-              ? c.items
-                  .filter((i) => i.kind === 'ORDER')
-                  .map((i) => (i.qty && i.qty > 1 ? `${i.title} ×${i.qty}` : i.title))
-                  .join(', ')
-              : checkSummary(c, names, money);
+            const what = counter.length ? linesSummary(c) : checkSummary(c, names, money);
+            const paidBy = paymentsSummary(c, money);
+            const cancellable = canCancel && live.length > 0 && c.status !== 'VOID';
             return (
               <li key={c.id} className="row-item day-row">
                 <div className="row-main">
@@ -83,9 +101,15 @@ export function DayChecksPanel() {
                     {formatClock(c.closedAt ?? c.createdAt, timezone)} · {c.createdBy}
                     {what ? ` · ${what}` : ''}
                   </span>
-                  {canCancel && live.length > 0 && c.status !== 'VOID' && (
-                    <span className="day-row-actions">
-                      {net > 0 ? (
+                  {paidBy && <span className="row-sub">{paidBy}</span>}
+                  <span className="day-row-actions">
+                    {c.status !== 'VOID' && (
+                      <button type="button" className="btn btn-small" onClick={() => setReceipt(c)}>
+                        Чек
+                      </button>
+                    )}
+                    {cancellable &&
+                      (net > 0 ? (
                         <span className="hint">Отменить можно после возврата денег («Чеки смены» → «Возврат»)</span>
                       ) : (
                         live.map((o) => (
@@ -100,9 +124,8 @@ export function DayChecksPanel() {
                             Отменить заказ №{o.number}
                           </button>
                         ))
-                      )}
-                    </span>
-                  )}
+                      ))}
+                  </span>
                 </div>
                 <span className={`tag tag-${status.tone}`}>{status.text}</span>
                 <span className="row-sub">{c.refunded > 0 ? `возврат ${money(c.refunded)}` : ''}</span>
@@ -125,6 +148,7 @@ export function DayChecksPanel() {
           }}
         />
       )}
+      {receipt && <ReceiptDialog check={receipt} onClose={() => setReceipt(null)} />}
     </SectionCard>
   );
 }
@@ -146,6 +170,10 @@ export function ArchivePanel() {
   const [date, setDate] = useState('');
   const archive = useLive(() => getJson<ArchiveView>(`/api/archive${dayQuery(date)}`), [date], hub.version);
   const a = archive.data;
+  const [receipt, setReceipt] = useState<CheckView | null>(null);
+  // A refund's check, as it stands now (with the refund on it): «Чек» shows and reprints it.
+  const openReceipt = (checkId: string) =>
+    void hub.run(`receipt:${checkId}`, async () => setReceipt(await getJson<CheckView>(`/api/checks/${encodeURIComponent(checkId)}`)));
 
   return (
     <SectionCard
@@ -185,6 +213,18 @@ export function ArchivePanel() {
                   <span className="archive-why">
                     {e.reason ? `«${e.reason}»` : 'без причины'} · {entryWho(e)}
                   </span>
+                  {e.kind === 'REFUND' && e.checkId && (
+                    <span className="day-row-actions">
+                      <button
+                        type="button"
+                        className="btn btn-small"
+                        disabled={hub.isBusy(`receipt:${e.checkId}`)}
+                        onClick={() => e.checkId && openReceipt(e.checkId)}
+                      >
+                        Чек
+                      </button>
+                    </span>
+                  )}
                 </div>
                 <span className={`tag ${e.kind === 'REFUND' ? 'tag-warn' : e.kind === 'VOID' ? 'tag-muted' : 'tag-danger'}`}>
                   {ARCHIVE_KIND_LABEL[e.kind]}
@@ -196,6 +236,7 @@ export function ArchivePanel() {
           </ul>
         </>
       )}
+      {receipt && <ReceiptDialog check={receipt} onClose={() => setReceipt(null)} />}
     </SectionCard>
   );
 }

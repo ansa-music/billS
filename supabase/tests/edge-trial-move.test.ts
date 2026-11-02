@@ -74,8 +74,11 @@ test('café code: issued once on the report that asks for it, kept only as sha25
   );
   assert.equal(row!.code_hash, sha(cafeCodeHashInput(code)));
   assert.equal(row!.code_at, MONDAY_NOON);
-  const everything = JSON.stringify(await e.s.db.all('SELECT * FROM trials'));
-  assert.ok(!everything.includes(code), 'the code itself is stored nowhere');
+  // The code itself is kept only in the service-only cafe_code column, for the platform owner's «Показать» (trial-codes.ts).
+  const [kept] = await e.s.db.all<{ cafe_code: string }>('SELECT cafe_code FROM trials WHERE id = ?::uuid', [d.id]);
+  assert.equal(kept!.cafe_code, code);
+  const everything = JSON.stringify(await e.s.db.all('SELECT t.*, NULL AS cafe_code FROM trials t'));
+  assert.ok(!everything.replace(/"cafe_code":"[^"]*"/g, '').includes(code), 'nowhere else');
 
   // Asking again does not change it: a desk that lost its code uses «Сменить код».
   const again = await report(e, d, { needCode: true });

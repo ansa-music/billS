@@ -6,7 +6,7 @@
  * never turns into a device by itself. Small and free of the HUB: auth.ts, license.tsx and the banner import it.
  * The device itself is demo-hub/link-device.ts.
  */
-import type { LinkStatus, LinkView } from '@bills/domain';
+import type { LinkStatus, LinkView, TrialCloudInfo } from '@bills/domain';
 import { isLinkSecret, linkFromHash } from '@bills/domain';
 import { TRIAL, TRIAL_HERE_KEY } from './trial-store.ts';
 
@@ -103,9 +103,11 @@ export interface LinkViewState {
   since: number;
   /** Something that stops the device for good (no WebCrypto on http://). */
   problem: string | null;
+  /** The café moved to the cloud cash desk (the cash desk's answers say so): where to open it now. */
+  inCloud: TrialCloudInfo | null;
 }
 
-let view: LinkViewState = { status: 'connecting', direct: false, cloud: false, since: Date.now(), problem: null };
+let view: LinkViewState = { status: 'connecting', direct: false, cloud: false, since: Date.now(), problem: null, inCloud: null };
 let version = 0;
 const listeners = new Set<() => void>();
 let retry: (() => void) | null = null;

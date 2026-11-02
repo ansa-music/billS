@@ -1,11 +1,12 @@
 import type { Action, Business, LicenseState, LicenseStatus, RoleSet } from '@bills/domain';
-import { ACTION_MODULE, MODULE_LABEL, decide, licenseGateOf, TRIAL_MOVED_MESSAGE } from '@bills/domain';
+import { ACTION_MODULE, MODULE_LABEL, decide, licenseGateOf, TRIAL_MOVED_MESSAGE, trialOverMessage } from '@bills/domain';
 import { currentTrial, TRIAL } from './demo-hub/trial-store.ts';
 import { isWatchMode } from './demo-hub/watch-mode.ts';
 import { WatchBanner } from './trial/WatchBanner.tsx';
 import { isLinkMode } from './demo-hub/link-mode.ts';
 import { LinkBanner } from './trial/LinkBanner.tsx';
 import { TrialMovedBanner } from './trial/TrialMove.tsx';
+import { TRIAL_CLOUD_READ_ONLY } from './trial/TrialCloud.tsx';
 import { trialMovedAway } from './demo-hub/trial-move.ts';
 
 /**
@@ -46,7 +47,8 @@ export function blockedReason(roles: RoleSet, action: Action, license: LicenseSt
     case 'forbidden':
       return 'Недостаточно прав для этого действия.';
     case 'read_only':
-      // A trial cash desk moved to another computer is read-only for that reason, not an expired licence.
+      // A trial cash desk moved to the cloud or to another computer is read-only for that reason, not an expired licence.
+      if (TRIAL && currentTrial()?.cloud) return TRIAL_CLOUD_READ_ONLY;
       if (TRIAL && trialMovedAway(currentTrial())) return TRIAL_MOVED_MESSAGE;
       return `Только чтение: ${license?.message ?? READ_ONLY_TEXT}`;
     case 'module_off': {
@@ -82,7 +84,7 @@ export function LicenseBanner({ license }: { license: LicenseStatus | null | und
 }
 
 function LicenseStrip({ license }: { license: LicenseStatus | null | undefined }) {
-  if (!license || (TRIAL && trialMovedAway(currentTrial()))) return null;
+  if (!license || (TRIAL && (trialMovedAway(currentTrial()) || currentTrial()?.cloud))) return null;
   const tone = licenseTone(license.state);
   if (tone === 'ok' && !license.readOnly) return null;
   // Browser trial: the days left are on the badge in the menu; only read-only mode gets the strip.
@@ -93,7 +95,7 @@ function LicenseStrip({ license }: { license: LicenseStatus | null | undefined }
       <p className="license-banner-text">
         <strong>{danger ? 'Только чтение.' : 'Лицензия.'}</strong>{' '}
         {TRIAL && license.readOnly
-          ? (currentTrial()?.message ?? 'Пробный период завершён: данные можно смотреть и скачать, новые заказы недоступны.')
+          ? (trialOverMessage(currentTrial() ?? {}) ?? 'Пробный период завершён: данные можно смотреть и скачать, новые заказы недоступны.')
           : (license.message ?? (danger ? READ_ONLY_TEXT : 'Лицензия скоро закончится. Продлите доступ.'))}
       </p>
     </div>

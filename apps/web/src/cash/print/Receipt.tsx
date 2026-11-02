@@ -1,131 +1,160 @@
 import { Fragment } from 'react';
-import type { CheckView, HubState, Minor } from '@bills/domain';
-import { formatMoney } from '@bills/domain';
+import type { CheckView, ClubSettings, CreateCounterOrderResponse, HubState, Minor, ReceiptData, ReceiptOrderInfo } from '@bills/domain';
+import { buildReceipt, formatMoney, normalizeReceiptSettings } from '@bills/domain';
 import { formatClock, formatMinutes } from '../../format.ts';
-import { METHOD_LABEL } from '../format.ts';
-import { groupLines } from '../lines.ts';
+import { QrCode } from '../../QrCode.tsx';
 import { formatStamp, Info, Row, Sep } from './blocks.tsx';
+import { getPaper } from './paper.ts';
 import { printForm } from './printForm.tsx';
 
-type Club = HubState['club'];
+/** What a screen holds that a receipt needs: the club and its settings (HubState has both). */
+export interface ReceiptContext {
+  club: HubState['club'];
+  settings: ClubSettings;
+}
+
+export interface ReceiptOptions {
+  /** Table id → name: titles bar lines whose game is not on the check (billiards). */
+  names?: ReadonlyMap<string, string> | undefined;
+  /** Counter orders the screen already holds (the counter's fresh order). */
+  orders?: readonly ReceiptOrderInfo[] | undefined;
+  now?: number | undefined;
+}
 
 /**
- * Prints the guest check; an OPEN check comes out as «Предчек» with what is still due.
- * `names` (table id → name) titles bar lines whose game is not on the check.
+ * The receipt of a check as it prints: buildReceipt (packages/domain receipt.ts) with the club's
+ * «Чек» settings. Print after payment, reprint, archive and preview all come through here.
  */
-export function printReceipt(
-  check: CheckView,
-  club: Club,
-  names?: ReadonlyMap<string, string>,
-  now: number = Date.now(),
-  /** Coffee shop: the guest's order number, printed large («Заказ 17»). */
-  orderNumber?: number,
-): void {
-  printForm(<Receipt check={check} club={club} names={names} now={now} orderNumber={orderNumber} />);
+export function receiptOf(check: CheckView, ctx: ReceiptContext, options: ReceiptOptions = {}): ReceiptData {
+  return buildReceipt({
+    check,
+    club: ctx.club,
+    settings: normalizeReceiptSettings(ctx.settings.receipt),
+    business: ctx.settings.business?.type,
+    now: options.now ?? Date.now(),
+    tableNames: options.names,
+    orders: options.orders,
+  });
 }
 
-/** A settled check is dated by its last payment; anything else by the moment it is printed. */
-function receiptTime(check: CheckView, now: number): number {
-  if (check.status !== 'PAID') return now;
-  const paidAt = check.payments.reduce((at, p) => (p.kind === 'PAYMENT' ? Math.max(at, p.at) : at), 0);
-  return paidAt || check.closedAt || now;
+/**
+ * Prints the guest check on this device's paper; an OPEN check comes out as «Предчек» with what
+ * is still due. `copies` — the venue's number of copies (the print right after payment);
+ * a reprint or a precheck is one copy.
+ */
+export function printReceipt(check: CheckView, ctx: ReceiptContext, options: ReceiptOptions & { copies?: boolean } = {}): void {
+  const data = receiptOf(check, ctx, options);
+  const copies = options.copies && !data.precheck ? data.copies : 1;
+  printForm(
+    Array.from({ length: copies }, (_, i) => <ReceiptForm key={i} data={data} copy={i + 1} />),
+    getPaper(),
+  );
 }
 
-/** Who took the money; before any payment, who opened the check. */
-function cashiers(check: CheckView): string {
-  const names = new Set(check.payments.filter((p) => p.kind === 'PAYMENT').map((p) => p.actor));
-  return names.size > 0 ? [...names].join(', ') : check.createdBy;
+/** The counter's receipt right after the order was taken (and paid): the venue's copies. */
+export function printCounterReceipt(res: CreateCounterOrderResponse, ctx: ReceiptContext): void {
+  printReceipt(res.check, ctx, { orders: [res.order], copies: true });
 }
 
-export function Receipt({
-  check,
-  club,
-  names,
-  now,
-  orderNumber,
-}: {
-  check: CheckView;
-  club: Club;
-  names?: ReadonlyMap<string, string> | undefined;
-  now: number;
-  orderNumber?: number | undefined;
-}) {
-  const money = (a: Minor) => formatMoney(a, club.currency);
-  const tz = club.timezone;
-  const pre = check.status === 'OPEN';
-  const payments = check.payments.filter((p) => p.kind === 'PAYMENT');
-  const refunds = check.payments.filter((p) => p.kind === 'REFUND');
-  // Paid in several goes: the time tells the payments apart.
-  const timed = new Set(payments.map((p) => p.operationId)).size > 1;
-  const discounted = check.discount != null || check.discountAmount > 0;
-  // A coffee shop check has only bar lines; tables are thanked for the game.
-  const game = check.items.some((i) => i.kind === 'GAME');
+/** A receipt on screen exactly as it prints, at the given paper width. */
+export function ReceiptPreview({ data, paper }: { data: ReceiptData; paper?: '58' | '80' }) {
+  return (
+    <div className="receipt-sheet">
+      <div className="pf-preview" data-paper={paper ?? data.paper} aria-label="Чек, как он будет напечатан">
+        <ReceiptForm data={data} />
+      </div>
+    </div>
+  );
+}
+
+export function ReceiptForm({ data, copy = 1 }: { data: ReceiptData; copy?: number }) {
+  const money = (a: Minor) => formatMoney(a, data.currency);
+  const tz = data.timezone;
+  const { venue } = data;
+  const counter = data.orderNumbers.length > 0;
+  const orderSub = [data.service, data.guestName].filter(Boolean).join(' · ');
+  const extras = data.wifi || data.instagram || data.qr;
 
   return (
-    <div className="pf">
+    <div className="pf pf-receipt">
       <header className="pf-head">
-        <p className="pf-club">{club.name}</p>
-        {pre && <p className="pf-title">Предчек</p>}
-        <p className={pre ? 'pf-strong' : 'pf-title'}>Счёт №{check.number}</p>
-        {check.status === 'VOID' && <p className="pf-strong">Аннулирован</p>}
-        <p>{formatStamp(receiptTime(check, now), tz)}</p>
-        {orderNumber != null && <p className="pf-title">Заказ {orderNumber}</p>}
+        {venue.logo && <img className="pf-logo" src={venue.logo} alt="" />}
+        <p className="pf-club">{venue.name}</p>
+        {venue.address && <p>{venue.address}</p>}
+        {venue.phone && <p>{venue.phone}</p>}
+        {venue.taxId && <p>БИН/ИИН {venue.taxId}</p>}
+        {venue.header && <p className="pf-strong">{venue.header}</p>}
       </header>
-      <Info label="Кассир">{cashiers(check)}</Info>
+      {copy > 1 && <p className="pf-copy">Копия</p>}
+      {data.precheck && <p className="pf-title pf-center">Предчек</p>}
+
+      {counter ? (
+        <>
+          <Sep />
+          <div className="pf-order">
+            <p className="pf-strong">Заказ</p>
+            <p className="pf-order-number">{data.orderNumbers.join(', ')}</p>
+            {orderSub && <p className="pf-order-sub">{orderSub}</p>}
+          </div>
+          <Sep />
+          <div className="pf-meta">
+            <span>Счёт №{data.checkNumber}</span>
+            <span>{formatStamp(data.at, tz)}</span>
+          </div>
+        </>
+      ) : (
+        <div className="pf-head">
+          <p className={data.precheck ? 'pf-strong' : 'pf-title'}>Счёт №{data.checkNumber}</p>
+          <p>{formatStamp(data.at, tz)}</p>
+          {orderSub && <p className="pf-strong">{orderSub}</p>}
+        </div>
+      )}
+      {data.status === 'VOID' && <p className="pf-strong pf-center">Аннулирован</p>}
+      {data.cashier && <Info label={data.cashier.label}>{data.cashier.name}</Info>}
 
       <Sep />
-      {groupLines(check.items).map(({ key, game, orders, tableId }) => (
-        <Fragment key={key}>
-          {game ? (
-            <div className="pf-item">
-              <Row label={game.title} value={money(game.amount)} />
-              {game.startedAt != null && game.stoppedAt != null && (
+      {data.groups.map((g) => (
+        <Fragment key={g.key}>
+          {g.heading && <p className="pf-item pf-strong">{g.heading}</p>}
+          {g.items.map((item) => (
+            <div key={item.id} className="pf-item">
+              <Row label={<span className="pf-name">{item.name}</span>} value={money(item.amount)} />
+              {item.options.length > 0 && <p className="pf-sub">{item.options.join(' · ')}</p>}
+              {item.qty != null && item.qty > 1 && item.unitPrice != null && (
                 <p className="pf-sub">
-                  {formatClock(game.startedAt, tz)}–{formatClock(game.stoppedAt, tz)} · {formatMinutes(game.playedSeconds ?? 0)}
+                  {item.qty} × {money(item.unitPrice)}
                 </p>
               )}
-            </div>
-          ) : (
-            game || tableId != null ? (
-              <p className="pf-item pf-strong">Бар{tableId != null && names?.get(tableId) ? ` · ${names.get(tableId)}` : ''}</p>
-            ) : null
-          )}
-          {/* Bar line: the product on its own line, «2 × 600 ₸ … 1 200 ₸» under it. */}
-          {orders.map((item) => (
-            <div key={item.id} className="pf-item">
-              <p>{item.title}</p>
-              <Row
-                sub
-                label={item.qty != null && item.unitPrice != null ? `${item.qty} × ${money(item.unitPrice)}` : ''}
-                value={money(item.amount)}
-              />
+              {item.span && (
+                <p className="pf-sub">
+                  {formatClock(item.span.from, tz)}–{formatClock(item.span.to, tz)} · {formatMinutes(item.span.seconds)}
+                </p>
+              )}
             </div>
           ))}
         </Fragment>
       ))}
+      {data.groups.length === 0 && <p className="pf-center">Позиций нет</p>}
 
       <Sep />
-      {discounted && <Row label="Сумма" value={money(check.subtotal)} />}
-      {discounted && (
+      {data.discount && (
         <>
-          <Row
-            label={check.discount?.kind === 'PERCENT' ? `Скидка ${check.discount.value}%` : 'Скидка'}
-            value={`−${money(check.discountAmount)}`}
-          />
-          {check.discount?.reason && <p className="pf-sub">{check.discount.reason}</p>}
+          <Row label="Сумма" value={money(data.subtotal)} />
+          <Row label={data.discount.label} value={`−${money(data.discount.amount)}`} />
+          {data.discount.reason && <p className="pf-sub">{data.discount.reason}</p>}
         </>
       )}
-      <Row label="Итого" value={money(check.total)} big />
+      <div className="pf-row pf-total">
+        <span className="pf-label">ИТОГО</span>
+        <span className="pf-value">{money(data.total)}</span>
+      </div>
 
-      {(payments.length > 0 || refunds.length > 0) && (
+      {(data.payments.length > 0 || data.refunds.length > 0) && (
         <>
           <Sep />
-          {payments.map((p) => (
+          {data.payments.map((p) => (
             <div key={p.id} className="pf-item">
-              <Row
-                label={timed ? `${METHOD_LABEL[p.method]} · ${formatClock(p.at, tz)}` : METHOD_LABEL[p.method]}
-                value={money(p.amount)}
-              />
+              <Row label={p.at != null ? `${p.label} · ${formatClock(p.at, tz)}` : p.label} value={money(p.amount)} />
               {p.tendered != null && (
                 <>
                   <Row sub label="Получено" value={money(p.tendered)} />
@@ -134,23 +163,48 @@ export function Receipt({
               )}
             </div>
           ))}
-          {refunds.map((p) => (
-            <div key={p.id} className="pf-item">
-              <Row label={`Возврат · ${METHOD_LABEL[p.method]}`} value={`−${money(p.amount)}`} />
-              {p.reason && <p className="pf-sub">{p.reason}</p>}
+          {data.refunds.map((r) => (
+            <div key={r.id} className="pf-item">
+              <Row label={r.label} value={`−${money(r.amount)}`} />
+              {r.reason && <p className="pf-sub">{r.reason}</p>}
             </div>
           ))}
         </>
       )}
-
-      {(check.status === 'PAID' || check.paid > 0 || pre) && <Sep />}
-      {(check.status === 'PAID' || check.paid > 0) && <Row label="Оплачено" value={money(check.paid)} strong />}
-      {check.refunded > 0 && <Row label="Возвращено" value={money(check.refunded)} strong />}
-      {pre && <Row label="К оплате" value={money(check.due)} big />}
+      {(data.paid != null || data.refunded != null || data.due != null) && <Sep />}
+      {data.paid != null && <Row label="Оплачено" value={money(data.paid)} strong />}
+      {data.refunded != null && <Row label="Возвращено" value={money(data.refunded)} strong />}
+      {data.due != null && <Row label="К оплате" value={money(data.due)} big />}
 
       <Sep />
-      <p className="pf-center pf-strong">{game ? 'Спасибо за игру!' : 'Спасибо!'}</p>
-      <p className="pf-center pf-notice">Не является фискальным чеком</p>
+      {data.thanks.map((line, i) => (
+        <p key={i} className="pf-thanks">
+          {line}
+        </p>
+      ))}
+      {extras && (
+        <div className="pf-extra">
+          {data.wifi && (
+            <p>
+              Wi-Fi: <span className="pf-strong">{data.wifi.name}</span>
+              {data.wifi.password && (
+                <>
+                  {' '}
+                  · пароль: <span className="pf-strong">{data.wifi.password}</span>
+                </>
+              )}
+            </p>
+          )}
+          {data.instagram && <p>Instagram: {data.instagram}</p>}
+          {data.qr && (
+            <div className="pf-qr">
+              <QrCode value={data.qr.url} size={84} label={data.qr.caption} />
+              <p>{data.qr.caption}</p>
+            </div>
+          )}
+        </div>
+      )}
+      <p className="pf-center pf-notice">{data.notice}</p>
     </div>
   );
 }

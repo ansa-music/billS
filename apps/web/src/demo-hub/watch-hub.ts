@@ -13,7 +13,7 @@
  */
 import initSqlJs from 'sql.js';
 import wasmUrl from 'sql.js/dist/sql-wasm-browser.wasm?url';
-import { TRIAL_WATCH, TRIAL_WATCH_READ_ONLY_MESSAGE, watchRequestAllowed, watchSnapshotNewer } from '@bills/domain';
+import { parseTrialCloudInfo, TRIAL_IN_CLOUD_MESSAGE, TRIAL_WATCH, TRIAL_WATCH_READ_ONLY_MESSAGE, watchRequestAllowed, watchSnapshotNewer } from '@bills/domain';
 import { systemClock } from '@ts-hub/clock.ts';
 import { openDb } from '@ts-hub/db.ts';
 import { buildApp } from '@ts-hub/http/app.ts';
@@ -164,6 +164,12 @@ async function bootWatch(token: string): Promise<void> {
     const [sql, state] = await Promise.all([initSqlJs({ locateFile: () => wasmUrl }), fetchWatchState(token)]);
     SQL = sql;
     updateWatchView({ venue: state.venue, checkedAt: Date.now() });
+    // The café moved to the cloud cash desk: the phone shows the way there instead of the old copy.
+    const cloud = parseTrialCloudInfo(state.cloud);
+    if (cloud) {
+      updateWatchView({ cloud });
+      throw new WatchProblem('cloud', TRIAL_IN_CLOUD_MESSAGE);
+    }
     if (state.snapshotAt === null) {
       throw new WatchProblem('empty', 'Касса ещё не прислала данные. Откройте TS на кассе с интернетом и подождите минуту.');
     }
@@ -225,6 +231,12 @@ async function bootWatch(token: string): Promise<void> {
     try {
       const state = await fetchWatchState(token);
       updateWatchView({ venue: state.venue, checkedAt: Date.now(), offline: false });
+      const cloud = parseTrialCloudInfo(state.cloud);
+      if (cloud) {
+        // «Касса переехала в облако» over the copy (WatchBanner.tsx); the copy stays for «Посмотреть старые данные».
+        updateWatchView({ cloud });
+        return;
+      }
       if (watchSnapshotNewer(state.snapshotAt, current.snapshotAt)) {
         const snap = await fetchWatchSnapshot(token);
         if (watchSnapshotNewer(snap.snapshotAt, current.snapshotAt)) await swap(fromBase64(snap.snapshot), snap.snapshotAt);

@@ -30,7 +30,7 @@ import {
   planLabel,
 } from './license-form.ts';
 import { OfflineBanner, Section, loadingText } from './shared.tsx';
-import { TrialsSection, useTrialsPoll } from './Trials.tsx';
+import { BoughtSection, TrialsSection, useTrialsPoll } from './Trials.tsx';
 import { pendingCount, waitingText } from './trials.ts';
 
 const ZONE = 'Asia/Almaty';
@@ -552,7 +552,9 @@ export function PlatformCabinet({
   // «Пробные версии» are polled here, on both tabs, so the tab shows how many requests wait.
   const trialsShown = TRIALS_AVAILABLE && can(me.role, 'platform.view');
   const trials = useTrialsPoll(trialsShown);
-  const waiting = trialsShown ? pendingCount(trials.data) : 0;
+  const waiting = trialsShown ? pendingCount(trials.data?.trials) : 0;
+  // «Коды для входа» of the cafés: the platform owner only (not the support team).
+  const owner = me.role === 'owner';
   // A saved card shows the cloud's answer at once; the next poll brings the same and drops it.
   useEffect(() => setOverrides({}), [data]);
 
@@ -605,7 +607,7 @@ export function PlatformCabinet({
       )}
 
       {can(me.role, 'platform.view') && tab === 'trials' ? (
-        <TrialsSection editable={editable} poll={trials} />
+        <TrialsSection editable={editable} owner={owner} poll={trials} />
       ) : can(me.role, 'platform.view') ? (
         <>
           {waiting > 0 && (
@@ -621,6 +623,7 @@ export function PlatformCabinet({
               }}
             />
           )}
+          {trialsShown && <BoughtSection editable={editable} owner={owner} poll={trials} />}
           {current && (
             <ClientCard
               key={current.companyId}

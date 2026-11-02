@@ -1,48 +1,17 @@
-import type { CheckItemView, CheckView, HubState, Minor, OrderView, SessionView } from '@bills/domain';
+import type { CheckItemView, CheckLineGroup, CheckView, HubState, Minor, OrderView, SessionView } from '@bills/domain';
+import { groupCheckLines } from '@bills/domain';
 
 /**
  * Check lines and what is owed: games together with their bar orders.
- * Shared by the pay dialog, the unpaid panel, the «Счета» section and the printed receipt.
+ * Shared by the pay dialog, the unpaid panel, the «Счета» section and the printed receipt
+ * (the receipt groups through the same domain function, packages/domain receipt.ts).
  */
 
 /** A game line and the bar lines ordered at that game. `game` is null for bar lines whose game is not on the check. */
-export interface LineGroup {
-  key: string;
-  game: CheckItemView | null;
-  orders: CheckItemView[];
-  /** The table the game (or the orders) were on. */
-  tableId: string | null;
-}
+export type LineGroup = CheckLineGroup;
 
-/**
- * The HUB lists each GAME line followed by its ORDER lines, then the bar lines whose game is
- * not on the check. Groups by game (ORDER lines carry the sessionId of the game they were
- * made at) and keeps that order.
- */
-export function groupLines(items: readonly CheckItemView[]): LineGroup[] {
-  const groups: LineGroup[] = [];
-  const bySession = new Map<string, LineGroup>();
-  for (const item of items) {
-    const known = item.sessionId != null ? bySession.get(item.sessionId) : undefined;
-    if (item.kind === 'GAME') {
-      if (known && known.game === null) {
-        known.game = item;
-        known.key = item.id;
-        continue;
-      }
-      const group: LineGroup = { key: item.id, game: item, orders: [], tableId: item.tableId };
-      groups.push(group);
-      if (item.sessionId != null) bySession.set(item.sessionId, group);
-    } else if (known) {
-      known.orders.push(item);
-    } else {
-      const group: LineGroup = { key: `bar:${item.id}`, game: null, orders: [item], tableId: item.tableId };
-      groups.push(group);
-      if (item.sessionId != null) bySession.set(item.sessionId, group);
-    }
-  }
-  return groups;
-}
+/** Games with their bar lines, in the HUB's order (groupCheckLines). */
+export const groupLines = groupCheckLines;
 
 /** Sum of the bar (ORDER) lines. */
 export function barOf(items: readonly CheckItemView[]): Minor {
