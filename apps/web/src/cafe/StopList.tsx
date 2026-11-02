@@ -31,7 +31,18 @@ export function StopListDialog({ actor, onClose, notify }: { actor: string; onCl
   };
 
   return (
-    <Modal title="Стоп-лист" onClose={onClose} className="modal-wide">
+    <Modal
+      title="Стоп-лист"
+      onClose={onClose}
+      className="modal-wide"
+      footer={
+        <div className="modal-actions">
+          <button type="button" className="btn btn-primary" onClick={onClose}>
+            Готово
+          </button>
+        </div>
+      }
+    >
       <p className="hint">Нажмите на позицию, которая закончилась: на кассе она пропадёт. Нажмите ещё раз, когда появится.</p>
       {error ? (
         <p className="form-error">{error}</p>

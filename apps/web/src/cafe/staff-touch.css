@@ -1,0 +1,1706 @@
+/* Coffee shop staff screens on phones and tablets (the staff work from their own devices):
+   the barista's KDS (#/barista), the guest board (#/board), the café navigation, and «Склад»,
+   «Счета» and «Стоп-лист» at 360–1366 px. Imported once from Shell.tsx.
+
+   Scope: the KDS and the board use their own classes (kds-*, gb-*). Everything that touches
+   a screen shared with the billiard club (shell, cash dialogs, «Счета») sits under
+   html[data-business='cafe'] (set by Shell.tsx while a coffee shop is open), so a billiard
+   club looks and behaves exactly as before. */
+
+/* ── Barista KDS (#/barista) ─────────────────────────────────────────────── */
+/* Read from a step or two away: big numbers and names, one big button, colour by waiting time
+   (normal → amber → red), must-not-miss options (plant milk, decaf) in their own colour.
+   Layouts by width: ≥1000 px three equal columns; 600–999 px (portrait tablet) three columns
+   with «Готовы» narrow, as small tickets; <600 px (phone) tabs.
+   From 600 px the KDS fills the window (useFillHeight → --fill-h) and the columns scroll inside. */
+
+.kds {
+  --kds-new: var(--info);
+  --kds-prep: #b59bff;
+  --kds-ready: #5cc98b;
+  --kds-on-ready: #06200f;
+  --kds-attn: #f08cff;
+  --kds-attn-bg: color-mix(in oklab, var(--kds-attn) 20%, var(--surface));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) .kds {
+    --kds-prep: #5b3fc4;
+    --kds-ready: #17784a;
+    --kds-on-ready: #ffffff;
+    --kds-attn: #9a1fb8;
+  }
+}
+
+:root[data-theme='light'] .kds {
+  --kds-prep: #5b3fc4;
+  --kds-ready: #17784a;
+  --kds-on-ready: #ffffff;
+  --kds-attn: #9a1fb8;
+}
+
+/* The page fills the window on tablets and PCs: no page scroll, the columns scroll. */
+@media (min-width: 600px) {
+  .shell[data-section='barista'] .content {
+    padding-bottom: 12px;
+  }
+
+  .kds {
+    height: max(460px, calc(var(--fill-h, 100dvh) - 12px));
+  }
+}
+
+/* Top strip: how many in work, the tools, then «Всего в работе». */
+.kds-bar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: 'load tools' 'allday allday';
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+/* A very wide screen (a 1920 px PC): everything on one line, «Всего в работе» still gets room. */
+@media (min-width: 1700px) {
+  .kds-bar {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: 'load allday tools';
+  }
+}
+
+.kds-load {
+  grid-area: load;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.kds-load-num {
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.kds-load-label {
+  font-size: 17px;
+  font-weight: 650;
+  color: var(--text-2);
+}
+
+.kds-tools {
+  grid-area: tools;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.kds-tool {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 650;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--dur), transform var(--dur-fast);
+}
+
+.kds-tool:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.kds-tool:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.kds-tool[aria-pressed='false'] {
+  color: var(--muted);
+}
+
+.kds-tool:focus-visible,
+.kds-next:focus-visible,
+.kds-back:focus-visible,
+.kds-cancel:focus-visible,
+.kds-tab:focus-visible,
+.kds-undo button:focus-visible,
+.kds-hint:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.kds-tool-count {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--kds-ready);
+  color: var(--kds-on-ready);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 22px;
+  text-align: center;
+}
+
+.kds-offline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.kds-offline .conn-dot {
+  background: var(--danger);
+}
+
+/* «Всего в работе»: one line of chips, swiped sideways when long. */
+.kds-allday {
+  grid-area: allday;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+}
+
+.kds-allday-empty {
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.kds-allday-title {
+  flex: none;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.kds-allday-list {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.kds-allday-list::-webkit-scrollbar {
+  display: none;
+}
+
+.kds-allday-item {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px 0 6px;
+  border-radius: 18px;
+  background: var(--surface-2);
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.kds-allday-qty {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border-radius: 14px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 28px;
+  text-align: center;
+}
+
+.kds-attn {
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--kds-attn-bg);
+  color: var(--kds-attn);
+  font-weight: 800;
+}
+
+/* Hints: sound still locked (the first tap anywhere unlocks it), screen may go dark. */
+.kds-hint {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  margin: 0;
+  padding: 10px 14px;
+  border: 2px solid var(--info);
+  border-radius: 14px;
+  background: var(--info-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  text-align: left;
+}
+
+.kds-hint .icon {
+  flex: none;
+  color: var(--info);
+}
+
+.kds-hint-sound {
+  cursor: pointer;
+  animation: kds-hint 1.6s ease-in-out infinite;
+}
+
+.kds-hint-wake {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.kds-hint-wake .icon {
+  color: var(--warn);
+}
+
+.kds-hint > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.kds-hint-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+@keyframes kds-hint {
+  50% {
+    border-color: color-mix(in oklab, var(--info) 40%, transparent);
+  }
+}
+
+/* Phone tabs: hidden from 600 px, where every column is on screen. */
+.kds-tabs {
+  display: none;
+}
+
+.kds-board {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.kds-col {
+  --stage-c: var(--kds-new);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-top: 5px solid var(--stage-c);
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--surface-2) 70%, var(--bg));
+  container-type: inline-size;
+}
+
+.kds-col[data-stage='PREPARING'] {
+  --stage-c: var(--kds-prep);
+}
+
+.kds-col[data-stage='READY'] {
+  --stage-c: var(--kds-ready);
+}
+
+.kds-col-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.kds-col-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.kds-col-head h2::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--stage-c);
+}
+
+.kds-col-count {
+  min-width: 40px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 18px;
+  background: var(--stage-c);
+  color: var(--bg);
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 36px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.kds-empty {
+  margin: 0;
+  padding: 32px 16px;
+  color: var(--muted);
+  font-size: 17px;
+  text-align: center;
+}
+
+.kds-cards {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 10px;
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+/* A card. Its edge says how long the guest has waited: ok → amber after 5 min → red after 10. */
+.kds-card {
+  --edge: var(--border-strong);
+  flex: none;
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  border: 3px solid var(--edge);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  font-size: 18px;
+  font-size: clamp(17px, 6cqi, 22px);
+  line-height: 1.25;
+}
+
+.kds-card[data-age='warn'] {
+  --edge: var(--warn);
+  background: color-mix(in oklab, var(--warn) 9%, var(--surface));
+}
+
+.kds-card[data-age='late'] {
+  --edge: var(--danger);
+  background: color-mix(in oklab, var(--danger) 11%, var(--surface));
+}
+
+.kds-card[data-age='ready'] {
+  --edge: color-mix(in oklab, var(--kds-ready) 55%, var(--border));
+}
+
+.kds-card[data-fresh] {
+  animation: kds-fresh 1s ease-in-out 0s 4;
+}
+
+@keyframes kds-fresh {
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--kds-new) 55%, transparent);
+  }
+}
+
+.kds-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+}
+
+/* A narrow column (portrait tablet): the head keeps one line. */
+@container (max-width: 270px) {
+  .kds-card-head {
+    gap: 4px;
+  }
+
+  .kds-timer .icon {
+    display: none;
+  }
+
+  .kds-service {
+    padding: 2px 7px;
+    font-size: 0.72em;
+  }
+
+  .kds-timer {
+    padding: 3px 6px;
+    font-size: 0.85em;
+  }
+}
+
+.kds-num {
+  margin-right: auto;
+  font-size: 2.5em;
+  font-weight: 800;
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.kds-service {
+  flex: none;
+  padding: 4px 10px;
+  border: 2px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: 0.8em;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.kds-service[data-service='TAKEAWAY'] {
+  border-color: var(--info);
+  background: var(--info);
+  color: var(--on-info);
+}
+
+.kds-timer {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  color: var(--text-2);
+  font-size: 0.95em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.kds-card[data-age='warn'] .kds-timer {
+  background: var(--warn);
+  color: var(--on-warn);
+}
+
+.kds-card[data-age='late'] .kds-timer {
+  background: var(--danger);
+  color: var(--on-danger);
+  animation: kds-late 1.4s ease-in-out infinite;
+}
+
+@keyframes kds-late {
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.kds-guest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: -4px 0 0;
+}
+
+.kds-guest-name {
+  font-size: 1.05em;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.kds-unpaid {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 0.75em;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.kds-items {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kds-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+}
+
+.kds-qty {
+  min-width: 2.1em;
+  padding: 1px 4px;
+  border-radius: 8px;
+  color: var(--text-2);
+  font-size: 1.05em;
+  font-weight: 800;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Two or more of the same: hard to miss. */
+.kds-item[data-many] .kds-qty {
+  background: var(--text);
+  color: var(--bg);
+}
+
+.kds-item-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.kds-item-name {
+  font-size: 1.12em;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.kds-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  color: var(--text-2);
+  font-size: 0.92em;
+  font-weight: 650;
+}
+
+.kds-opt {
+  padding: 0 7px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  overflow-wrap: anywhere;
+}
+
+/* Plant milk, decaf, no sugar: the wrong milk is the most common mistake at the bar. */
+.kds-opt[data-attn] {
+  background: var(--kds-attn-bg);
+  color: var(--kds-attn);
+  font-weight: 800;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--kds-attn) 45%, transparent);
+}
+
+.kds-summary {
+  display: none;
+  margin: 0;
+  color: var(--text-2);
+  font-size: 0.85em;
+}
+
+.kds-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 4px solid var(--warn);
+  border-radius: 8px;
+  background: var(--warn-soft);
+  color: var(--text);
+  font-size: 1em;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.kds-note .icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--warn);
+}
+
+.kds-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.kds-next {
+  flex: 1;
+  min-width: 0;
+  min-height: 64px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--kds-new);
+  color: var(--on-info);
+  font: inherit;
+  font-size: 1.2em;
+  font-weight: 800;
+  cursor: pointer;
+  transition: filter var(--dur), transform var(--dur-fast);
+}
+
+.kds-next[data-to='READY'] {
+  background: var(--kds-prep);
+  color: var(--bg);
+}
+
+.kds-next[data-to='ISSUED'] {
+  background: var(--kds-ready);
+  color: var(--kds-on-ready);
+}
+
+.kds-next:active:not(:disabled),
+.kds-back:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.kds-next:disabled,
+.kds-back:disabled,
+.kds-cancel:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.kds-back {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  min-height: 64px;
+  border: 2px solid var(--border-strong);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.kds-cancel {
+  flex: none;
+  min-height: 64px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--danger);
+  font: inherit;
+  font-size: 0.8em;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+/* «Вернуть» for the last step: a strip at the bottom for a few seconds. */
+.kds-undo {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: calc(100vw - 24px);
+  padding: 8px 8px 8px 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  background: var(--surface-3);
+  box-shadow: var(--shadow-lg);
+  transform: translateX(-50%);
+  animation: kds-undo-in var(--dur) var(--ease);
+}
+
+.kds-undo-text {
+  min-width: 0;
+  font-size: 17px;
+}
+
+.kds-undo-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 18px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.kds-undo-btn:disabled {
+  opacity: 0.55;
+}
+
+.kds-undo-close {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+@keyframes kds-undo-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+}
+
+/* «Выданные»: recall within 15 minutes. */
+.kds-issued {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kds-issued-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+
+.kds-issued-num {
+  min-width: 2ch;
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.kds-issued-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.kds-issued-text strong,
+.kds-issued-text .muted {
+  overflow-wrap: anywhere;
+}
+
+/* Portrait tablet: «Новые» and «Готовятся» get the room; «Готовы» is a narrow column of small
+   tickets (number, guest, what it is, «Выдан») — a portrait screen is tall, not wide. */
+@media (min-width: 600px) and (max-width: 999px) {
+  .kds-board {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(150px, 0.6fr);
+    gap: 10px;
+  }
+
+  .kds-col-head {
+    padding: 8px 10px;
+  }
+
+  .kds-col-head h2 {
+    font-size: 18px;
+  }
+
+  .kds-cards {
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .kds-card {
+    padding: 10px 12px 12px;
+  }
+
+  .kds-col[data-stage='READY'] .kds-card {
+    gap: 6px;
+    padding: 8px 10px 10px;
+    font-size: 17px;
+  }
+
+  .kds-col[data-stage='READY'] .kds-card-head {
+    flex-wrap: wrap;
+    gap: 4px 6px;
+  }
+
+  .kds-col[data-stage='READY'] .kds-num {
+    flex: 1 0 100%;
+    font-size: 2.3em;
+  }
+
+  .kds-col[data-stage='READY'] :is(.kds-items, .kds-note, .kds-cancel, .kds-back) {
+    display: none;
+  }
+
+  .kds-col[data-stage='READY'] .kds-summary {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+
+  .kds-col[data-stage='READY'] .kds-next {
+    min-height: 56px;
+  }
+
+  /* The tools fit one row: the less used ones keep only their icon. */
+  .kds-tool[href] .kds-tool-label,
+  .kds-tool[aria-pressed] .kds-tool-label {
+    display: none;
+  }
+
+  .kds-tool[href],
+  .kds-tool[aria-pressed] {
+    padding: 0;
+    width: 48px;
+  }
+}
+
+/* Phones: one stage at a time, picked with big tabs; the page scrolls as usual. */
+@media (max-width: 599px) {
+  .kds {
+    gap: 8px;
+  }
+
+  .kds-bar {
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .kds-tools {
+    gap: 4px;
+  }
+
+  /* «39 / в работе» stacked: the four tools keep one row on a 360 px phone. */
+  .kds-load {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .kds-load-num {
+    font-size: 30px;
+  }
+
+  .kds-load-label {
+    font-size: 13px;
+  }
+
+  .kds-tool {
+    padding: 0;
+    width: 48px;
+  }
+
+  .kds-tool-label,
+  .kds-tool-fs,
+  .kds-allday-title {
+    display: none;
+  }
+
+  .kds-offline {
+    padding: 0 10px;
+  }
+
+  .kds-tool-count {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+  }
+
+  .kds-tabs {
+    position: sticky;
+    top: 56px;
+    z-index: 5;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--surface);
+  }
+
+  .kds-tab {
+    --stage-c: var(--kds-new);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-height: 60px;
+    padding: 4px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--text-2);
+    font: inherit;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .kds-tab[data-stage='PREPARING'] {
+    --stage-c: var(--kds-prep);
+  }
+
+  .kds-tab[data-stage='READY'] {
+    --stage-c: var(--kds-ready);
+  }
+
+  .kds-tab[aria-selected='true'] {
+    background: color-mix(in oklab, var(--stage-c) 18%, var(--surface));
+    color: var(--text);
+    box-shadow: inset 0 -4px 0 var(--stage-c);
+  }
+
+  .kds-tab-count {
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .kds-tab[data-alert] {
+    animation: kds-tab-alert 1s ease-in-out infinite;
+  }
+
+  @keyframes kds-tab-alert {
+    50% {
+      background: color-mix(in oklab, var(--kds-new) 30%, var(--surface));
+    }
+  }
+
+  .kds-board {
+    display: block;
+  }
+
+  .kds-col {
+    border: 0;
+    background: none;
+  }
+
+  .kds-col:not([data-active]) {
+    display: none;
+  }
+
+  .kds-col-head {
+    display: none;
+  }
+
+  .kds-cards {
+    padding: 0;
+    overflow: visible;
+  }
+
+  .kds-card {
+    font-size: 19px;
+  }
+
+  .kds-undo {
+    bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+
+  .kds-undo-text {
+    font-size: 16px;
+  }
+
+  .kds-issued-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .kds-issued-row .btn {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kds-card[data-fresh],
+  .kds-card[data-age='late'] .kds-timer,
+  .kds-hint-sound,
+  .kds-tab[data-alert],
+  .kds-undo {
+    animation: none;
+  }
+}
+
+/* ── Guest board (#/board) ───────────────────────────────────────────────── */
+/* Exactly one screen, never a scrollbar: a 16:9 TV gets «Готовится» | «Готово — заберите» side
+   by side, a portrait tablet one above the other. Board.tsx sizes the numbers to fill their box
+   (the bigger the fewer); headings and the clock scale with the screen. */
+
+.gb {
+  --gb-ready: #5cc98b;
+  --gb-ready-ink: #8be0ae;
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) .gb {
+    --gb-ready: #17784a;
+    --gb-ready-ink: #0f6139;
+  }
+}
+
+:root[data-theme='light'] .gb {
+  --gb-ready: #17784a;
+  --gb-ready-ink: #0f6139;
+}
+
+.gb[data-idle] {
+  cursor: none;
+}
+
+.gb-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  padding: clamp(8px, 1.6vmin, 20px) clamp(12px, 2.4vmin, 32px);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.gb-brand {
+  display: flex;
+  align-items: center;
+  gap: clamp(10px, 1.6vmin, 20px);
+  min-width: 0;
+}
+
+.gb-brand h1 {
+  margin: 0;
+  font-size: clamp(20px, 3.6vmin, 48px);
+  font-weight: 780;
+  letter-spacing: -0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gb-logo,
+.gb-mark {
+  flex: none;
+  width: clamp(36px, 5.6vmin, 72px);
+  height: clamp(36px, 5.6vmin, 72px);
+  object-fit: contain;
+}
+
+.gb-tools {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gb-clock {
+  margin-right: 6px;
+  font-size: clamp(20px, 3.6vmin, 48px);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.gb-offline {
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: clamp(14px, 2vmin, 22px);
+  font-weight: 750;
+}
+
+.gb-icon,
+.gb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 48px;
+  height: 48px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  transition: opacity 0.4s ease;
+}
+
+.gb-btn {
+  padding: 0 16px;
+}
+
+.gb-btn-sound {
+  border: 2px solid var(--info);
+  background: var(--info-soft);
+  animation: kds-hint 1.6s ease-in-out infinite;
+}
+
+.gb-icon:focus-visible,
+.gb-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* A TV shows numbers, not buttons: they fade out until the next touch or mouse move. */
+.gb[data-idle] .gb-fade {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.gb-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 0.84fr) minmax(0, 1.16fr);
+  min-height: 0;
+}
+
+.gb-col {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(8px, 1.6vmin, 20px);
+  min-width: 0;
+  min-height: 0;
+  padding: clamp(12px, 2.4vmin, 32px);
+}
+
+.gb-col + .gb-col {
+  border-left: 1px solid var(--border);
+}
+
+.gb-col[data-kind='ready'] {
+  background: color-mix(in oklab, var(--gb-ready) 7%, var(--bg));
+}
+
+.gb-col h2 {
+  margin: 0;
+  font-size: clamp(22px, 4.6vmin, 60px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--text-2);
+}
+
+.gb-col[data-kind='ready'] h2 {
+  color: var(--gb-ready-ink);
+}
+
+/* The box the numbers fill (measured by Board.tsx). */
+.gb-fit {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.gb-numbers {
+  display: grid;
+  align-content: start;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  line-height: 1;
+}
+
+.gb-numbers li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 0.09em 0.1em;
+  border-radius: 0.12em;
+  background: var(--surface);
+  border: 2px solid var(--border);
+}
+
+.gb-col[data-kind='ready'] .gb-numbers li {
+  background: color-mix(in oklab, var(--gb-ready) 14%, var(--surface));
+  border-color: color-mix(in oklab, var(--gb-ready) 55%, transparent);
+}
+
+.gb-num {
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.gb-col[data-kind='preparing'] .gb-num {
+  color: var(--text-2);
+}
+
+.gb-col[data-kind='ready'] .gb-num {
+  color: var(--text);
+}
+
+.gb-name {
+  max-width: 100%;
+  margin-top: 0.06em;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 0.26em;
+  font-weight: 650;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gb-more {
+  border-style: dashed !important;
+  background: transparent !important;
+}
+
+.gb-more .gb-num {
+  color: var(--muted) !important;
+  font-size: 0.7em;
+}
+
+.gb-numbers li[data-fresh] {
+  animation: gb-pop 1s ease-in-out 0s 6;
+}
+
+@keyframes gb-pop {
+  50% {
+    background: color-mix(in oklab, var(--gb-ready) 34%, var(--surface));
+    transform: scale(1.04);
+  }
+}
+
+.gb-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(20px, 3.6vmin, 44px);
+  font-weight: 650;
+}
+
+/* Portrait (a tablet on the counter, a TV turned upright): one above the other. */
+@media (orientation: portrait) {
+  .gb-cols {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  }
+
+  .gb-col + .gb-col {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 480px) {
+  .gb-btn-sound {
+    padding: 0 10px;
+    font-size: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gb-numbers li[data-fresh],
+  .gb-btn-sound {
+    animation: none;
+  }
+}
+
+/* ── Café navigation: top bar, rail, phone tabs ─────────────────────────── */
+/* Shell.tsx renders «Сменить» in the top bar for a coffee shop only; it shows on tablets (the
+   rail layout) and on touch screens from 768 px, where a tablet is passed between people. A PC
+   with a mouse keeps the person menu, a phone has «Сменить» under «Ещё». */
+.topbar-switch {
+  display: none;
+}
+
+@media (min-width: 768px) and (max-width: 1180px), (min-width: 768px) and (pointer: coarse) {
+  html[data-business='cafe'] .topbar-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 0 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    background: var(--surface-2);
+    color: var(--text);
+    font: inherit;
+    font-size: 15px;
+    font-weight: 700;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  html[data-business='cafe'] .topbar-switch:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  /* Room for it: the person pill keeps the avatar and a short name; the theme switch is in
+     the person menu («Тема»), so the bar does not repeat it. */
+  html[data-business='cafe'] .topbar .actor-name {
+    max-width: 100px;
+  }
+
+  html[data-business='cafe'] .topbar-theme {
+    display: none;
+  }
+}
+
+/* Touch targets in the café shell: rail items, top-bar buttons and phone tabs ≥ 48 px. */
+@media (max-width: 1180px), (pointer: coarse) {
+  html[data-business='cafe'] .topbar .icon-btn,
+  html[data-business='cafe'] .actor-pill {
+    min-width: 48px;
+    min-height: 48px;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1180px) {
+  /* The rail: full words under the icons on two lines rather than «Бари…». */
+  html[data-business='cafe'] .sidebar .nav-label-short {
+    width: 100%;
+    max-height: 2.4em;
+    white-space: normal;
+    font-size: 11.5px;
+    line-height: 1.2;
+  }
+
+  html[data-business='cafe'] .sidebar .nav-link {
+    min-height: 64px;
+    padding-inline: 2px;
+  }
+}
+
+@media (max-width: 767px) {
+  /* 360 px: the title gives way first, the clock and the buttons never leave the bar. */
+  html[data-business='cafe'] .topbar-title {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  html[data-business='cafe'] .topbar-title-text {
+    min-width: 0;
+  }
+
+  html[data-business='cafe'] .topbar-title h1 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  html[data-business='cafe'] .topbar-tools {
+    flex: none;
+  }
+
+  /* «Ещё»: who is signed in and a big «Сменить» on top, every other page below. */
+  html[data-business='cafe'] .more-sheet .more-who .btn {
+    min-height: 52px;
+    padding: 0 18px;
+    font-size: var(--fs-base);
+  }
+
+  html[data-business='cafe'] .more-links .nav-link {
+    min-height: 56px;
+  }
+
+  html[data-business='cafe'] .more-links .nav-label {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.2;
+  }
+
+  html[data-business='cafe'] .bottom-nav .nav-link {
+    min-height: 60px;
+  }
+}
+
+@media (max-width: 380px) {
+  html[data-business='cafe'] .topbar {
+    gap: 4px;
+    padding-inline: 8px 4px;
+  }
+
+  html[data-business='cafe'] .topbar-title {
+    gap: 8px;
+  }
+
+  html[data-business='cafe'] .topbar-mark {
+    width: 32px;
+    height: 32px;
+  }
+
+  html[data-business='cafe'] .topbar-clock {
+    padding: 0 2px;
+  }
+}
+
+/* ── Склад, Счета, Стоп-лист on phones and tablets ──────────────────────── */
+/* «Склад» is café-only and styled in stock/stock.css. Here: «Счета» (cash/*, sections/Checks.tsx,
+   shared with the billiard club — so everything is under html[data-business='cafe']), the cash
+   dialogs and «Стоп-лист». */
+
+/* «Счета»: buttons, printer switch and day pickers ≥ 48 px on phones and tablets (up to a
+   1280 px landscape tablet) and on any touch screen; a 1366 px PC keeps its sizes. */
+@media (max-width: 1300px), (pointer: coarse) {
+  /* Not inside a dialog: dialog buttons are bigger already (styles.css). */
+  html[data-business='cafe'] :is(.cash-panel, .day-checks, .archive, .shift-banner):not(.modal *) :is(.btn, .paper-opt),
+  html[data-business='cafe'] .day-picker {
+    min-height: 48px;
+  }
+
+  html[data-business='cafe'] :is(.cash-panel, .day-checks):not(.modal *) .btn-small {
+    font-size: var(--fs-base);
+  }
+
+  html[data-business='cafe'] .pay-discount summary {
+    min-height: 48px;
+  }
+}
+
+/* «Чеки за день» and «Архив» when their card is narrow (a phone, or «Архив» beside the checks
+   on a PC): a card per check — number and sum on top, what was ordered under them, then the
+   status, and the cancel button across the card. Wide cards keep the four-column rows. */
+html[data-business='cafe'] :is(.day-checks, .archive) {
+  container-type: inline-size;
+}
+
+@container (max-width: 520px) {
+  html[data-business='cafe'] :is(.day-row, .archive-row) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 12px;
+  }
+
+  html[data-business='cafe'] :is(.day-row, .archive-row) > .row-main {
+    display: contents;
+  }
+
+  html[data-business='cafe'] :is(.day-row, .archive-row) > .row-main > strong {
+    grid-row: 1;
+    grid-column: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  html[data-business='cafe'] :is(.day-row, .archive-row) > .row-amount {
+    grid-row: 1;
+    grid-column: 2;
+    align-self: start;
+    font-size: var(--fs-lg);
+  }
+
+  html[data-business='cafe'] :is(.day-row, .archive-row) > .row-main > :not(strong) {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+
+  html[data-business='cafe'] :is(.day-row, .archive-row) > .tag {
+    grid-row: auto;
+    grid-column: 1;
+    justify-self: start;
+  }
+
+  html[data-business='cafe'] :is(.day-row, .archive-row) > .row-sub {
+    grid-row: auto;
+    grid-column: 2;
+    text-align: right;
+  }
+
+  html[data-business='cafe'] .day-row > .row-sub:empty {
+    display: none;
+  }
+
+  html[data-business='cafe'] .day-row-actions {
+    order: 1;
+    margin-top: 2px;
+  }
+
+  html[data-business='cafe'] .day-row-actions .btn {
+    flex: 1 1 100%;
+  }
+}
+
+/* Dialogs. A long title («Сырьё: Молоко овсяное …») takes at most two lines, and the head
+   never shrinks under it (it was cut off at the top of a phone sheet). */
+html[data-business='cafe'] .modal-head {
+  flex-shrink: 0;
+}
+
+html[data-business='cafe'] .modal-head h2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* The dialog is the card: no box drawn inside it around the report or the change. */
+html[data-business='cafe'] .modal :is(.report, .pay-preview) {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+/* «Выручка» in the X/Z report: ordinary weight, like the rest of the report. */
+html[data-business='cafe'] .modal .report-revenue {
+  font-weight: inherit;
+  letter-spacing: normal;
+}
+
+/* Long names and dates in «Открыта 02.11 15:25 · …»: the value moves under its label instead of
+   running off a phone screen (sums keep their no-break spaces, so they never split). */
+html[data-business='cafe'] .modal .kv > div {
+  flex-wrap: wrap;
+}
+
+html[data-business='cafe'] .modal .kv dd {
+  margin-left: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  /* Two buttons share one line when they fit («Закрыть · Печать», «Предчек · Принять оплату»):
+     on a 640 px tall phone the list above keeps its room. */
+  html[data-business='cafe'] .modal-actions .btn {
+    flex: 1 1 auto;
+    padding-inline: var(--space-4);
+  }
+}
+
+/* X/Z report on phones: one card per payment method instead of a four-column table. */
+@media (max-width: 480px) {
+  html[data-business='cafe'] .report-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  html[data-business='cafe'] .report-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  html[data-business='cafe'] .report-table tbody tr:nth-child(even) {
+    background: none;
+  }
+
+  html[data-business='cafe'] .report-table tr.report-total {
+    border-bottom: 0;
+  }
+
+  html[data-business='cafe'] .report-table :is(th, td) {
+    padding: 0;
+    border: 0;
+    white-space: normal;
+  }
+
+  html[data-business='cafe'] .report-table th[scope='row'] {
+    grid-row: 1;
+    grid-column: 1;
+    font-size: var(--fs-base);
+    font-weight: 650;
+  }
+
+  html[data-business='cafe'] .report-table td:last-child {
+    grid-row: 1;
+    grid-column: 2;
+    font-size: var(--fs-base);
+    font-weight: 700;
+  }
+
+  html[data-business='cafe'] .report-table td:not(:last-child) {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--text-2);
+    font-weight: 500;
+  }
+
+  html[data-business='cafe'] .report-table td:not(:last-child)::before {
+    content: attr(data-label);
+    color: var(--muted);
+  }
+}
+
+/* «Открыть смену» from the banner: the form's own panel frame and «Смена закрыта» title are
+   redundant inside a dialog that already says «Открыть смену». */
+html[data-business='cafe'] .modal .cash-panel {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+html[data-business='cafe'] .modal .cash-panel > .panel-head {
+  display: none;
+}
+
+/* «Стоп-лист»: a long product name wraps beside its «есть / нет в наличии» tag. */
+.stop-item > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.stop-item > .tag {
+  flex: none;
+}
