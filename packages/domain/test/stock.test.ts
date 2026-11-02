@@ -128,7 +128,7 @@ test('validateRecipe names every problem', () => {
   const known = { ingredientIds: new Set(['coffee', 'milk', 'oat']), choiceIds: new Set(['l', 'oat']) };
   assert.deepEqual(validateRecipe({ items: [{ ingredientId: 'coffee', quantity: 18 }], options: [] }, known), []);
   assert.deepEqual(validateRecipe({ items: [], options: [] }, known), [], 'an empty recipe removes it');
-  assert.deepEqual(validateRecipe(null, known), ['Тех. карта: неверный формат']);
+  assert.deepEqual(validateRecipe(null, known), ['Состав: неверный формат']);
   const problems = validateRecipe(
     {
       items: [

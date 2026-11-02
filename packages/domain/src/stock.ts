@@ -2,7 +2,7 @@ import type { Minor } from './money.ts';
 
 /**
  * «Склад» of a coffee shop: raw materials (сырьё — coffee beans, milk, cups), the recipe of
- * every drink (тех. карта, граммовка per one unit sold, with changes per option: size L takes
+ * every drink (состав, граммовка per one unit sold, with changes per option: size L takes
  * more milk, «Овсяное» swaps milk for oat milk), deliveries (поставки), counts (инвентаризация),
  * write-offs (списание) and a log of every movement.
  *
@@ -152,7 +152,7 @@ export function daysLeftOf(quantity: number, perDay: number | null): number | nu
   return Math.floor(quantity / perDay);
 }
 
-// ── Recipes (тех. карты) ────────────────────────────────────────────────────
+// ── Recipes (состав) ────────────────────────────────────────────────────────
 
 /** One ingredient of a drink for one unit sold (граммовка). */
 export interface RecipeLine {
@@ -267,7 +267,7 @@ export function validateRecipe(
   recipe: unknown,
   known: { ingredientIds: ReadonlySet<string>; choiceIds: ReadonlySet<string> },
 ): string[] {
-  if (typeof recipe !== 'object' || recipe === null) return ['Тех. карта: неверный формат'];
+  if (typeof recipe !== 'object' || recipe === null) return ['Состав: неверный формат'];
   const r = recipe as Partial<Recipe>;
   const errors: string[] = [];
   const items: unknown[] = Array.isArray(r.items) ? r.items : [];
@@ -348,6 +348,12 @@ export const STOCK_MOVEMENT_LABEL: Record<StockMovementKind, string> = {
   adjust: 'Остаток исправлен',
   writeoff: 'Списание',
 };
+
+/**
+ * The reason on the movement that takes a deleted ingredient's stock to zero (`writeoff`, or
+ * `adjust` up from below zero), so the totals stay honest and the history says why.
+ */
+export const INGREDIENT_DELETED_REASON = 'Сырьё удалено';
 
 // ── Deleting or correcting a delivery ───────────────────────────────────────
 
@@ -438,13 +444,13 @@ export interface IngredientView {
   value: Minor | null;
   /** Products whose recipe uses it. */
   usedIn: number;
-  /** Something happened to it already (movements, deliveries, counts): removing it archives it. */
+  /** Something happened to it already (movements, deliveries, counts): deleting it keeps that history. */
   hasHistory: boolean;
   /** Put in by TS as an example (the trial's sample stock): the owner changes or removes it like their own. */
   isSample: boolean;
 }
 
-/** GET /api/stock/ingredients — archived ones included (the screen hides them). */
+/** GET /api/stock/ingredients — archived ones included (the screen hides them), deleted ones never. */
 export interface IngredientsView {
   ingredients: IngredientView[];
 }
@@ -469,18 +475,22 @@ export interface UpdateIngredientRequest {
 }
 
 /**
- * GET /api/stock/ingredients/:id/removal — what «Удалить» will do: an ingredient nothing ever
- * happened to is deleted; one with history is archived (hidden from lists and pickers, the
- * history keeps its name). Recipes that use it are named: it leaves them only when asked.
+ * GET /api/stock/ingredients/:id/removal — what «Удалить» will do, active or archived alike: an
+ * ingredient nothing ever happened to is deleted completely (`delete`); one with history is
+ * deleted for good but its row stays for that history (`history`: gone from the levels, the
+ * archive and every picker, while movements, deliveries, counts and the journal keep its name;
+ * there is no way back, and the name is free for a new one). What is on hand then goes off as
+ * «Сырьё удалено». Recipes that use it are named: it leaves them only when asked.
  */
 export interface IngredientRemovalView {
   ingredientId: string;
   name: string;
   unit: IngredientUnit;
+  /** On hand now: written off to zero on deletion (below zero — brought up to zero). */
   quantity: number;
   /** Products whose recipe uses it (also as what an option replaces). */
   recipes: Array<{ productId: string; name: string }>;
-  outcome: 'delete' | 'archive';
+  outcome: 'delete' | 'history';
   history: { movements: number; supplies: number; counts: number };
 }
 
@@ -491,9 +501,12 @@ export interface RemoveIngredientRequest {
 }
 
 export interface RemoveIngredientResponse {
-  outcome: 'deleted' | 'archived';
+  /** Its history stays (movements, deliveries, counts name it); false — nothing ever happened to it. */
+  historyKept: boolean;
   /** Recipes it was taken out of. */
   recipes: string[];
+  /** What was on hand and went off as «Сырьё удалено» (below zero — brought up to zero); 0 — nothing. */
+  quantity: number;
 }
 
 /** POST /api/stock/ingredients/:id/adjust — «Исправить остаток»: the level as it really is, with why. */
