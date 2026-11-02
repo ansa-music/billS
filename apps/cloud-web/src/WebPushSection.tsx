@@ -3,7 +3,7 @@ import { Section } from './shared.tsx';
 import { enableWebPush, webPushDeviceId, webPushSupport } from './webPush.ts';
 import type { WebPushSupport } from './webPush.ts';
 
-function supportText(s: Exclude<WebPushSupport, { ok: true }>): string {
+export function supportText(s: Exclude<WebPushSupport, { ok: true }>): string {
   switch (s.reason) {
     case 'no-key':
       return 'В этой сборке кабинета push-уведомления браузера не настроены. Используйте ntfy ниже.';

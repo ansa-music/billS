@@ -10,9 +10,10 @@ export interface LocalDevice {
   token: string;
 }
 
-type Kind = 'webpush' | 'ntfy';
+/** 'platform-webpush': this browser's push for the platform cabinet («Уведомления о заявках»), a separate row. */
+type Kind = 'webpush' | 'ntfy' | 'platform-webpush';
 
-const KEY: Record<Kind, string> = { webpush: 'ts.device.webpush', ntfy: 'ts.device.ntfy' };
+const KEY: Record<Kind, string> = { webpush: 'ts.device.webpush', ntfy: 'ts.device.ntfy', 'platform-webpush': 'ts.device.platform-webpush' };
 
 export function readLocalDevice(kind: Kind): LocalDevice | null {
   try {

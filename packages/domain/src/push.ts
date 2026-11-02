@@ -352,6 +352,8 @@ export interface PushData {
   kind: PushKind;
   clubId: string;
   alertId?: string;
+  /** Where a tap leads, relative to the cabinet (`#/platform/trials`); without it — the club's page. */
+  url?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -382,6 +384,21 @@ export interface TelegramStatusView {
 export interface TelegramLinkResponse {
   url: string;
   expiresAt: number;
+}
+
+/**
+ * GET /platform/devices: Web Push of the platform cabinet («Уведомления о заявках» — new trial requests).
+ * `pushEnabled` is false when the cloud has no VAPID keys; only 'webpush' devices are kept.
+ */
+export interface PlatformDevicesView {
+  pushEnabled: boolean;
+  devices: DeviceView[];
+}
+
+/** POST /platform/notify/test: a test message to every chat and device of the platform owner who asked. */
+export interface PlatformNotifyTestResponse {
+  delivered: number;
+  failed: number;
 }
 
 /** How long a link code from the cabinet works. */

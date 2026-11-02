@@ -6,6 +6,7 @@ import { TRIAL_WATCH, TRIAL_WATCH_RATE } from '@bills/domain';
 import { handleTrial } from '../../apps/cloud/src/edge/trial.ts';
 import type { EdgeTest } from './edge-helpers.ts';
 import { edgeTest, HOUR, MONDAY_NOON } from './edge-helpers.ts';
+import { startActive } from './trial-helpers.ts';
 
 const DAY = 24 * HOUR;
 const MINUTE = 60_000;
@@ -25,10 +26,10 @@ const STATS: TrialStats = {
 
 const SQLITE = Buffer.concat([Buffer.from('SQLite format 3\0'), randomBytes(50_000)]);
 
+/** A request the platform owner approved at once (an active trial, 14 days from now). */
 async function start(e: EdgeTest, venue = 'Кофейня «Зерно»') {
-  const res = await e.call(handleTrial, 'POST', '/functions/v1/trial/trial/start', { headers: { 'x-forwarded-for': '198.51.100.4' }, body: { venue } });
-  assert.equal(res.status, 201, JSON.stringify(res.body));
-  return { id: res.body.id as string, auth: { authorization: `Bearer ${res.body.token}` } };
+  const s = await startActive(e, { venue });
+  return { id: s.id, auth: s.auth };
 }
 
 type Trial = Awaited<ReturnType<typeof start>>;

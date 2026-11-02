@@ -52,6 +52,70 @@
   gap: 6px;
 }
 
+/* «Заявка отправлена» / «Заявка отклонена» (TrialGate): the request waits for TS. */
+.trial-wait {
+  display: grid;
+  gap: 12px;
+}
+
+.trial-wait p {
+  margin: 0;
+}
+
+.trial-wait-venue {
+  font-size: var(--fs-lg);
+  overflow-wrap: anywhere;
+}
+
+.trial-wait-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--text-2);
+  font-weight: 560;
+}
+
+.trial-wait-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent);
+  animation: ts-trial-pulse 2.4s var(--ease) infinite;
+}
+
+.trial-wait-state[data-offline] {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.trial-wait-state[data-offline] .trial-wait-dot {
+  background: var(--muted);
+  animation: none;
+}
+
+.trial-wait-message {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 12px 14px;
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-size: var(--fs-md, 1rem);
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trial-wait-dot {
+    animation: none;
+  }
+}
+
 /* The trial badge at the bottom of the menu (TrialBadge.tsx): one quiet line, no strip over the pages.
    This file is loaded with the welcome screen, which every trial start imports. */
 .trial-badge {

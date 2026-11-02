@@ -39,12 +39,15 @@ import type {
   OwnerKeyView,
   OwnerOverview,
   OwnerView,
+  PlatformDevicesView,
+  PlatformNotifyTestResponse,
   PushRule,
   PushSettingsView,
   TelegramLinkResponse,
   TelegramStatusView,
   TestPushResponse,
   TrialEndDateRequest,
+  TrialRejectRequest,
   UpdateTariffsRequest,
   UpdateTariffsResponse,
 } from '@bills/domain';
@@ -659,6 +662,51 @@ export function setTrialEndDate(id: string, date: string): Promise<TrialView> {
 
 export function endTrial(id: string): Promise<TrialView> {
   return platformEdge<TrialView>('POST', `/platform/trials/${enc(id)}/end`, {});
+}
+
+export function approveTrial(id: string): Promise<TrialView> {
+  return platformEdge<TrialView>('POST', `/platform/trials/${enc(id)}/approve`, {});
+}
+
+export function rejectTrial(id: string, message: string | null): Promise<TrialView> {
+  const body: TrialRejectRequest = message ? { message } : {};
+  return platformEdge<TrialView>('POST', `/platform/trials/${enc(id)}/reject`, body);
+}
+
+export function makeTrialPermanent(id: string): Promise<TrialView> {
+  return platformEdge<TrialView>('POST', `/platform/trials/${enc(id)}/permanent`, {});
+}
+
+export async function deleteTrial(id: string): Promise<void> {
+  await platformEdge<{ deleted: string }>('DELETE', `/platform/trials/${enc(id)}`);
+}
+
+export function fetchPlatformTelegram(): Promise<TelegramStatusView> {
+  return platformEdge<TelegramStatusView>('GET', '/platform/telegram');
+}
+
+export function linkPlatformTelegram(): Promise<TelegramLinkResponse> {
+  return platformEdge<TelegramLinkResponse>('POST', '/platform/telegram/link', {});
+}
+
+export async function unlinkPlatformTelegram(chatId: string): Promise<void> {
+  await platformEdge<{ ok: true }>('DELETE', `/platform/telegram/chats/${enc(chatId)}`);
+}
+
+export function fetchPlatformDevices(): Promise<PlatformDevicesView> {
+  return platformEdge<PlatformDevicesView>('GET', '/platform/devices');
+}
+
+export function registerPlatformDevice(body: RegisterDeviceBody): Promise<DeviceView> {
+  return platformEdge<DeviceView>('POST', '/platform/devices', body);
+}
+
+export async function removePlatformDevice(id: string): Promise<void> {
+  await platformEdge<{ ok: true }>('DELETE', `/platform/devices/${enc(id)}`);
+}
+
+export function testPlatformNotify(): Promise<PlatformNotifyTestResponse> {
+  return platformEdge<PlatformNotifyTestResponse>('POST', '/platform/notify/test', {});
 }
 
 /** The last SQLite copy the trial sent (base64); 404 when it has sent none yet. */

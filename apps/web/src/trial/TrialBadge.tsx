@@ -1,14 +1,14 @@
 import { useEffect, useReducer, useState, useSyncExternalStore } from 'react';
 import { Modal } from '../ui.tsx';
-import { currentTrial, daysLeft, downloadBackup, subscribeTrial, TRIAL, trialEndsAt, trialOver, trialVersion } from '../demo-hub/trial-store.ts';
+import { currentTrial, daysLeft, downloadBackup, subscribeTrial, TRIAL, trialEndsAt, trialOver, trialPermanent, trialVersion } from '../demo-hub/trial-store.ts';
 import { openTrialWatch, TrialWatchHost, useCanWatchFromPhone } from './TrialWatch.tsx';
 import { openTrialLink, TrialLinkHost, useCanLinkDevices } from './TrialLink.tsx';
 
 /**
- * Browser trial (VITE_TRIAL=1): a quiet line at the bottom of the menu — «Пробная · 12 дн.» —
- * instead of a strip over every page. A click opens the details: the end date, «Скачать копию»,
- * the director's code (role manager, «Директор» in a coffee shop), «Открыть на телефоне» and how
- * to extend. Renders nothing in other builds.
+ * Browser trial (VITE_TRIAL=1): a quiet line at the bottom of the menu — «Пробная · 12 дн.», or
+ * «Полная версия» once TS made it permanent — instead of a strip over every page. A click opens the
+ * details: the end date (none for the full version), «Скачать копию», the director's code (role manager,
+ * «Директор» in a coffee shop), devices, «Открыть на телефоне» and how to extend. Renders nothing in other builds.
  */
 export function TrialBadge({ place = 'sidebar' }: { place?: 'sidebar' | 'sheet' }) {
   useSyncExternalStore(subscribeTrial, trialVersion);
@@ -21,9 +21,11 @@ export function TrialBadge({ place = 'sidebar' }: { place?: 'sidebar' | 'sheet' 
   const [open, setOpen] = useState(false);
   const info = TRIAL ? currentTrial() : null;
   if (!info) return null;
-  const over = trialOver(info);
+  const full = trialPermanent(info);
+  const over = !full && trialOver(info);
   const left = daysLeft(info);
-  const label = over ? 'Пробная завершена' : `Пробная · ${left} дн.`;
+  const label = full ? 'Полная версия' : over ? 'Пробная завершена' : `Пробная · ${left} дн.`;
+  const title = full ? 'Полная версия TS — без срока' : over ? (info.message ?? 'Пробный период завершён') : `Пробная версия: осталось ${left} ${daysWord(left)}`;
   return (
     <>
       <button
@@ -31,14 +33,15 @@ export function TrialBadge({ place = 'sidebar' }: { place?: 'sidebar' | 'sheet' 
         className="trial-badge"
         data-place={place}
         data-over={over || undefined}
-        title={over ? (info.message ?? 'Пробный период завершён') : `Пробная версия: осталось ${left} ${daysWord(left)}`}
+        data-full={full || undefined}
+        title={title}
         aria-haspopup="dialog"
         onClick={() => setOpen(true)}
       >
         <span className="trial-badge-dot" aria-hidden="true" />
         <span className="trial-badge-text">{label}</span>
         <span className="trial-badge-short" aria-hidden="true">
-          {over ? 'Пробная' : `${left} дн.`}
+          {full ? 'TS' : over ? 'Пробная' : `${left} дн.`}
         </span>
       </button>
       {open && <TrialDetails onClose={() => setOpen(false)} />}
@@ -59,13 +62,18 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
   const canWatch = useCanWatchFromPhone();
   const canLink = useCanLinkDevices();
   if (!info) return null;
-  const over = trialOver(info);
+  const full = trialPermanent(info);
+  const over = !full && trialOver(info);
   const left = daysLeft(info);
   const until = new Date(trialEndsAt(info)).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
   return (
-    <Modal open title="Пробная версия" onClose={onClose}>
+    <Modal open title={full ? 'Полная версия' : 'Пробная версия'} onClose={onClose}>
       <div className="trial-details">
-        {over ? (
+        {full ? (
+          <p className="trial-details-state">
+            <strong>Полная версия TS</strong> — без срока: касса работает, ничего продлевать не нужно.
+          </p>
+        ) : over ? (
           <p className="trial-details-state" data-over="">
             {info.message ?? 'Пробный период завершён: данные можно смотреть и скачать, новые заказы недоступны.'}
           </p>
@@ -137,7 +145,7 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
             </button>
           </div>
         )}
-        <p className="trial-details-foot">Продлить или подключить полную версию — напишите TS.</p>
+        <p className="trial-details-foot">{full ? 'Вопросы и помощь — напишите TS.' : 'Продлить или подключить полную версию — напишите TS.'}</p>
       </div>
     </Modal>
   );

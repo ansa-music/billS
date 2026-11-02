@@ -1,6 +1,9 @@
-import type { PlatformLoginRequest, PlatformLoginResponse, PlatformMe } from '@bills/domain';
+import type { PlatformLoginRequest, PlatformLoginResponse, PlatformMe, PlatformNotifyTestResponse, TelegramLinkResponse, TelegramStatusView, TrialView } from '@bills/domain';
+import { telegramStartLink } from '@bills/domain';
 import { authenticatePlatformKey, createPlatformSession, deletePlatformSession, platformByToken } from '../access.ts';
 import { CloudError } from '../errors.ts';
+import { notifyPlatform, platformDevices, registerPlatformDevice, removePlatformDevice, TRIALS_PATH } from '../platform-notify.ts';
+import { createPlatformLinkCode, listPlatformChats, unlinkPlatformChat } from '../telegram.ts';
 import {
   blockClient,
   createClient,
@@ -10,7 +13,17 @@ import {
   platformStaff,
   updateClientLicense,
 } from '../platform.ts';
-import { endTrial, extendTrial, listTrials, setTrialEndDate, trialSnapshot } from '../trial.ts';
+import {
+  approveTrial,
+  deleteTrial,
+  endTrial,
+  extendTrial,
+  listTrials,
+  makeTrialPermanent,
+  rejectTrial,
+  setTrialEndDate,
+  trialSnapshot,
+} from '../trial.ts';
 import type { EdgeContext } from './context.ts';
 import { signPendingQuietly } from './context.ts';
 import type { EdgeRequest, Schema } from './http.ts';
@@ -36,12 +49,26 @@ import { authUserId, corsHeaders } from './owner.ts';
  *   POST /platform/clients/:companyId/block      BlockClientRequest → ClientView
  *   POST /platform/clients/:companyId/manager-key → IssuedLongKey
  *   GET  /platform/staff, POST /platform/staff   the support team (hiring: owner only)
- *   GET  /platform/trials                        → { trials: TrialView[] } (coffee shop browser trials, newest first)
- *   POST /platform/trials/:id/extend             { days: 1..90 } → TrialView
+ *   GET  /platform/trials                        → { trials: TrialView[] } (coffee shop browser trials: requests first,
+ *                                                then newest first; each with duplicateOf, «похоже на повтор»)
+ *   POST /platform/trials/:id/approve            → TrialView (a request → active, 14 days from now; 409 TRIAL_NOT_PENDING)
+ *   POST /platform/trials/:id/reject             { message? ≤ 300 } → TrialView (pending → rejected; 409 TRIAL_NOT_PENDING)
+ *   POST /platform/trials/:id/permanent          → TrialView (any trial → permanent, no end date)
+ *   POST /platform/trials/:id/extend             { days: 1..90 } → TrialView (409 TRIAL_NOT_APPROVED for a request)
  *   POST /platform/trials/:id/end-date           { date: YYYY-MM-DD, today..today+90 } → TrialView
  *                                                (active through that day of the trial's zone; 422 DATE_INVALID)
  *   POST /platform/trials/:id/end                → TrialView (ended now)
+ *   DELETE /platform/trials/:id                  → { deleted, venue } (pending / rejected / ended / expired; 409 TRIAL_RUNNING)
  *   GET  /platform/trials/:id/snapshot           → { snapshot: base64 SQLite, snapshotAt } (404 SNAPSHOT_NOT_FOUND)
+ *
+ * «Уведомления о заявках» (platform-notify.ts) — the signed-in person's own chats and devices:
+ *   GET    /platform/telegram                    → TelegramStatusView (configured: false without TELEGRAM_BOT_TOKEN)
+ *   POST   /platform/telegram/link               → TelegramLinkResponse (t.me link, one-time code, 15 minutes; 503 TELEGRAM_NOT_CONFIGURED)
+ *   DELETE /platform/telegram/chats/:chatId      → { ok: true } (404 TELEGRAM_CHAT_NOT_FOUND)
+ *   GET    /platform/devices                     → PlatformDevicesView
+ *   POST   /platform/devices                     RegisterDeviceRequest (webpush) → DeviceView
+ *   DELETE /platform/devices/:id                 → { ok: true } (404 DEVICE_NOT_FOUND)
+ *   POST   /platform/notify/test                 → PlatformNotifyTestResponse (a test message to those chats and devices)
  */
 
 const loginSchema: Schema = {
@@ -149,22 +176,115 @@ export async function handlePlatform(req: EdgeRequest, ctx: EdgeContext): Promis
       return json(200, await listTrials(ctx.db, ctx.now(), await requirePlatform(req, ctx)), { ...cors, 'cache-control': 'no-store' });
     }
 
-    const trial = /^\/platform\/trials\/([^/]+)\/(extend|end-date|end|snapshot)$/.exec(path);
+    const trialDelete = /^\/platform\/trials\/([^/]+)$/.exec(path);
+    if (m === 'DELETE' && trialDelete) {
+      const me = await requirePlatform(req, ctx);
+      const res = await deleteTrial(ctx.db, ctx.now(), me, trialDelete[1]!);
+      ctx.log(`platform: ${me.name} (${me.id}) удалил пробную версию ${res.deleted} «${res.venue}»`);
+      return json(200, res, cors);
+    }
+
+    const trial = /^\/platform\/trials\/([^/]+)\/(extend|end-date|end|snapshot|approve|reject|permanent)$/.exec(path);
     if (trial && ((m === 'POST' && trial[2] !== 'snapshot') || (m === 'GET' && trial[2] === 'snapshot'))) {
       const me = await requirePlatform(req, ctx);
       // A uuid needs no decoding; anything else is not a trial (404 from the lookup).
       const id = trial[1]!;
       if (trial[2] === 'snapshot') return json(200, await trialSnapshot(ctx.db, me, id), { ...cors, 'cache-control': 'no-store' });
-      const view =
-        trial[2] === 'extend'
-          ? await extendTrial(ctx.db, ctx.now(), me, id, await readJson(req))
-          : trial[2] === 'end-date'
-            ? await setTrialEndDate(ctx.db, ctx.now(), me, id, await readJson(req))
-            : await endTrial(ctx.db, ctx.now(), me, id);
-      const did = trial[2] === 'extend' ? 'продлил' : trial[2] === 'end-date' ? 'назначил дату окончания' : 'завершил';
+      const now = ctx.now();
+      let view: TrialView;
+      let did: string;
+      switch (trial[2]) {
+        case 'extend':
+          view = await extendTrial(ctx.db, now, me, id, await readJson(req));
+          did = `продлил до ${new Date(view.endsAt).toISOString()}`;
+          break;
+        case 'end-date':
+          view = await setTrialEndDate(ctx.db, now, me, id, await readJson(req));
+          did = `назначил дату окончания ${new Date(view.endsAt).toISOString()}`;
+          break;
+        case 'approve':
+          await readOptionalJson(req);
+          view = await approveTrial(ctx.db, now, me, id);
+          did = `подтвердил заявку до ${new Date(view.endsAt).toISOString()}`;
+          break;
+        case 'reject':
+          view = await rejectTrial(ctx.db, now, me, id, await readOptionalJson(req));
+          did = 'отклонил заявку';
+          break;
+        case 'permanent':
+          await readOptionalJson(req);
+          view = await makeTrialPermanent(ctx.db, now, me, id);
+          did = 'сделал постоянной';
+          break;
+        default:
+          view = await endTrial(ctx.db, now, me, id);
+          did = `завершил ${new Date(view.endsAt).toISOString()}`;
+      }
       // The platform has no audit table: the action goes to the function's log with who did it.
-      ctx.log(`platform: ${me.name} (${me.id}) ${did} пробную версию ${view.id} «${view.venue}» до ${new Date(view.endsAt).toISOString()}`);
+      ctx.log(`platform: ${me.name} (${me.id}) ${did}: пробная версия ${view.id} «${view.venue}»`);
       return json(200, view, cors);
+    }
+
+    // «Уведомления о заявках»: the signed-in person's own Telegram chats and Web Push devices.
+    if (m === 'GET' && path === '/platform/telegram') {
+      const me = await requirePlatform(req, ctx);
+      const view: TelegramStatusView = ctx.telegram
+        ? { configured: true, botUsername: await ctx.telegram.username(), chats: await listPlatformChats(ctx.db, me.id) }
+        : { configured: false, botUsername: null, chats: [] };
+      return json(200, view, { ...cors, 'cache-control': 'no-store' });
+    }
+
+    if (m === 'POST' && path === '/platform/telegram/link') {
+      const me = await requirePlatform(req, ctx);
+      await readOptionalJson(req);
+      const bot = ctx.telegram;
+      const username = bot ? await bot.username() : null;
+      if (!bot || !username) throw new CloudError(503, 'TELEGRAM_NOT_CONFIGURED', 'Telegram пока не подключён к TS');
+      const { code, expiresAt } = await createPlatformLinkCode(ctx.db, ctx.now(), me.id);
+      const res: TelegramLinkResponse = { url: telegramStartLink(username, code), expiresAt };
+      return json(200, res, { ...cors, 'cache-control': 'no-store' });
+    }
+
+    const platformChat = /^\/platform\/telegram\/chats\/([^/]+)$/.exec(path);
+    if (m === 'DELETE' && platformChat) {
+      const me = await requirePlatform(req, ctx);
+      const chatId = decodeURIComponent(platformChat[1]!);
+      if (!(await unlinkPlatformChat(ctx.db, chatId, me.id))) throw new CloudError(404, 'TELEGRAM_CHAT_NOT_FOUND', 'Этот чат не подключён');
+      if (ctx.telegram) {
+        const bye = await ctx.telegram.sendMessage(chatId, 'Этот чат отключён от заявок TS в кабинете платформы.');
+        if (!bye.ok) ctx.log(`Telegram: ${bye.description}`);
+      }
+      return json(200, { ok: true }, cors);
+    }
+
+    if (m === 'GET' && path === '/platform/devices') {
+      const me = await requirePlatform(req, ctx);
+      return json(200, await platformDevices(ctx.db, me.id, ctx.pushChannels.includes('webpush')), { ...cors, 'cache-control': 'no-store' });
+    }
+
+    if (m === 'POST' && path === '/platform/devices') {
+      const me = await requirePlatform(req, ctx);
+      return json(200, await registerPlatformDevice(ctx.db, ctx.now(), me.id, await readJson(req)), cors);
+    }
+
+    const platformDevice = /^\/platform\/devices\/([^/]+)$/.exec(path);
+    if (m === 'DELETE' && platformDevice) {
+      const me = await requirePlatform(req, ctx);
+      if (!(await removePlatformDevice(ctx.db, me.id, decodeURIComponent(platformDevice[1]!)))) {
+        throw new CloudError(404, 'DEVICE_NOT_FOUND', 'Устройство не найдено');
+      }
+      return json(200, { ok: true }, cors);
+    }
+
+    if (m === 'POST' && path === '/platform/notify/test') {
+      const me = await requirePlatform(req, ctx);
+      await readOptionalJson(req);
+      const res: PlatformNotifyTestResponse = await notifyPlatform(
+        { db: ctx.db, sender: ctx.sender, telegram: ctx.telegram, cabinetUrl: ctx.cabinetUrl, log: ctx.log },
+        { title: 'TS: проверка уведомлений', body: 'Если вы это видите — новые заявки на пробные версии будут приходить сюда.', url: TRIALS_PATH },
+        me.id,
+      );
+      return json(200, res, cors);
     }
 
     if (m === 'GET' && path === '/platform/staff') return json(200, await platformStaff(ctx.db, await requirePlatform(req, ctx)), cors);

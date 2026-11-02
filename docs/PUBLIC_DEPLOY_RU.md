@@ -201,6 +201,7 @@ node scripts/supabase-sql.ts club --company <COMPANY_ID> --name "Клуб на �
    Без GitHub — руками: `supabase secrets set TELEGRAM_BOT_TOKEN=… TELEGRAM_BOT_USERNAME=… TELEGRAM_WEBHOOK_SECRET=…`, затем откройте в браузере
    `https://api.telegram.org/bot<токен>/setWebhook?url=https://<ID>.supabase.co/functions/v1/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>`.
 5. Владелец в кабинете: **Уведомления → «Получать в Telegram»** → «Открыть Telegram» → «Запустить». Ссылка одноразовая и живёт 15 минут. В кабинете появится «Подключено: @имя · отключить».
+6. **Владелец платформы** (заявки на пробную версию кофейни): кабинет платформы → **«Пробные версии»** → внизу **«Получать заявки в Telegram»** → «Открыть Telegram» → «Запустить». Каждая новая заявка придёт сообщением «Новая заявка на пробную версию: «…» · имя · город» с кнопкой «Открыть пробные версии». Там же — «Получать заявки на этом устройстве» (Web Push, ключи VAPID из шага 4) и «Проверить уведомления». Если уведомление не ушло, заявка всё равно сохраняется и видна в кабинете (число на вкладке «Пробные версии»).
 
 Сводка дня приходит из той же проверки, что «HUB пропал» (`pg_cron` каждые 5 минут, шаг 4), — без неё сводки не будет, тревоги придут всё равно. Пока токена нет, в кабинете написано «Telegram пока не подключён к TS». Если владелец заблокировал бота, чат отключается сам.
 
@@ -239,7 +240,8 @@ GitHub → **Actions → deploy → Run workflow**, или просто пуш �
   - `…0200_push.sql` — Web Push и ntfy;
   - `…0300_cron.sql` — pg_cron, в тестах пропускается;
   - `…0400_keepalive.sql`;
-  - `…20261025000000_telegram.sql` — чаты Telegram владельцев, одноразовые коды привязки, отметки о сводке дня.
+  - `…20261025000000_telegram.sql` — чаты Telegram владельцев, одноразовые коды привязки, отметки о сводке дня;
+  - `…20261103100000_trial_requests.sql` — пробная версия кофейни начинается с заявки (статусы `pending`, `rejected`, `permanent`, `installId` против повторов), чаты Telegram и Web Push владельца платформы для уведомлений о заявках.
 - Edge Functions (`supabase/functions/*`) — тонкие обёртки на Deno; `telegram` — вебхук бота (логика в `apps/cloud/src/telegram.ts`). Логика лежит в `apps/cloud/src/edge/` и переиспользует `sync.ts`, `projection.ts`, `push.ts` облака. В Deno её приносит бандл `npm run bundle:edge` (`supabase/functions/_shared/core.js`, собирается в CI).
 - Переменные сборки:
   - кабинет — `VITE_SUPABASE_URL` и `VITE_SUPABASE_ANON_KEY` (режим Supabase; без них кабинет ходит в `apps/cloud` по `/api`), `VITE_VAPID_PUBLIC_KEY`;

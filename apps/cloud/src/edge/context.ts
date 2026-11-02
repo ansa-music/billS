@@ -12,6 +12,8 @@ import { TelegramBot, TelegramChannel } from '../telegram.ts';
 export interface EdgeContext {
   db: SqlDriver;
   push: PushDispatcher;
+  /** The sender behind `push`: also reaches the platform team's devices (platform-notify.ts). */
+  sender: PushSender;
   /** Channels that will actually send: 'webpush' (VAPID set), 'ntfy'. */
   pushChannels: string[];
   now: () => number;
@@ -128,6 +130,7 @@ export function edgeContext(db: SqlDriver, env: Env, options: EdgeContextOptions
   return {
     db,
     push,
+    sender,
     pushChannels,
     now,
     log,

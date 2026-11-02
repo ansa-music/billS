@@ -30,7 +30,8 @@ import {
   planLabel,
 } from './license-form.ts';
 import { OfflineBanner, Section, loadingText } from './shared.tsx';
-import { TrialsSection } from './Trials.tsx';
+import { TrialsSection, useTrialsPoll } from './Trials.tsx';
+import { pendingCount, waitingText } from './trials.ts';
 
 const ZONE = 'Asia/Almaty';
 
@@ -548,6 +549,10 @@ export function PlatformCabinet({
   const [selected, setSelected] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Record<string, ClientView>>({});
   const editable = can(me.role, 'clients.edit');
+  // «Пробные версии» are polled here, on both tabs, so the tab shows how many requests wait.
+  const trialsShown = TRIALS_AVAILABLE && can(me.role, 'platform.view');
+  const trials = useTrialsPoll(trialsShown);
+  const waiting = trialsShown ? pendingCount(trials.data) : 0;
   // A saved card shows the cloud's answer at once; the next poll brings the same and drops it.
   useEffect(() => setOverrides({}), [data]);
 
@@ -583,21 +588,31 @@ export function PlatformCabinet({
       </header>
       <OfflineBanner online={online} />
 
-      {can(me.role, 'platform.view') && TRIALS_AVAILABLE && (
+      {trialsShown && (
         <nav className="tabs platform-tabs" aria-label="Разделы платформы">
           <a href="#/platform" aria-current={tab === 'clients' ? 'page' : undefined}>
             Клиенты
           </a>
           <a href="#/platform/trials" aria-current={tab === 'trials' ? 'page' : undefined}>
             Пробные версии
+            {waiting > 0 && (
+              <span className="tab-count" aria-label={`, новых заявок: ${waiting}`}>
+                {waiting}
+              </span>
+            )}
           </a>
         </nav>
       )}
 
       {can(me.role, 'platform.view') && tab === 'trials' ? (
-        <TrialsSection editable={editable} />
+        <TrialsSection editable={editable} poll={trials} />
       ) : can(me.role, 'platform.view') ? (
         <>
+          {waiting > 0 && (
+            <p className="notice">
+              <a href="#/platform/trials">{waitingText(waiting)} — открыть</a>
+            </p>
+          )}
           {creating && (
             <NewClient
               onDone={() => {
