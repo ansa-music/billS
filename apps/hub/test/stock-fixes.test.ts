@@ -31,8 +31,9 @@ import { auditActions, FAST_LAMPS, Harness, MONDAY_NOON, post } from './helpers.
 
 /**
  * «Склад», client feedback from a café on the trial: a delivery typed in by mistake is deleted or
- * corrected (counter-movements, never a rewrite), any ingredient can be removed (archived when it
- * has history, taken out of recipes when asked), a level is put right by hand with a reason, the
+ * corrected (counter-movements, never a rewrite), any ingredient — active or archived — can be
+ * deleted (for good with its history kept, what is left written off; taken out of recipes when
+ * asked), a level is put right by hand with a reason, the
  * example TS put in goes away at once, and a delivery line may bring a new ingredient.
  */
 
@@ -410,24 +411,25 @@ test('a delivery line may bring something not on the stock yet: it is created wi
 
 // ─── Removing an ingredient ─────────────────────────────────────────────────
 
-test('removing an ingredient: never used — deleted; with history — archived; in recipes — named, taken out when asked', async (t) => {
+test('removing an ingredient: never used — deleted; with history — deleted for good, the history keeps it; in recipes — named, taken out when asked', async (t) => {
   const h = harness(t);
   const hub = await cafe(h);
 
-  // Nothing ever happened to it: gone for good.
+  // Nothing ever happened to it: gone completely.
   const cinnamon = (await send<IngredientView>(hub, '/api/stock/ingredients', { name: 'Корица', unit: 'г' })).body;
   assert.equal(cinnamon.hasHistory, false);
   const plan = (await get<IngredientRemovalView>(hub, `/api/stock/ingredients/${cinnamon.id}/removal`)).body;
   assert.deepEqual([plan.outcome, plan.recipes], ['delete', []]);
   const gone = await send<RemoveIngredientResponse>(hub, `/api/stock/ingredients/${cinnamon.id}/remove`, {});
-  assert.deepEqual(gone.body, { outcome: 'deleted', recipes: [] });
+  assert.deepEqual(gone.body, { historyKept: false, recipes: [], quantity: 0 });
   assert.equal(one(hub.db, 'SELECT id FROM ingredients WHERE id = ?', cinnamon.id), undefined);
 
   // Sugar: in the Раф recipe and with a starting level — the dialog names the recipe.
   const sugar = await ingredient(hub, 'Сахар');
   assert.equal(sugar.hasHistory, true);
   const sugarPlan = (await get<IngredientRemovalView>(hub, `/api/stock/ingredients/${sugar.id}/removal`)).body;
-  assert.equal(sugarPlan.outcome, 'archive');
+  assert.equal(sugarPlan.outcome, 'history');
+  assert.equal(sugarPlan.quantity, 2000);
   assert.deepEqual(sugarPlan.recipes.map((r) => r.name), ['Раф']);
   assert.deepEqual(sugarPlan.history, { movements: 1, supplies: 0, counts: 0 });
   const refused = await send(hub, `/api/stock/ingredients/${sugar.id}/remove`, {});
@@ -437,14 +439,21 @@ test('removing an ingredient: never used — deleted; with history — archived;
   assertError(await send(hub, `/api/stock/ingredients/${sugar.id}/update`, { isArchived: true }), 409, 'INGREDIENT_IN_RECIPES');
 
   const removed = await send<RemoveIngredientResponse>(hub, `/api/stock/ingredients/${sugar.id}/remove`, { fromRecipes: true });
-  assert.deepEqual(removed.body, { outcome: 'archived', recipes: ['Раф'] });
-  assert.equal((await ingredient(hub, 'Сахар')).isArchived, true);
+  assert.deepEqual(removed.body, { historyKept: true, recipes: ['Раф'], quantity: 2000 });
+  assert.ok(!(await ingredients(hub)).some((i) => i.id === sugar.id), 'gone from the list and from the archive');
   const raf = (await get<RecipeView>(hub, `/api/stock/recipes/${await productId(hub, 'Раф')}`)).body;
   assert.ok(raf.items.length > 0 && raf.items.every((i) => i.ingredientId !== sugar.id));
   await sell(hub, [{ product: 'Раф', options: ['s'] }]);
-  assert.equal((await ingredient(hub, 'Сахар')).quantity, 2000, 'a Раф no longer takes sugar');
-  // The history keeps the name.
-  assert.equal((await movements(hub, sugar.id))[0]!.name, 'Сахар');
+  // The history keeps the name; what was left went off as «удалено».
+  const log = await movements(hub, sugar.id);
+  assert.deepEqual(
+    log.map((m) => [m.kind, m.quantity, m.balance, m.reason, m.name]),
+    [
+      ['writeoff', -2000, 0, 'Сырьё удалено', 'Сахар'],
+      ['initial', 2000, 2000, null, 'Сахар'],
+    ],
+    'a Раф no longer takes sugar',
+  );
 
   // Milk: in the base of every milk drink, in the sizes and as what «Овсяное» replaces — all of it goes.
   const milk = await ingredient(hub, 'Молоко 3,2%');
@@ -455,9 +464,180 @@ test('removing an ingredient: never used — deleted; with history — archived;
   assert.equal(left[0]!.n, 0);
   const latte = (await get<RecipeView>(hub, `/api/stock/recipes/${await productId(hub, 'Латте')}`)).body;
   assert.ok(latte.items.length > 0, 'the rest of the recipe stays');
-  const entry = one<{ data: string }>(hub.db, "SELECT data FROM audit_log WHERE action = 'stock.ingredient_removed' ORDER BY id DESC LIMIT 1")!;
-  assert.equal((JSON.parse(entry.data) as { outcome: string }).outcome, 'archived');
   assertError(await send(hub, `/api/stock/ingredients/${randomUUID()}/remove`, {}), 404, 'INGREDIENT_NOT_FOUND');
+});
+
+test('«Удалить» an archived raw material with stock on hand: gone for good, written off as «удалено», its name free again', async (t) => {
+  const h = harness(t);
+  const hub = await cafe(h);
+  const coffee = await ingredient(hub, 'Кофе в зёрнах'); // 3 000 г at 12 ₸, in all six coffees
+  await sell(hub, [{ product: 'Латте', options: ['s'] }]); // −18 г
+  const supply = await send<SupplyView>(hub, '/api/stock/supplies', {
+    supplier: 'Обжарщик',
+    lines: [{ ingredientId: coffee.id, quantity: 1000, amount: 12000_00 }],
+  });
+  assert.equal(supply.status, 201);
+  const count = await send(hub, '/api/stock/counts', { lines: [{ ingredientId: coffee.id, counted: 3900 }] });
+  assert.equal(count.status, 201);
+  // Out of the recipes by hand, then into the archive — like the owner's «10 в архиве».
+  for (const p of ['Американо', 'Капучино', 'Латте', 'Раф', 'Флэт уайт', 'Эспрессо']) {
+    const id = await productId(hub, p);
+    const r = (await get<RecipeView>(hub, `/api/stock/recipes/${id}`)).body;
+    const res = await send(hub, `/api/stock/recipes/${id}`, {
+      items: r.items.filter((i) => i.ingredientId !== coffee.id),
+      options: r.options.filter((o) => o.ingredientId !== coffee.id && o.replacesId !== coffee.id),
+    });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+  }
+  assert.equal((await send(hub, `/api/stock/ingredients/${coffee.id}/update`, { isArchived: true })).status, 200);
+  assert.equal((await ingredient(hub, 'Кофе в зёрнах')).isArchived, true);
+
+  h.clock.advance(MIN);
+  const plan = (await get<IngredientRemovalView>(hub, `/api/stock/ingredients/${coffee.id}/removal`)).body;
+  assert.equal(plan.outcome, 'history');
+  assert.equal(plan.quantity, 3900);
+  assert.deepEqual(plan.recipes, []);
+  assert.deepEqual(plan.history, { movements: 4, supplies: 1, counts: 1 });
+  const removed = await send<RemoveIngredientResponse>(hub, `/api/stock/ingredients/${coffee.id}/remove`, {});
+  assert.equal(removed.status, 200, JSON.stringify(removed.body));
+  assert.deepEqual(removed.body, { historyKept: true, recipes: [], quantity: 3900 });
+
+  // Gone from the levels, the archive, the sample — the row stays for the history.
+  assert.ok(!(await ingredients(hub)).some((i) => i.id === coffee.id));
+  assert.ok(!hub.hub.stock.sample().ingredients.some((i) => i.id === coffee.id));
+  const row = one<{ deleted_at: number | null; quantity: number; is_sample: number }>(
+    hub.db,
+    'SELECT deleted_at, quantity, is_sample FROM ingredients WHERE id = ?',
+    coffee.id,
+  )!;
+  assert.deepEqual({ ...row }, { deleted_at: h.clock.now(), quantity: 0, is_sample: 0 });
+  // The stock it had went off at its cost, so the totals stay honest.
+  const [last] = await movements(hub, coffee.id);
+  assert.deepEqual([last!.kind, last!.quantity, last!.balance, last!.cost, last!.reason], ['writeoff', -3900, 0, -3900 * 1200, 'Сырьё удалено']);
+  // Deliveries, counts and the journal still name it.
+  assert.equal((await get<SuppliesView>(hub, '/api/stock/supplies')).body.supplies[0]!.lines[0]!.name, 'Кофе в зёрнах');
+  assert.equal(hub.hub.stock.counts().counts[0]!.lines[0]!.name, 'Кофе в зёрнах');
+  const entry = one<{ data: string }>(hub.db, "SELECT data FROM audit_log WHERE action = 'stock.ingredient_removed' ORDER BY id DESC LIMIT 1")!;
+  assert.deepEqual(JSON.parse(entry.data), {
+    name: 'Кофе в зёрнах',
+    unit: 'г',
+    outcome: 'deleted',
+    historyKept: true,
+    recipes: [],
+    quantity: 3900,
+    cost: -3900 * 1200,
+  });
+
+  // Nothing can be done to it any more — it cannot come back from a screen.
+  assertError(await send(hub, `/api/stock/ingredients/${coffee.id}/update`, { isArchived: false }), 404, 'INGREDIENT_NOT_FOUND');
+  assertError(await send(hub, `/api/stock/ingredients/${coffee.id}/adjust`, { quantity: 1, reason: 'Пересчитали' }), 404, 'INGREDIENT_NOT_FOUND');
+  assertError(await send(hub, '/api/stock/writeoffs', { ingredientId: coffee.id, quantity: 1, reason: 'Пролили' }), 404, 'INGREDIENT_NOT_FOUND');
+  assertError(await send(hub, '/api/stock/counts', { lines: [{ ingredientId: coffee.id, counted: 1 }] }), 404, 'INGREDIENT_NOT_FOUND');
+  assertError(await send(hub, `/api/stock/ingredients/${coffee.id}/remove`, {}), 404, 'INGREDIENT_NOT_FOUND');
+  assert.equal((await get(hub, `/api/stock/ingredients/${coffee.id}/removal`)).status, 404);
+  assertError(
+    await send(hub, '/api/stock/supplies', { supplier: 'Обжарщик', lines: [{ ingredientId: coffee.id, quantity: 1, amount: 1 }] }),
+    422,
+    'INGREDIENT_DELETED',
+  );
+  assertError(
+    await send(hub, `/api/stock/recipes/${await productId(hub, 'Эспрессо')}`, { items: [{ ingredientId: coffee.id, quantity: 9 }] }),
+    422,
+    'RECIPE_INVALID',
+  );
+
+  // A new «Кофе в зёрнах» can be made — typed in, or brought by a delivery line.
+  const again = await send<IngredientView>(hub, '/api/stock/ingredients', { name: 'Кофе в зёрнах', unit: 'г' });
+  assert.equal(again.status, 201, JSON.stringify(again.body));
+  assert.notEqual(again.body.id, coffee.id);
+  assert.deepEqual([again.body.quantity, again.body.hasHistory, again.body.isSample], [0, false, false]);
+  const fresh = await send<SupplyView>(hub, '/api/stock/supplies', {
+    supplier: 'Обжарщик',
+    lines: [{ newIngredient: { name: 'кофе в зёрнах', unit: 'г' }, quantity: 500, amount: 6000_00 }],
+  });
+  assert.equal(fresh.body.lines[0]!.ingredientId, again.body.id, 'the delivery finds the new one, not the deleted one');
+});
+
+test('a level below zero is brought to zero when the raw material is deleted', async (t) => {
+  const h = harness(t);
+  const hub = await cafe(h);
+  const cream = (await send<IngredientView>(hub, '/api/stock/ingredients', { name: 'Сливки', unit: 'мл', quantity: 500, costPerUnit: 200 })).body;
+  await send(hub, '/api/stock/writeoffs', { ingredientId: cream.id, quantity: 600, reason: 'Скисло' });
+  assert.equal((await ingredient(hub, 'Сливки')).quantity, -100);
+  const plan = (await get<IngredientRemovalView>(hub, `/api/stock/ingredients/${cream.id}/removal`)).body;
+  assert.deepEqual([plan.outcome, plan.quantity], ['history', -100]);
+  const removed = await send<RemoveIngredientResponse>(hub, `/api/stock/ingredients/${cream.id}/remove`, {});
+  assert.deepEqual(removed.body, { historyKept: true, recipes: [], quantity: -100 });
+  const [last] = await movements(hub, cream.id);
+  assert.deepEqual([last!.kind, last!.quantity, last!.balance, last!.cost, last!.reason], ['adjust', 100, 0, 200 * 100, 'Сырьё удалено']);
+});
+
+test('after a raw material is deleted, a cancelled order and a deleted or corrected delivery leave it at zero', async (t) => {
+  const h = harness(t);
+  const hub = await cafe(h);
+  const milk = await ingredient(hub, 'Молоко 3,2%');
+  const cups = await ingredient(hub, 'Стакан 0,5'); // 100
+  const supply = await send<SupplyView>(hub, '/api/stock/supplies', {
+    supplier: 'Метро',
+    lines: [
+      { ingredientId: milk.id, quantity: 1000, amount: 600_00 },
+      { ingredientId: cups.id, quantity: 50, amount: 2000_00 },
+    ],
+  });
+  const order = await sell(hub, [{ product: 'Латте', options: ['l'] }]); // a 0,5 cup and 350 мл
+  assert.equal((await ingredient(hub, 'Стакан 0,5')).quantity, 149);
+  const removed = await send<RemoveIngredientResponse>(hub, `/api/stock/ingredients/${cups.id}/remove`, { fromRecipes: true });
+  assert.equal(removed.body.quantity, 149);
+  const level = () => one<{ quantity: number }>(hub.db, 'SELECT quantity FROM ingredients WHERE id = ?', cups.id)!.quantity;
+  const cupMoves = () => all(hub.db, 'SELECT id FROM stock_movements WHERE ingredient_id = ?', cups.id).length;
+  const before = cupMoves();
+
+  // The cancel gives the milk back; the deleted cups stay at zero.
+  await send(hub, `/api/counter/orders/${order.id}/cancel`, { reason: 'Гость передумал' });
+  assert.equal((await ingredient(hub, 'Молоко 3,2%')).quantity, 13000);
+  assert.deepEqual([level(), cupMoves()], [0, before]);
+
+  // A correction keeps the line of the deleted cups as it was; changing that line is refused.
+  const fixed = await send<SupplyView>(hub, `/api/stock/supplies/${supply.body.id}/update`, {
+    supplier: 'Метро',
+    lines: [
+      { ingredientId: milk.id, quantity: 2000, amount: 1200_00 },
+      { ingredientId: cups.id, quantity: 50, amount: 2000_00 },
+    ],
+  });
+  assert.equal(fixed.status, 200, JSON.stringify(fixed.body));
+  assert.equal(fixed.body.lines[1]!.name, 'Стакан 0,5');
+  assert.equal((await ingredient(hub, 'Молоко 3,2%')).quantity, 14000);
+  const changed = await send(hub, `/api/stock/supplies/${supply.body.id}/update`, {
+    supplier: 'Метро',
+    lines: [{ ingredientId: milk.id, quantity: 2000, amount: 1200_00 }],
+  });
+  assertError(changed, 422, 'INGREDIENT_DELETED');
+  assert.match(changed.body.error!.message, /Стакан 0,5/);
+
+  // Deleting the delivery takes the milk back; nothing moves on the deleted cups.
+  const deleted = await send<SupplyView>(hub, `/api/stock/supplies/${supply.body.id}/delete`, {});
+  assert.equal(deleted.status, 200, JSON.stringify(deleted.body));
+  assert.equal((await ingredient(hub, 'Молоко 3,2%')).quantity, 12000);
+  assert.deepEqual([level(), cupMoves()], [0, before]);
+});
+
+test('migration 022: ingredients get deleted_at; an old base keeps its rows as they were', async (t) => {
+  const h = harness(t);
+  const dir = join(h.dir, 'migrations');
+  mkdirSync(dir);
+  for (const f of readdirSync(MIGRATIONS_DIR)) if (Number.parseInt(f, 10) < 22) copyFileSync(new URL(f, MIGRATIONS_DIR), join(dir, f));
+  const old = openDb(h.dbPath, h.clock.now(), { migrationsDir: pathToFileURL(dir + '/') });
+  run(old, "INSERT INTO ingredients (id, name, unit, quantity, is_archived, created_at, updated_at) VALUES ('a', 'Кофе в зёрнах', 'г', 1500, 1, 1, 1)");
+  old.close();
+  const file = readdirSync(MIGRATIONS_DIR).find((f) => f.startsWith('022_'))!;
+  copyFileSync(new URL(file, MIGRATIONS_DIR), join(dir, file));
+  const db = openDb(h.dbPath, h.clock.now(), { migrationsDir: pathToFileURL(dir + '/') });
+  try {
+    assert.deepEqual({ ...one<object>(db, 'SELECT id, quantity, is_archived, deleted_at FROM ingredients') }, { id: 'a', quantity: 1500, is_archived: 1, deleted_at: null });
+  } finally {
+    db.close();
+  }
 });
 
 // ─── «Исправить остаток» ────────────────────────────────────────────────────
@@ -674,7 +854,7 @@ test('a correction keeps the lines of an ingredient archived since the delivery;
   const h = harness(t);
   const hub = await cafe(h);
   const milk = await ingredient(hub, 'Молоко 3,2%');
-  const cups = await ingredient(hub, 'Стакан 0,5');
+  const cups = (await send<IngredientView>(hub, '/api/stock/ingredients', { name: 'Стакан 0,2', unit: 'шт' })).body;
   const supply = await send<SupplyView>(hub, '/api/stock/supplies', {
     supplier: 'Метро',
     lines: [
@@ -682,8 +862,9 @@ test('a correction keeps the lines of an ingredient archived since the delivery;
       { ingredientId: cups.id, quantity: 50, amount: 2000_00 },
     ],
   });
-  await send(hub, `/api/stock/ingredients/${cups.id}/remove`, { fromRecipes: true });
-  assert.equal((await ingredient(hub, 'Стакан 0,5')).isArchived, true);
+  // «В архив» — hidden for a while, not deleted.
+  assert.equal((await send(hub, `/api/stock/ingredients/${cups.id}/update`, { isArchived: true })).status, 200);
+  assert.equal((await ingredient(hub, 'Стакан 0,2')).isArchived, true);
   const fixed = await send<SupplyView>(hub, `/api/stock/supplies/${supply.body.id}/update`, {
     supplier: 'Метро',
     lines: [

@@ -1,0 +1,11 @@
+-- «Удалить сырьё» for good (StockService.removeIngredient, right stock.edit — the director and the
+-- administrator), active or archived alike.
+--
+-- An ingredient nothing ever happened to is still deleted outright. One with history (movements,
+-- delivery lines, count lines) cannot be: those rows reference it and name it. `deleted_at` marks
+-- it instead — it is gone from the levels, the archive, every picker, search and the sample, its
+-- recipe lines are removed and what was on hand is written off as «Сырьё удалено»; movements,
+-- deliveries, counts and the journal keep showing its name. A deleted ingredient is also archived,
+-- so every list that hides archived ones hides it too, and its name is free for a new one.
+-- There is no way back from a screen.
+ALTER TABLE ingredients ADD COLUMN deleted_at INTEGER;

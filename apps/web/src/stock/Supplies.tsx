@@ -18,6 +18,8 @@ interface Line {
   /** A known ingredient, or null with `fresh`: created with the delivery. */
   ingredientId: string | null;
   fresh: { name: string; unit: IngredientUnit } | null;
+  /** A line of an ingredient deleted since the delivery: shown as it was, it cannot change. */
+  kept: { name: string; unit: IngredientUnit } | null;
   quantity: string;
   /** Base units per typed unit: 1000 when typed in кг or л. */
   factor: number;
@@ -191,6 +193,8 @@ function SupplyForm({
         key: nextKey++,
         ingredientId: l.ingredientId,
         fresh: null,
+        // Not on the stock any more (archived ones are): deleted since the delivery.
+        kept: ingredients.some((i) => i.id === l.ingredientId) ? null : { name: l.name, unit: l.unit },
         quantity: typed.text,
         factor: typed.factor,
         amount: l.amount ? toMajorText(l.amount, currency) : '',
@@ -211,11 +215,11 @@ function SupplyForm({
 
   const add = (ingredientId: string) => {
     const ing = byId.get(ingredientId);
-    setLines((ls) => [...ls, { key: nextKey++, ingredientId, fresh: null, quantity: '', factor: ing ? bigUnitOf(ing.unit).factor : 1, amount: '' }]);
+    setLines((ls) => [...ls, { key: nextKey++, ingredientId, fresh: null, kept: null, quantity: '', factor: ing ? bigUnitOf(ing.unit).factor : 1, amount: '' }]);
     setQuery('');
   };
   const addFresh = (unit: IngredientUnit) => {
-    setLines((ls) => [...ls, { key: nextKey++, ingredientId: null, fresh: { name: q, unit }, quantity: '', factor: bigUnitOf(unit).factor, amount: '' }]);
+    setLines((ls) => [...ls, { key: nextKey++, ingredientId: null, fresh: { name: q, unit }, kept: null, quantity: '', factor: bigUnitOf(unit).factor, amount: '' }]);
     setQuery('');
   };
   const patch = (key: number, p: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...p } : l)));
@@ -308,19 +312,23 @@ function SupplyForm({
         <ul className="stock-lines">
           {parsed.map((l, idx) => {
             const ing = l.ingredientId ? byId.get(l.ingredientId) : undefined;
-            const unit = ing?.unit ?? l.fresh?.unit ?? 'шт';
+            const unit = ing?.unit ?? l.kept?.unit ?? l.fresh?.unit ?? 'шт';
+            const name = ing?.name ?? l.kept?.name ?? l.fresh?.name ?? '';
             const pack = packOf(unit);
             const perPack = l.qty && l.sum ? Math.round((l.sum / l.qty) * pack.size) : null;
             return (
               <li key={l.key} className="stock-line">
                 <div className="stock-line-head">
                   <span className="stock-line-name">
-                    {idx + 1}. {ing?.name ?? l.fresh?.name ?? '—'}
+                    {idx + 1}. {name || '—'}
                     {l.fresh && <span className="tag tag-ok">новое</span>}
+                    {l.kept && <span className="tag tag-muted">удалено</span>}
                   </span>
-                  <button type="button" className="btn btn-small" aria-label="Убрать строку" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}>
-                    <Icon name="trash" size={16} />
-                  </button>
+                  {!l.kept && (
+                    <button type="button" className="btn btn-small" aria-label="Убрать строку" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}>
+                      <Icon name="trash" size={16} />
+                    </button>
+                  )}
                 </div>
                 <div className="stock-line-fields">
                   <label className="field">
@@ -329,16 +337,24 @@ function SupplyForm({
                       value={l.quantity}
                       factor={l.factor}
                       unit={unit}
-                      label={`Количество: ${ing?.name ?? l.fresh?.name ?? ''}`}
+                      label={`Количество: ${name}`}
+                      disabled={l.kept !== null}
                       invalid={l.quantity.trim() !== '' && l.qty === null}
                       onChange={(text, factor) => patch(l.key, { quantity: text, factor })}
                     />
                   </label>
                   <label className="field">
                     <span>Сумма, {currency}</span>
-                    <input inputMode="decimal" value={l.amount} onChange={(e) => patch(l.key, { amount: e.target.value })} placeholder="0" />
+                    <input
+                      inputMode="decimal"
+                      value={l.amount}
+                      disabled={l.kept !== null}
+                      onChange={(e) => patch(l.key, { amount: e.target.value })}
+                      placeholder="0"
+                    />
                   </label>
                 </div>
+                {l.kept && <span className="hint">Это сырьё удалено — строка остаётся как была.</span>}
                 {(perPack !== null || (l.qty !== null && l.factor > 1)) && (
                   <span className="hint">
                     {l.qty !== null && l.factor > 1 ? `= ${l.qty.toLocaleString('ru-RU')} ${unit}` : ''}
@@ -397,6 +413,8 @@ function DeleteSupplyDialog({
   const below = [...taken]
     .map(([id, q]) => ({ ing: byId.get(id), after: Math.round(((byId.get(id)?.quantity ?? 0) - q) * 1000) / 1000 }))
     .filter((x) => x.ing && x.after < 0);
+  // Raw material deleted since (archived ones are still listed): its stock went off when it was deleted.
+  const gone = supply.lines.some((l) => !byId.has(l.ingredientId));
   return (
     <Modal
       title="Удалить поставку?"
@@ -424,11 +442,12 @@ function DeleteSupplyDialog({
           {supply.lines.map((l, i) => (
             <li key={i}>
               <span>{l.name}</span>
-              <span className="stock-minus">−{qtyLabel(l.quantity, l.unit)}</span>
+              {byId.has(l.ingredientId) ? <span className="stock-minus">−{qtyLabel(l.quantity, l.unit)}</span> : <span className="muted">удалено</span>}
               <span className="money">{formatMoney(l.amount, currency)}</span>
             </li>
           ))}
         </ul>
+        {gone && <p className="hint">Удалённое сырьё не трогаем: его остаток списали, когда его удаляли.</p>}
         {below.length > 0 && (
           <div className="warn-note">
             Часть уже ушла в продажи — остаток станет минусом:{' '}
