@@ -29,6 +29,7 @@ import type { TrialInfo, TrialRecord } from './trial-store.ts';
 import { loadTrial, saveTrial, setCurrentTrial, TRIAL_DAYS, updateCurrentTrial } from './trial-store.ts';
 import type { TrialTerms } from './trial-cloud.ts';
 import { startTrialCloud } from './trial-cloud.ts';
+import { setWatchSoonHook } from './trial-watch.ts';
 
 const SAVE_DEBOUNCE_MS = 800;
 
@@ -167,7 +168,7 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
     info = {
       startedAt: now,
       venue: fresh?.venue.trim() || 'Моя кофейня',
-      managerName: fresh?.managerName.trim() || 'Управляющий',
+      managerName: fresh?.managerName.trim() || 'Директор',
       managerKey: trialKey(),
     };
   }
@@ -198,7 +199,7 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
   // A copy from the cabinet comes without the manager's code: give the manager a new one to sign in with.
   if (saved && !info.managerKey) {
     const managerKey = trialKey();
-    hub.auth.issueFixedKeys([{ roles: ['manager'], name: info.managerName || 'Управляющий', key: managerKey }]);
+    hub.auth.issueFixedKeys([{ roles: ['manager'], name: info.managerName || 'Директор', key: managerKey }]);
     updateCurrentTrial({ managerKey });
   }
   const saver = keepTrialSaved(db, hub, info);
@@ -219,7 +220,11 @@ async function bootTrial(fresh: NewTrial | null): Promise<TrialInfo> {
       void installTrialLicense(hub, info, Date.now()).catch((err: unknown) => console.warn('[trial] could not apply the new terms', err));
     },
   });
-  if (link) (window as unknown as { __tsTrialReportNow?: () => Promise<unknown> }).__tsTrialReportNow = link.reportNow;
+  if (link) {
+    (window as unknown as { __tsTrialReportNow?: () => Promise<unknown> }).__tsTrialReportNow = link.reportNow;
+    // «Открыть на телефоне»: a fresh copy goes up right away, so the phone opens on current data.
+    setWatchSoonHook(link.watchSoon);
+  }
   return info;
 }
 
@@ -273,7 +278,7 @@ function isHubPath(url: URL): boolean {
 }
 
 /** Same-origin /api/* requests go to the in-page HUB; everything else to the network. */
-function installFetch(app: MiniFastify, changed: () => void): void {
+export function installFetch(app: Pick<MiniFastify, 'inject'>, changed: () => void): void {
   const networkFetch = window.fetch.bind(window);
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = input instanceof Request ? input : null;
@@ -295,7 +300,7 @@ function installFetch(app: MiniFastify, changed: () => void): void {
 }
 
 /** `new EventSource('/api/events')` subscribes to the in-page HUB's change events. */
-function installEventSource(hub: Hub): void {
+export function installEventSource(hub: Pick<Hub, 'events'>): void {
   const NetworkEventSource = window.EventSource;
 
   class DemoEventSource extends EventTarget {

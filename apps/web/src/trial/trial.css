@@ -201,3 +201,88 @@
   .trial-badge-dot { animation: none; }
   .trial-badge { transition: none; }
 }
+
+/* «Смотреть с телефона» at the cash desk (TrialWatch.tsx): the QR code, the link, plain facts. */
+.trial-details-watch {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.trial-watch {
+  display: grid;
+  gap: 12px;
+  max-width: 440px;
+}
+
+.trial-watch p {
+  margin: 0;
+}
+
+.trial-watch-qr {
+  display: grid;
+  place-items: center;
+}
+
+.trial-watch-qr .qr-code {
+  width: min(232px, 70vw);
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.trial-watch-link {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.trial-watch-link input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.trial-watch-facts {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 1.2em;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.trial-watch-status {
+  font-weight: 600;
+}
+
+.trial-watch-error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* The phone (WatchBanner.tsx): a strip placed like .pwa-banner; amber when the copy is old or offline. */
+.watch-banner {
+  border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  background: color-mix(in oklab, var(--accent) 10%, var(--surface));
+}
+
+.watch-banner[data-stale] {
+  border-color: color-mix(in oklab, var(--warn) 60%, transparent);
+  background: color-mix(in oklab, var(--warn) 14%, var(--surface));
+}
+
+.login-shell > .watch-banner {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto 16px;
+}
+
+.watch-problem-detail {
+  margin-top: 8px;
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}

@@ -2,7 +2,7 @@
  * Where the browser trial keeps its coffee shop (VITE_TRIAL=1): IndexedDB, not localStorage —
  * two weeks of orders outgrow localStorage's few megabytes. One record holds the SQLite file
  * and the facts the trial needs before the HUB starts (when it began, the venue, the
- * manager's key for «Код управляющего», the link to the TS cloud). Small and dependency-free, so the badge can import it
+ * director's key for «Код директора», the link to the TS cloud). Small and dependency-free, so the badge can import it
  * without pulling in the HUB.
  */
 
@@ -83,12 +83,29 @@ export async function loadTrial(): Promise<TrialRecord | null> {
   }
 }
 
+/**
+ * A synchronous «this browser has its own coffee shop» mark next to the IndexedDB record: a remembered
+ * watch link (watch-mode.ts, «Смотреть с телефона») never takes over a browser that runs the trial itself.
+ */
+export const TRIAL_HERE_KEY = 'ts.trial.here';
+
+function markTrialHere(here: boolean): void {
+  try {
+    if (here) localStorage.setItem(TRIAL_HERE_KEY, '1');
+    else localStorage.removeItem(TRIAL_HERE_KEY);
+  } catch {
+    // Storage blocked: a watch link is then only followed when opened as a link.
+  }
+}
+
 export async function saveTrial(rec: TrialRecord): Promise<void> {
   await withStore('readwrite', (s) => s.put(rec, RECORD));
+  markTrialHere(true);
 }
 
 export async function clearTrial(): Promise<void> {
   await withStore('readwrite', (s) => s.delete(RECORD));
+  markTrialHere(false);
 }
 
 /** The facts of the running trial, for the badge (set by boot.ts, updated by trial-cloud.ts). */

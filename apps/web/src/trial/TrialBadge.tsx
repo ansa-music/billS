@@ -1,11 +1,13 @@
 import { useEffect, useReducer, useState, useSyncExternalStore } from 'react';
 import { Modal } from '../ui.tsx';
 import { currentTrial, daysLeft, downloadBackup, subscribeTrial, TRIAL, trialEndsAt, trialOver, trialVersion } from '../demo-hub/trial-store.ts';
+import { openTrialWatch, TrialWatchHost, useCanWatchFromPhone } from './TrialWatch.tsx';
 
 /**
  * Browser trial (VITE_TRIAL=1): a quiet line at the bottom of the menu — «Пробная · 12 дн.» —
  * instead of a strip over every page. A click opens the details: the end date, «Скачать копию»,
- * the manager's code and how to extend. Renders nothing in other builds.
+ * the director's code (role manager, «Директор» in a coffee shop), «Открыть на телефоне» and how
+ * to extend. Renders nothing in other builds.
  */
 export function TrialBadge({ place = 'sidebar' }: { place?: 'sidebar' | 'sheet' }) {
   useSyncExternalStore(subscribeTrial, trialVersion);
@@ -39,6 +41,7 @@ export function TrialBadge({ place = 'sidebar' }: { place?: 'sidebar' | 'sheet' 
         </span>
       </button>
       {open && <TrialDetails onClose={() => setOpen(false)} />}
+      {place === 'sidebar' && <TrialWatchHost />}
     </>
   );
 }
@@ -47,6 +50,7 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
   const info = currentTrial();
   const [busy, setBusy] = useState(false);
   const [showKey, setShowKey] = useState(false);
+  const canWatch = useCanWatchFromPhone();
   if (!info) return null;
   const over = trialOver(info);
   const left = daysLeft(info);
@@ -89,13 +93,28 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
               type="button"
               className="btn btn-ghost"
               onClick={() => {
-                if (window.confirm('Показать код управляющего? Убедитесь, что экран не видят посторонние.')) setShowKey(true);
+                if (window.confirm('Показать код директора? Убедитесь, что экран не видят посторонние.')) setShowKey(true);
               }}
             >
-              Код управляющего
+              Код директора
             </button>
           )}
         </div>
+        {canWatch && (
+          <div className="trial-details-watch">
+            <p className="muted">Смотреть, что происходит на кассе, можно и с телефона — одновременно с кассой.</p>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                onClose();
+                openTrialWatch();
+              }}
+            >
+              Открыть на телефоне
+            </button>
+          </div>
+        )}
         <p className="trial-details-foot">Продлить или подключить полную версию — напишите TS.</p>
       </div>
     </Modal>

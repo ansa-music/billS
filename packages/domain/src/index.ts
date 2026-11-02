@@ -27,5 +27,6 @@ export * from './stock-forecast.ts';
 export * from './guest.ts';
 export * from './booking.ts';
 export * from './trial.ts';
+export * from './trial-watch.ts';
 export * from './archive.ts';
 export * from './stock.ts';

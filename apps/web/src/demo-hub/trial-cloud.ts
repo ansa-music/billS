@@ -6,7 +6,7 @@
  *
  * Contract (supabase/functions/trial): base `${VITE_SUPABASE_URL}/functions/v1/trial`
  *   POST /start  {venue, managerName, timezone}            → {id, token, startedAt, endsAt, status}
- *   POST /report Bearer token, {id, stats, snapshot?}       → {status, endsAt, message?}
+ *   POST /report Bearer token, {id, stats, snapshot?}       → {status, endsAt, message?, watching?}
  *   GET  /terms?id=  Bearer token                          → {status, endsAt, message?}
  * Without VITE_SUPABASE_URL everything here is off. Nothing waits on the network: a failed
  * call is tried again on the next tick.
@@ -16,6 +16,8 @@ import { TRIAL_SNAPSHOT_MAX_BYTES, workingDay } from '@bills/domain';
 import type { DatabaseSync } from './shims/sqlite.ts';
 import type { TrialInfo } from './trial-store.ts';
 import { isStatus } from './trial-store.ts';
+import type { TrialReportAnswer } from '@bills/domain';
+import { TRIAL_WATCH, trialReportEveryMs, trialSnapshotDue } from '@bills/domain';
 
 export type { TrialStats, TrialTerms };
 type TrialDayStats = TrialStats['days'][number];
@@ -28,9 +30,9 @@ const BASE = String(import.meta.env.VITE_SUPABASE_URL ?? '')
 export const TRIAL_CLOUD_URL = BASE ? `${BASE}/functions/v1/trial` : '';
 
 const APP_VERSION = String(import.meta.env.VITE_APP_VERSION ?? 'trial');
-const REPORT_EVERY_MS = 5 * 60_000;
+/** How often «is a report due?» is asked: every 5 minutes, or every minute while a phone watches (TRIAL_WATCH). */
+const REPORT_TICK_MS = 15_000;
 const FIRST_CHANGE_DELAY_MS = 20_000;
-const SNAPSHOT_EVERY_MS = 30 * 60_000;
 const SNAPSHOT_MAX_BYTES = TRIAL_SNAPSHOT_MAX_BYTES;
 const STATS_DAYS = 14;
 const TIMEOUT_MS = 20_000;
@@ -159,9 +161,20 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(s);
 }
 
+/** POST /report with the answer's `watching` kept: a phone is looking («Смотреть с телефона»). */
+async function cloudReportWatching(id: string, token: string, stats: TrialStats, snapshot?: string): Promise<TrialReportAnswer> {
+  const req: TrialReportRequest = { id, stats, ...(snapshot ? { snapshot } : {}) };
+  const body = await call('/report', { method: 'POST', token, body: JSON.stringify(req) });
+  const terms = parseTerms(body);
+  if (!terms) throw new Error('trial /report: unexpected answer');
+  return (body as { watching?: unknown }).watching === true ? { ...terms, watching: true } : terms;
+}
+
 export interface TrialCloudLink {
   /** Report now (the debug hook and tests); resolves with the cloud's terms or null. */
   reportNow(): Promise<TrialTerms | null>;
+  /** A watch link was just made: report at the phone's pace for a while, a fresh copy first. */
+  watchSoon(): void;
 }
 
 export interface TrialCloudDeps {
@@ -179,6 +192,8 @@ export interface TrialCloudDeps {
 /**
  * Starts the link: POST /start once (retried until it answers), then a report every 5 minutes,
  * 20 s after the first change, and a last one (without the copy) when the page goes away.
+ * While a phone watches (the report's answer says `watching`, or a watch link was just made) the
+ * reports come every minute and carry the copy whenever it changed; otherwise the copy goes every 30 minutes.
  * Returns null when this build has no cloud or the coffee shop is a local-only copy.
  */
 export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
@@ -186,6 +201,10 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
   // A copy opened for viewing (no cloud link) must never pose as the trial.
   if (!TRIAL_CLOUD_URL || info.localOnly) return null;
   let running: Promise<TrialTerms | null> | null = null;
+  let watchedByCloud = false;
+  let watchedUntil = 0;
+  const watched = () => watchedByCloud || Date.now() < watchedUntil;
+  let lastAttempt = 0;
 
   const take = (terms: TrialTerms) => {
     const message = terms.message ?? null;
@@ -196,7 +215,7 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
   };
 
   const snapshot = (): { data: string; hash: string } | null => {
-    if (Date.now() - (info.snapshotAt ?? 0) < SNAPSHOT_EVERY_MS || db.isTransaction) return null;
+    if (!trialSnapshotDue(Date.now(), info.snapshotAt, watched()) || db.isTransaction) return null;
     const bytes = db.export();
     if (bytes.length > SNAPSHOT_MAX_BYTES) return null;
     const hash = fingerprint(bytes);
@@ -211,7 +230,8 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
         take(started);
       }
       const snap = snapshot();
-      const terms = await cloudReport(info.cloudId!, info.cloudToken!, collectStats(db), snap?.data);
+      const terms = await cloudReportWatching(info.cloudId!, info.cloudToken!, collectStats(db), snap?.data);
+      watchedByCloud = terms.watching === true;
       if (snap) deps.persist({ snapshotAt: Date.now(), snapshotHash: snap.hash });
       take(terms);
       return terms;
@@ -221,15 +241,25 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
     }
   };
   const reportNow = () => {
-    running ??= tick().finally(() => {
-      running = null;
-    });
+    if (!running) {
+      lastAttempt = Date.now();
+      running = tick().finally(() => {
+        running = null;
+      });
+    }
     return running;
+  };
+  const watchSoon = () => {
+    watchedUntil = Date.now() + TRIAL_WATCH.watchingMs;
+    // After a report already on its way (it may have gone without the copy).
+    void (running ?? Promise.resolve()).then(() => reportNow());
   };
 
   // The first report a few seconds after opening, so the counter draws first.
   setTimeout(() => void reportNow(), 3000);
-  setInterval(() => void reportNow(), REPORT_EVERY_MS);
+  setInterval(() => {
+    if (Date.now() - lastAttempt >= trialReportEveryMs(watched())) void reportNow();
+  }, REPORT_TICK_MS);
   let firstChange = true;
   deps.onChange(() => {
     if (!firstChange) return;
@@ -249,5 +279,5 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
       // Closing the page: nothing to do if the browser refuses.
     }
   });
-  return { reportNow };
+  return { reportNow, watchSoon };
 }

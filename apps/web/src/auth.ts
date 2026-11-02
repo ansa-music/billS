@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Action, AuthStaff, Role } from '@bills/domain';
 import { can, isRole, normalizeAccessKey, primaryRole } from '@bills/domain';
 import { UNAUTHORIZED_EVENT, command, loginWithKey, setAuthToken } from './api.ts';
+import { isWatchMode } from './demo-hub/watch-mode.ts';
 
 /**
  * Who is signed in on this screen. A session comes from an access key
@@ -16,7 +17,11 @@ export interface AuthSession {
   expiresAt: number;
 }
 
-const AUTH_KEY = 'bills.auth';
+/**
+ * A phone watching a trial cash desk («Смотреть с телефона», demo-hub/watch-mode.ts) keeps its own
+ * session: signing in there never signs this browser's own trial, or a cash desk in another tab, out.
+ */
+const authKey = (): string => (isWatchMode() ? 'bills.watch.auth' : 'bills.auth');
 const ACTOR_KEY = 'bills.actor';
 const DEVICE_KEY = 'bills.device';
 /** Pre-key staff picker (removed); cleared on the next write so old tablets do not keep it around. */
@@ -44,7 +49,7 @@ function parseStaff(value: unknown): AuthStaff | null {
 
 export function readAuth(): AuthSession | null {
   try {
-    const raw = localStorage.getItem(AUTH_KEY);
+    const raw = localStorage.getItem(authKey());
     if (!raw) return null;
     const a = JSON.parse(raw) as Partial<AuthSession>;
     const staff = parseStaff(a.staff);
@@ -60,10 +65,10 @@ export function writeAuth(session: AuthSession | null): void {
   setAuthToken(session?.token ?? null);
   try {
     if (session) {
-      localStorage.setItem(AUTH_KEY, JSON.stringify(session));
+      localStorage.setItem(authKey(), JSON.stringify(session));
       localStorage.setItem(ACTOR_KEY, session.staff.name);
     } else {
-      localStorage.removeItem(AUTH_KEY);
+      localStorage.removeItem(authKey());
     }
     localStorage.removeItem(LEGACY_STAFF_KEY);
   } catch {
