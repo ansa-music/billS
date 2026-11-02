@@ -3,6 +3,8 @@ import { ACTION_MODULE, MODULE_LABEL, decide, licenseGateOf } from '@bills/domai
 import { currentTrial, TRIAL } from './demo-hub/trial-store.ts';
 import { isWatchMode } from './demo-hub/watch-mode.ts';
 import { WatchBanner } from './trial/WatchBanner.tsx';
+import { isLinkMode } from './demo-hub/link-mode.ts';
+import { LinkBanner } from './trial/LinkBanner.tsx';
 
 /**
  * The license of this branch as screens see it: the banner in the shell and
@@ -55,8 +57,21 @@ export function blockedReason(roles: RoleSet, action: Action, license: LicenseSt
  * mode. Nothing while the license is fine or not enforced (null).
  */
 export function LicenseBanner({ license }: { license: LicenseStatus | null | undefined }) {
+  // A phone or tablet working through the trial cash desk: «Касса на связи» / «Касса не отвечает» first.
+  if (isLinkMode()) {
+    return (
+      <>
+        <LinkBanner />
+        <LicenseStrip license={license} />
+      </>
+    );
+  }
   // A phone watching a trial cash desk: «Только просмотр · данные кассы на 14:32» instead.
   if (isWatchMode()) return <WatchBanner />;
+  return <LicenseStrip license={license} />;
+}
+
+function LicenseStrip({ license }: { license: LicenseStatus | null | undefined }) {
   if (!license) return null;
   const tone = licenseTone(license.state);
   if (tone === 'ok' && !license.readOnly) return null;

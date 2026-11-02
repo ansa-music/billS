@@ -10,8 +10,10 @@ import './sections.css';
 import './app.css';
 import { applyStoredTheme } from './theme.ts';
 import { App } from './App.tsx';
-import { watchTokenFromHash } from '@bills/domain';
+import { linkFromHash, watchTokenFromHash } from '@bills/domain';
 import { watchToken } from './demo-hub/watch-mode.ts';
+import type { LinkTarget } from './demo-hub/link-mode.ts';
+import { linkTarget } from './demo-hub/link-mode.ts';
 
 applyStoredTheme();
 
@@ -24,16 +26,29 @@ function render() {
 }
 
 // Two-week browser trial (VITE_TRIAL=1 with VITE_DEMO_LOCAL=1): the coffee shop is created on the
-// welcome screen and then runs in the page like the demo, kept in IndexedDB. A watch link
-// (#/watch/<token>, «Смотреть с телефона») opens the cash desk's latest data read-only instead.
+// welcome screen and then runs in the page like the demo, kept in IndexedDB. A device link
+// (#/link/<secret>, «Подключить устройство») makes this page a phone or tablet working through the cash
+// desk; a watch link (#/watch/<token>, «Смотреть с телефона») opens the cash desk's latest data read-only.
 if (import.meta.env.VITE_DEMO_LOCAL === '1' && import.meta.env.VITE_TRIAL === '1') {
-  const watching = watchToken();
-  if (watching) void startWatch(watching);
+  const linked = linkTarget();
+  const watching = linked ? null : watchToken();
+  if (linked) void startLink(linked);
+  else if (watching) void startWatch(watching);
   else void startTrial();
-  // A watch link opened in a tab that already shows TS changes only the hash: start over as the copy.
+  // A link opened in a tab that already shows TS changes only the hash: start over as that device or copy.
   window.addEventListener('hashchange', () => {
+    const nextLink = linkFromHash(window.location.hash);
+    if (nextLink && (nextLink.secret !== linked?.secret || nextLink.view !== linked.view)) {
+      window.location.reload();
+      return;
+    }
+    // The same link opened again on this device: just go to its page (the secret leaves the address bar).
+    if (nextLink) {
+      window.location.replace(`${window.location.pathname}${window.location.search}${nextLink.view === 'board' ? '#/board' : '#/'}`);
+      return;
+    }
     const next = watchTokenFromHash(window.location.hash);
-    if (next && next !== watching) window.location.reload();
+    if (next && next !== watching && !linked) window.location.reload();
   });
 } else if (import.meta.env.VITE_DEMO_LOCAL === '1') {
   // Public demo without a server (VITE_DEMO_LOCAL=1): start the HUB inside the page first.
@@ -45,6 +60,28 @@ if (import.meta.env.VITE_DEMO_LOCAL === '1' && import.meta.env.VITE_TRIAL === '1
     .then(render);
 } else {
   render();
+}
+
+/**
+ * A phone or tablet working through the trial cash desk: no HUB, no lock, no venue data here — the page's
+ * requests and live updates go to the cash desk (demo-hub/link-device.ts). Signs in with the person's own code.
+ */
+async function startLink(target: LinkTarget): Promise<void> {
+  const rootEl = document.getElementById('root')!;
+  rootEl.textContent = 'Подключаемся к кассе…';
+  // The secret leaves the address bar (and the history entry): it stays only in this device's storage.
+  if (window.location.hash.startsWith('#/link/')) {
+    history.replaceState(null, '', `${window.location.pathname}${window.location.search}${target.view === 'board' ? '#/board' : '#/'}`);
+  }
+  const [device, ui] = await Promise.all([import('./demo-hub/link-device.ts'), import('./trial/LinkBanner.tsx')]);
+  device.startLinkDevice(target);
+  createRoot(rootEl).render(
+    <StrictMode>
+      <ui.LinkGate>
+        <App />
+      </ui.LinkGate>
+    </StrictMode>,
+  );
 }
 
 /**

@@ -21,7 +21,7 @@ import type { ChangeEvent } from '@ts-hub/hub.ts';
 import { Hub } from '@ts-hub/hub.ts';
 import { SimulatorLampDriver } from '@ts-hub/lamps/simulator.ts';
 import { DEMO_LICENSE_KEYS } from '@ts-hub/demo-license.ts';
-import { installEventSource, installFetch } from './boot.ts';
+import { installEventSource, installFetch } from './page-api.ts';
 import type { InjectOptions, InjectResponse, MiniFastify } from './mini-fastify.ts';
 import type { DatabaseSync } from './shims/sqlite.ts';
 import { provideSqlJs } from './shims/sqlite.ts';

@@ -44,6 +44,8 @@ import { ConnectPage } from './onboarding/Connect.tsx';
 import { CafeNeedsCounterModule } from './onboarding/CafeLicense.tsx';
 import { useSetupGate } from './onboarding/setup.ts';
 import { WatchBanner } from './trial/WatchBanner.tsx';
+import { LinkBanner } from './trial/LinkBanner.tsx';
+import { isLinkMode } from './demo-hub/link-mode.ts';
 
 /** Route path → page. The table of routes (titles, icons, permissions) lives in router.tsx. */
 const PAGES: Record<string, (query: URLSearchParams, business: BusinessType) => ReactNode> = {
@@ -187,6 +189,7 @@ export function App() {
     return (
       <div className="login-shell">
         <WatchBanner />
+        <LinkBanner />
         <LoginPage next={next} />
       </div>
     );
@@ -196,7 +199,7 @@ export function App() {
     return (
       <main className="boot">
         <BrandMark className="boot-mark" />
-        <p>{hub.online ? 'Загрузка…' : 'Подключаемся к HUB клуба…'}</p>
+        <p>{hub.online ? 'Загрузка…' : isLinkMode() ? 'Подключаемся к кассе…' : 'Подключаемся к HUB клуба…'}</p>
       </main>
     );
   }
