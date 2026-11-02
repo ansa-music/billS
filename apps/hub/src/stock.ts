@@ -122,7 +122,7 @@ export interface StockViewer {
 /** Internal calls (tests, the sample) see and may change everything. */
 const ANY: StockViewer = { id: null, mayEditStock: true };
 
-interface RecipeRow {
+export interface RecipeRow {
   id: number;
   product_id: string;
   choice_id: string | null;
@@ -187,7 +187,7 @@ function recipeRows(db: Db, productId: string): RecipeRow[] {
   return all<RecipeRow>(db, 'SELECT * FROM recipe_items WHERE product_id = ? ORDER BY sort_order, id', productId);
 }
 
-function toRecipe(rows: readonly RecipeRow[]): Recipe {
+export function toRecipe(rows: readonly RecipeRow[]): Recipe {
   const items = rows
     .filter((r) => r.mode === 'base')
     .map((r) => ({ ingredientId: r.ingredient_id, quantity: fromMilli(r.quantity) }));

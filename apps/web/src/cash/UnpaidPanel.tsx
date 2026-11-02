@@ -26,7 +26,8 @@ export function UnpaidPanel(props: DeskProps) {
   const [paying, setPaying] = useState<CheckView | null>(null);
   const [cancelling, setCancelling] = useState<SessionView | null>(null);
   // A coffee shop check (counter orders, no table) is cancelled only by the manager or the administrator.
-  const canCancelCounter = useHub().canNow('counter.cancel');
+  const { canNow, business } = useHub();
+  const canCancelCounter = canNow('counter.cancel');
   const [cancelOrder, setCancelOrder] = useState<CancelTarget | null>(null);
   const counterOrdersOf = (c: CheckView) => [
     ...new Set(c.items.filter((i) => i.kind === 'ORDER' && i.orderId && i.tableId == null).map((i) => i.orderId!)),
@@ -62,7 +63,7 @@ export function UnpaidPanel(props: DeskProps) {
       </header>
 
       {state.checks.length === 0 && loose.length === 0 && unbilled.length === 0 ? (
-        <p className="empty">Неоплаченных игр и заказов нет</p>
+        <p className="empty">{business === 'cafe' ? 'Неоплаченных заказов нет' : 'Неоплаченных игр и заказов нет'}</p>
       ) : (
         <>
           {!canPay && <p className="hint hint-warn">Откройте смену, чтобы принимать оплату</p>}

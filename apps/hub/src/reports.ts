@@ -1,4 +1,16 @@
-import type { OwnerSummary, RevenuePoint, TableStat } from '@bills/domain';
+import type {
+  DeliveryReceipt,
+  IngredientUnit,
+  LossInput,
+  OwnerSummary,
+  PaymentMethod,
+  ProfitReport,
+  ReportRange,
+  RevenuePoint,
+  SalesReport,
+  TableStat,
+} from '@bills/domain';
+import { buildProfitReport, buildSalesReport, costsAsDeliveriesStand, fromMilli, REPORT_MAX_DAYS } from '@bills/domain';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
 import { all, one } from './db.ts';
@@ -233,6 +245,252 @@ export class ReportService {
       liveGames: live?.n ?? 0,
       unpaidGames: unpaid?.n ?? 0,
       unpaidAmount: (unpaid?.amount ?? 0) + (unpaid?.orders ?? 0),
+    };
+  }
+
+  /**
+   * «Себестоимость и прибыль» for whole local days `from`…`to` (default: today): revenue of the
+   * orders (as «Выручка» counts it), the cost of what their sales took off the stock — the recipe
+   * with the chosen options, at the price of the moment as the deliveries stand now
+   * (#atCurrentDeliveries) — gross profit per product, and losses: write-offs and inventory
+   * differences made in the period. Archived ingredients count like any other.
+   */
+  profit(fromParam?: string, toParam?: string): ProfitReport {
+    const { db } = this.deps;
+    const { club, range, period } = this.#range(fromParam, toParam);
+    const products = this.#soldProducts(club.id, period);
+    const sales = all<{ id: number; ingredient_id: string; product_id: string | null; quantity: number; cost: number | null }>(
+      db,
+      `SELECT m.id, m.ingredient_id, m.product_id, m.quantity, m.cost
+       FROM stock_movements m JOIN bar_orders o ON o.id = m.order_id
+       WHERE m.kind = 'sale' AND o.club_id = ? AND ${ORDER_IS_REVENUE}
+         AND o.created_at >= ? AND o.created_at < ?`,
+      club.id,
+      period.start,
+      period.end,
+    );
+    const losses = all<{
+      id: number;
+      kind: LossInput['kind'];
+      ingredient_id: string;
+      name: string | null;
+      unit: IngredientUnit | null;
+      quantity: number;
+      cost: number | null;
+    }>(
+      db,
+      `SELECT m.id, m.kind, m.ingredient_id, i.name, i.unit, m.quantity, m.cost
+       FROM stock_movements m LEFT JOIN ingredients i ON i.id = m.ingredient_id
+       WHERE m.kind IN ('writeoff', 'inventory') AND m.at >= ? AND m.at < ?
+       ORDER BY m.id`,
+      period.start,
+      period.end,
+    );
+    const value = this.#atCurrentDeliveries([...sales, ...losses]);
+    const costs = new Map<string, { productId: string; cost: number; incomplete: boolean }>();
+    for (const m of sales) {
+      if (m.product_id === null) continue;
+      const c = costs.get(m.product_id) ?? { productId: m.product_id, cost: 0, incomplete: false };
+      const v = value.get(m.id) ?? null;
+      // A sale takes stock off: its value is below zero; the cost of goods is what left.
+      if (v === null) c.incomplete = true;
+      else c.cost -= v;
+      costs.set(m.product_id, c);
+    }
+    return buildProfitReport({
+      range,
+      generatedAt: this.deps.clock.now(),
+      timezone: club.timezone,
+      currency: club.currency,
+      products,
+      costs: [...costs.values()],
+      losses: losses.map((l) => ({
+        kind: l.kind,
+        ingredientId: l.ingredient_id,
+        name: l.name ?? 'Удалённое сырьё',
+        unit: l.unit ?? 'шт',
+        quantity: fromMilli(l.quantity),
+        cost: value.get(l.id) ?? null,
+      })),
+    });
+  }
+
+  /**
+   * «Что продаётся» for whole local days `from`…`to` (default: today): top products by units and
+   * by revenue, orders by hour of the day, checks paid and the average check, money by payment
+   * method (refunds subtracted).
+   */
+  sales(fromParam?: string, toParam?: string): SalesReport {
+    const { db } = this.deps;
+    const { club, range, period } = this.#range(fromParam, toParam);
+    const orders = all<{ created_at: number; total: number }>(
+      db,
+      `SELECT o.created_at, o.total FROM bar_orders o
+       WHERE o.club_id = ? AND ${ORDER_IS_REVENUE} AND o.created_at >= ? AND o.created_at < ?`,
+      club.id,
+      period.start,
+      period.end,
+    );
+    const paidChecks = `SELECT id FROM checks WHERE club_id = ? AND status = 'PAID' AND closed_at >= ? AND closed_at < ?`;
+    const checks = one<{ n: number }>(db, `SELECT COUNT(*) AS n FROM (${paidChecks})`, club.id, period.start, period.end);
+    const paid = one<{ amount: number | null }>(
+      db,
+      `SELECT SUM(CASE WHEN kind = 'PAYMENT' THEN amount ELSE -amount END) AS amount FROM payments
+       WHERE check_id IN (${paidChecks})`,
+      club.id,
+      period.start,
+      period.end,
+    );
+    const byMethod: Partial<Record<PaymentMethod, number>> = {};
+    for (const r of all<{ method: PaymentMethod; amount: number | null }>(
+      db,
+      `SELECT method, SUM(CASE WHEN kind = 'PAYMENT' THEN amount ELSE -amount END) AS amount FROM payments
+       WHERE club_id = ? AND at >= ? AND at < ? GROUP BY method`,
+      club.id,
+      period.start,
+      period.end,
+    )) {
+      byMethod[r.method] = r.amount ?? 0;
+    }
+    return buildSalesReport({
+      range,
+      generatedAt: this.deps.clock.now(),
+      timezone: club.timezone,
+      currency: club.currency,
+      items: this.#soldProducts(club.id, period),
+      orders: orders.map((o) => ({ at: o.created_at, total: o.total })),
+      checks: { count: checks?.n ?? 0, paid: paid?.amount ?? 0 },
+      byMethod,
+    });
+  }
+
+  /** Products sold in the period's orders: units, revenue, and units whose sale took nothing off the stock. */
+  #soldProducts(club: string, p: Period) {
+    return all<{ product_id: string; name: string; qty: number; revenue: number; no_recipe: number }>(
+      this.deps.db,
+      `SELECT i.product_id, COALESCE(MAX(pr.name), MIN(i.title)) AS name, SUM(i.qty) AS qty, SUM(i.amount) AS revenue,
+              SUM(CASE WHEN EXISTS (SELECT 1 FROM stock_movements m
+                                    WHERE m.order_id = i.order_id AND m.product_id = i.product_id AND m.kind = 'sale')
+                       THEN 0 ELSE i.qty END) AS no_recipe
+       FROM bar_order_items i
+       JOIN bar_orders o ON o.id = i.order_id
+       LEFT JOIN products pr ON pr.id = i.product_id
+       WHERE o.club_id = ? AND ${ORDER_IS_REVENUE} AND o.created_at >= ? AND o.created_at < ?
+       GROUP BY i.product_id`,
+      club,
+      p.start,
+      p.end,
+    ).map((r) => ({ productId: r.product_id, name: r.name, qty: r.qty, revenue: r.revenue, qtyWithoutRecipe: r.no_recipe }));
+  }
+
+  /**
+   * The value of stock movements at the price of their moment as the deliveries stand now
+   * (costsAsDeliveriesStand): a movement keeps its recorded value unless a delivery of its
+   * ingredient was deleted or corrected after it — then the deliveries are replayed as they are now.
+   */
+  #atCurrentDeliveries(moves: ReadonlyArray<{ id: number; ingredient_id: string; quantity: number; cost: number | null }>): Map<number, number | null> {
+    const { db } = this.deps;
+    const out = new Map(moves.map((m) => [m.id, m.cost]));
+    if (moves.length === 0) return out;
+    const changed = new Set(
+      all<{ id: string }>(db, "SELECT DISTINCT ingredient_id AS id FROM stock_movements WHERE kind IN ('supply_undo', 'supply_fix')").map((r) => r.id),
+    );
+    const byIngredient = new Map<string, Array<{ id: number; quantity: number; cost: number | null }>>();
+    for (const m of moves) {
+      if (!changed.has(m.ingredient_id)) continue;
+      const list = byIngredient.get(m.ingredient_id) ?? [];
+      list.push(m);
+      byIngredient.set(m.ingredient_id, list);
+    }
+    for (const [ingredientId, list] of byIngredient) {
+      const values = costsAsDeliveriesStand(
+        this.#receipts(ingredientId),
+        list.map((m) => ({ seq: m.id, quantity: fromMilli(m.quantity), cost: m.cost })),
+      );
+      list.forEach((m, i) => out.set(m.id, values[i] ?? null));
+    }
+    return out;
+  }
+
+  /**
+   * The deliveries of an ingredient that matter for costsAsDeliveriesStand: from the first one
+   * deleted or corrected since to its last change. Positions are stock movement ids.
+   */
+  #receipts(ingredientId: string): DeliveryReceipt[] {
+    const { db } = this.deps;
+    const own = new Map<string, { received: number; changedSeq: number | null }>();
+    for (const m of all<{ id: number; supply_id: string; kind: string; quantity: number }>(
+      db,
+      'SELECT id, supply_id, kind, quantity FROM stock_movements WHERE ingredient_id = ? AND supply_id IS NOT NULL',
+      ingredientId,
+    )) {
+      const s = own.get(m.supply_id) ?? { received: 0, changedSeq: null };
+      if (m.kind === 'supply') s.received += m.quantity;
+      else if (m.kind === 'supply_undo' || m.kind === 'supply_fix') s.changedSeq = Math.max(s.changedSeq ?? 0, m.id);
+      own.set(m.supply_id, s);
+    }
+    const ids = [...own.keys()];
+    if (!ids.some((id) => own.get(id)!.changedSeq !== null)) return [];
+    const marks = ids.map(() => '?').join(', ');
+    const seqOf = new Map(
+      all<{ supply_id: string; seq: number }>(
+        db,
+        `SELECT supply_id, MIN(id) AS seq FROM stock_movements WHERE kind = 'supply' AND supply_id IN (${marks}) GROUP BY supply_id`,
+        ...ids,
+      ).map((r) => [r.supply_id, r.seq]),
+    );
+    const deleted = new Set(
+      all<{ id: string }>(db, `SELECT id FROM supplies WHERE deleted_at IS NOT NULL AND id IN (${marks})`, ...ids).map((r) => r.id),
+    );
+    const touched = ids.filter((id) => own.get(id)!.changedSeq !== null && seqOf.has(id));
+    if (touched.length === 0) return [];
+    const from = Math.min(...touched.map((id) => seqOf.get(id)!));
+    const to = Math.max(...touched.map((id) => own.get(id)!.changedSeq!));
+    const receipts: DeliveryReceipt[] = [];
+    for (const id of ids) {
+      const seq = seqOf.get(id);
+      if (seq === undefined || seq < from || seq > to) continue;
+      const s = own.get(id)!;
+      const before = one<{ balance: number }>(
+        db,
+        'SELECT balance FROM stock_movements WHERE ingredient_id = ? AND id < ? ORDER BY id DESC LIMIT 1',
+        ingredientId,
+        seq,
+      );
+      const lines = all<{ quantity: number; amount: number; cost_before: number | null; has_cost_before: number }>(
+        db,
+        'SELECT quantity, amount, cost_before, has_cost_before FROM supply_lines WHERE supply_id = ? AND ingredient_id = ? ORDER BY id',
+        id,
+        ingredientId,
+      );
+      const first = lines[0];
+      receipts.push({
+        seq,
+        stockBefore: fromMilli(before?.balance ?? 0),
+        received: fromMilli(s.received),
+        costBefore: first && first.has_cost_before === 1 ? first.cost_before : undefined,
+        lines: deleted.has(id) ? [] : lines.map((l) => ({ quantity: fromMilli(l.quantity), amount: l.amount })),
+        changedSeq: s.changedSeq,
+      });
+    }
+    return receipts;
+  }
+
+  /** The club and a period of whole local days; `to` defaults to `from`, `from` to today. */
+  #range(fromParam?: string, toParam?: string): { club: ClubRow; range: ReportRange; period: Period } {
+    const { db, clock } = this.deps;
+    const club = one<ClubRow>(db, 'SELECT id, timezone, currency FROM clubs ORDER BY created_at LIMIT 1');
+    if (!club) throw new HubError(503, 'CLUB_NOT_CONFIGURED', 'Клуб не настроен');
+    const today = localDateOf(clock.now(), club.timezone);
+    const from = fromParam || toParam || today;
+    const to = toParam || from;
+    if (!parseLocalDate(from) || !parseLocalDate(to)) throw new HubError(400, 'BAD_DATE', 'Дата должна быть в формате ГГГГ-ММ-ДД');
+    if (from > to) throw new HubError(400, 'BAD_RANGE', 'Начало периода позже конца');
+    if (addDays(from, REPORT_MAX_DAYS) <= to) throw new HubError(400, 'RANGE_TOO_LONG', `Период — не длиннее ${REPORT_MAX_DAYS} дней`);
+    return {
+      club,
+      range: { from, to },
+      period: { start: localMidnightUtc(from, club.timezone), end: localMidnightUtc(addDays(to, 1), club.timezone) },
     };
   }
 

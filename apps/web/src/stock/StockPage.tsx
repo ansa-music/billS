@@ -5,6 +5,7 @@ import { Icon } from '../icons.tsx';
 import { useCommands, useHub, useLive } from '../useHub.tsx';
 import { navigate, useLocation } from '../router.tsx';
 import { Loading, Page, Toast, useToast } from '../ui.tsx';
+import type { SupplyDraft } from './BuyList.tsx';
 import { InventoryTab } from './Inventory.tsx';
 import { LevelsTab } from './Levels.tsx';
 import { RecipesTab } from './Recipes.tsx';
@@ -49,6 +50,13 @@ export function StockPage() {
   const props = { ingredients: ingredients.data?.ingredients ?? [], run, busy: busy.size > 0 || !hub.online, notify: show };
   const go = (t: Tab) => navigate('/stock', { tab: t });
   const onNewOpened = useCallback(() => setOpenNew(false), []);
+  // «Создать поставку» on «Докупить на неделю»: the delivery form opens filled in with the list.
+  const [supplyDraft, setSupplyDraft] = useState<SupplyDraft | null>(null);
+  const startSupply = (draft: SupplyDraft) => {
+    setSupplyDraft(draft);
+    go('supplies');
+  };
+  const onDraftUsed = useCallback(() => setSupplyDraft(null), []);
 
   return (
     <Page title="Склад">
@@ -80,9 +88,9 @@ export function StockPage() {
       {!ingredients.data ? (
         ingredients.error ? <p className="form-error">{ingredients.error}</p> : <Loading online={hub.online} />
       ) : tab === 'levels' ? (
-        <LevelsTab {...props} openNew={openNew} onNewOpened={onNewOpened} />
+        <LevelsTab {...props} openNew={openNew} onNewOpened={onNewOpened} onStartSupply={hub.can('stock.supply') ? startSupply : undefined} />
       ) : tab === 'supplies' ? (
-        <SuppliesTab {...props} />
+        <SuppliesTab {...props} draft={supplyDraft} onDraftUsed={onDraftUsed} />
       ) : tab === 'recipes' ? (
         <RecipesTab {...props} />
       ) : (

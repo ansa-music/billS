@@ -67,7 +67,7 @@ interface LastPayment {
 export function PayDialog({ desk, initial, onClose }: { desk: Desk; initial: CheckView; onClose: () => void }) {
   const { state } = desk;
   // Discounts are for managers and owners; the HUB answers 403 to anyone else.
-  const { can } = useHub();
+  const { can, business } = useHub();
   const { currency, timezone } = state.club;
   const money = (a: Minor) => formatMoney(a, currency);
 
@@ -162,7 +162,10 @@ export function PayDialog({ desk, initial, onClose }: { desk: Desk; initial: Che
           </button>
         }
       >
-        <p>В счёте не осталось позиций — он аннулирован. Игры и заказы бара снова в списке «Ожидают оплаты».</p>
+        <p>
+          В счёте не осталось позиций — он аннулирован.{' '}
+          {business === 'cafe' ? 'Заказы снова в списке «Ожидают оплаты».' : 'Игры и заказы бара снова в списке «Ожидают оплаты».'}
+        </p>
       </Modal>
     );
   }

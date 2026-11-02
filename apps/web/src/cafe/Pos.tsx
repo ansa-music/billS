@@ -29,6 +29,8 @@ import { OpenShiftForm } from '../cash/ShiftPanel.tsx';
 import { Icon } from '../icons.tsx';
 import { OfflineBanner } from '../OfflineBanner.tsx';
 import { sellable, sortCatalog } from '../pages/bar/useCatalog.tsx';
+import type { StockTileHint } from '../stock/alerts.ts';
+import { useStockHints } from '../stock/alerts.ts';
 import { GuestPad } from '../loyalty/GuestPad.tsx';
 import type { PickedGuest } from '../loyalty/GuestPad.tsx';
 import { earnedLine, giftOrdinal, guestChip, loyaltyOf } from '../loyalty/model.ts';
@@ -53,10 +55,12 @@ import {
   readHeld,
   readLast,
   recordHits,
+  recordUsual,
   sameChoices,
   searchProducts,
   toggleChoice,
   topProducts,
+  topUsual,
   tryPrice,
   writeAutoPrint,
   writeHeld,
@@ -200,6 +204,8 @@ export function PosPage() {
   );
   const hueOf = useMemo(() => new Map(categories.map((c, i) => [c.id, categoryHue(i)])), [categories]);
   const hits = useMemo(() => topProducts(products), [products, hitsVersion]);
+  // «Как обычно»: the drinks with their options this counter sells most at this time of day.
+  const usual = useMemo(() => topUsual(products), [products, hitsVersion]);
   const activeTab = tab === HITS || categories.some((c) => c.id === tab) ? tab : HITS;
   // The field answers every key at once; the tiles follow a beat later (no jank on a slow phone).
   const deferredQuery = useDeferredValue(query);
@@ -273,7 +279,8 @@ export function PosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inOrderKey]);
 
-  const tapProduct = (p: ProductView) => {
+  /** A tile adds the drink with its default options; «Как обычно» passes the options it remembers. */
+  const tapProduct = (p: ProductView, picked?: readonly string[]) => {
     setFlash(null);
     setFailure(null);
     setCleared(null);
@@ -288,16 +295,18 @@ export function PosPage() {
     }
     const add = Math.min(want, room);
     const options = optionsOf(p);
-    const defaults = defaultChoices(options);
+    const defaults = picked ? [...picked] : defaultChoices(options);
+    // Options already chosen («Как обычно»): nothing to open under the line.
+    const open = options.length > 0 && !picked;
     // The same drink with the same options and no comment: one more on that line.
     const same = draft.lines.find((l) => l.productId === p.id && sameChoices(l.choices, defaults) && !lineComment(l));
     if (same) {
       patchLines((ls) => ls.map((l) => (l.id === same.id ? { ...l, qty: l.qty + add } : l)));
-      setSelected(options.length ? same.id : null);
+      setSelected(open ? same.id : null);
     } else {
       const line: Line = { id: lineId(), productId: p.id, choices: defaults, qty: add, comments: [], text: '' };
       patchLines((ls) => [...ls, line]);
-      setSelected(options.length ? line.id : null);
+      setSelected(open ? line.id : null);
     }
     if (query) setQuery('');
     // Phone: the keyboard goes away, so the drink's chips and the total show at the bottom.
@@ -436,6 +445,7 @@ export function PosPage() {
       .then((res) => {
         writeLast({ ...d, guestRequestId: undefined });
         recordHits(d.lines);
+        recordUsual(d.lines);
         setHitsVersion((v) => v + 1);
         setFlash((f) => (f?.id === id ? { ...f, state: 'ok', res, loyaltyNote: earnedLine(res.loyalty, loyalty, currency) } : f));
         if (readAutoPrint()) printCounterReceipt(res, state);
@@ -550,6 +560,8 @@ export function PosPage() {
   useBottomChrome(narrow && sorted !== null, sectionRef, dockRef);
 
   // ── Tiles ─────────────────────────────────────────────────────────────────
+  // «мало: молоко» / «закончилось: молоко» from the recipe and the levels of «Склад»: a hint only, the sale goes through.
+  const stockHints = useStockHints();
   const tiles = useMemo(
     () =>
       ordered(shown, tileLook.looks.order).map((p) => {
@@ -565,9 +577,10 @@ export function PosPage() {
           out: left === 0,
           low: left !== null && left > 0 && left <= LOW_STOCK ? left : null,
           options: options.length > 0,
+          hint: stockHints.get(p.id) ?? null,
         };
       }),
-    [shown, pendingStock, inOrder, hueOf, money, tileLook.looks.order],
+    [shown, pendingStock, inOrder, hueOf, money, tileLook.looks.order, stockHints],
   );
 
   if (!sorted) {
@@ -727,6 +740,28 @@ export function PosPage() {
 
           {/* Phone: the categories live at the bottom, under the thumb (the dock below). */}
           {!narrow && <CategoryTabs categories={categories} hueOf={hueOf} active={activeTab} searching={searching} onTab={pickTab} />}
+
+          {/* «Как обычно»: one tap, the drink with its usual options; only on «Хиты», not while searching. */}
+          {activeTab === HITS && !searching && !designing && usual.length > 0 && (
+            <div className="pos-usual" role="group" aria-label="Как обычно">
+              <span className="pos-usual-title">Как обычно</span>
+              <div className="pos-usual-list">
+                {usual.map((u) => (
+                  <button
+                    key={`${u.product.id}|${u.choices.join(',')}`}
+                    type="button"
+                    className="pos-usual-chip"
+                    style={{ '--hue': hueOf.get(u.product.categoryId) } as CSSProperties}
+                    onClick={() => tapProduct(u.product, u.choices)}
+                  >
+                    <span className="pos-usual-name">{u.product.name}</span>
+                    <span className="pos-usual-opts">{u.options}</span>
+                    <strong className="pos-usual-price">{money(u.price)}</strong>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {products.length === 0 ? (
             <p className="empty">В меню пока нет товаров. Добавьте их в разделе «Меню».</p>
@@ -1173,6 +1208,8 @@ interface Tile {
   out: boolean;
   low: number | null;
   options: boolean;
+  /** A raw material of the drink is low or out (alerts.ts): never blocks the sale. */
+  hint: StockTileHint | null;
 }
 
 /** The menu grid; re-renders only when the tiles change (not on the HUB clock tick). */
@@ -1203,6 +1240,11 @@ const MenuGrid = memo(function MenuGrid({
           <TilePhoto look={looks[t.id]} />
           <TileBadge look={looks[t.id]} />
           <span className="pos-tile-name">{t.name}</span>
+          {t.hint && !t.out && (
+            <span className="pos-tile-hint" data-level={t.hint.level} title={t.hint.text}>
+              {t.hint.text}
+            </span>
+          )}
           <span className="pos-tile-foot">
             <span className="pos-tile-price">{t.price}</span>
             {t.out ? (
