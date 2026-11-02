@@ -1,4 +1,5 @@
 import { isLinkMode } from './demo-hub/link-mode.ts';
+import { CLOUD } from './cloud/cloud-cafe.ts';
 
 /**
  * Shown while the screen cannot reach the HUB. The HUB itself keeps running games and lamps.
@@ -12,7 +13,12 @@ export function OfflineBanner({ online }: { online: boolean }) {
     <div className="hall-offline" role="status">
       <span className="hall-offline-dot" aria-hidden="true" />
       <p className="hall-offline-text">
-        {cafe ? (
+        {CLOUD ? (
+          <>
+            <strong>Нет связи с облаком TS.</strong> Проверьте интернет на этом устройстве. Заказы и деньги в облаке в сохранности —
+            экран обновится сам, как только связь вернётся.
+          </>
+        ) : cafe ? (
           <>
             <strong>Нет связи с TS.</strong> Заказы и деньги в сохранности — экран обновится сам, как только связь
             вернётся.

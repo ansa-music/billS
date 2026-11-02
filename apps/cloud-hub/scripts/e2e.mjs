@@ -9,8 +9,13 @@
  *   node scripts/e2e.mjs [base] import <file>      → a trial café moves in (base64 SQLite file), sign in with a
  *                                                    key from the trial, read its menu and orders.
  *   node scripts/e2e.mjs [base] load <code> <key> [n] → n paid orders in a row: cost per order.
+ *   node scripts/e2e.mjs [base] terms <code> <status> [endsAt] [message] → PUT terms, then what a screen sees.
+ *   node scripts/e2e.mjs [base] export <code> [out.json] → GET /admin/cafes/<code>/export (202 → again) into a file.
+ *   node scripts/e2e.mjs [base] steps                → the time of every Durable Object call of the last minutes
+ *                                                      (wrangler dev's local trace store): CPU per call, roughly.
  *
  * base defaults to http://127.0.0.1:8790; the admin token to ADMIN_TOKEN or `local-admin`.
+ * A move (`import`) goes one step per call (`?steps=1`) so each step's time shows in `steps`.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -21,8 +26,10 @@ const ADMIN = process.env.ADMIN_TOKEN ?? 'local-admin';
 
 const costs = [];
 
-async function call(method, path, { token, body, admin } = {}) {
-  const headers = { 'content-type': 'application/json' };
+const DEVICE = `e2e-${Math.random().toString(36).slice(2, 12)}`;
+
+async function call(method, path, { token, body, admin, raw } = {}) {
+  const headers = { 'content-type': 'application/json', 'x-ts-device': DEVICE };
   if (token) headers.authorization = `Bearer ${token}`;
   if (admin) headers.authorization = `Bearer ${ADMIN}`;
   if (method !== 'GET') headers['idempotency-key'] = crypto.randomUUID();
@@ -33,6 +40,7 @@ async function call(method, path, { token, body, admin } = {}) {
   const cost = res.headers.get('x-ts-cost');
   if (cost) costs.push({ method, path: path.replace(/^\/c\/[^/]+/, ''), ms: Math.round(ms), cost, bytes: text.length });
   if (!res.ok) throw new Error(`${method} ${path} → ${res.status} ${text}`);
+  if (raw) return { status: res.status, text, headers: res.headers, ms };
   return text ? JSON.parse(text) : null;
 }
 
@@ -190,20 +198,73 @@ async function modeImport(file, key) {
   const text = readFileSync(file, 'utf8').trim();
   const snapshot = text.startsWith('U1FMaXRl') ? text : readFileSync(file).toString('base64');
   const t0 = performance.now();
-  const res = await call('POST', '/admin/cafes/import', { admin: true, body: { snapshot, newManagerKey: !key } });
-  console.log(`imported in ${(performance.now() - t0).toFixed(0)} ms: ${JSON.stringify(res)}`);
+  // One step per call, so every step's time can be read back (`steps`); the café's alarm moves it on as well.
+  let res = await call('POST', '/admin/cafes/import?steps=0', { admin: true, body: { snapshot, newManagerKey: !key } });
+  const calls = [{ phase: 'upload', ms: Math.round(performance.now() - t0) }];
+  while (res.status === 'importing') {
+    const t1 = performance.now();
+    res = await call('POST', `/admin/cafes/${res.code}/import/continue?steps=1`, { admin: true });
+    calls.push({ phase: res.phase ?? res.status, ms: Math.round(performance.now() - t1) });
+    if (calls.length > 2000) throw new Error('the move does not end');
+  }
+  console.log(`moved in ${(performance.now() - t0).toFixed(0)} ms, ${calls.length} calls: ${JSON.stringify({ ...res, terms: undefined, license: undefined })}`);
+  const byPhase = {};
+  for (const c of calls) (byPhase[c.phase] ??= []).push(c.ms);
+  for (const [phase, ms] of Object.entries(byPhase)) {
+    console.log(`  after ${phase.padEnd(10)} ×${String(ms.length).padStart(3)}  wall avg ${(ms.reduce((x, y) => x + y, 0) / ms.length).toFixed(1)} ms, max ${Math.max(...ms)} ms`);
+  }
+  if (res.status !== 'ready') throw new Error(`move failed: ${JSON.stringify(res)}`);
   const signKey = key ?? res.managerKey;
   const c = api(res.code);
   const token = await login(res.code, signKey, 'Перенос из пробной');
   const catalog = await c('GET', '/api/bar/catalog', { token });
   const list = await c('GET', '/api/counter/orders', { token });
   const staff = await c('GET', '/api/staff', { token });
+  const state = await c('GET', '/api/state', { token });
   printCosts('imported café');
   console.log(`\nmenu: ${catalog.products.length} products (${catalog.products.slice(0, 4).map((p) => p.name).join(', ')}…)`);
-  console.log(`orders on the counter list: ${countOrders(list)}`);
+  console.log(`orders on the counter list: ${countOrders(list)}; shift ${state.shift ? `№${state.shift.number}, ${state.shift.expectedCash} in the drawer` : 'closed'}`);
   for (const o of (list.orders ?? list).slice(0, 5)) console.log(`  №${o.number} ${o.stage} ${o.guestName ?? ''} ${o.total}`);
   console.log(`staff: ${staff.staff.map((s) => s.name).join(', ')}`);
   writeFileSync(new URL('../.e2e-import.json', import.meta.url), JSON.stringify({ code: res.code, key: signKey }, null, 2));
+}
+
+async function modeTerms(code, status, endsAt, message) {
+  const body = { status, endsAt: endsAt === undefined || endsAt === 'null' ? null : Number(endsAt), ...(message ? { message } : {}) };
+  const res = await call('PUT', `/admin/cafes/${code}/terms`, { admin: true, body });
+  console.log('terms', JSON.stringify(res));
+  const hello = await call('GET', `/c/${code}/api/cloud`);
+  console.log('screens see', JSON.stringify(hello));
+}
+
+async function modeExport(code, out) {
+  const t0 = performance.now();
+  let res;
+  for (let i = 0; i < 100; i++) {
+    res = await call('GET', `/admin/cafes/${code}/export`, { admin: true, raw: true });
+    if (res.status === 200) break;
+    console.log(`  preparing: ${res.text}`);
+  }
+  const file = JSON.parse(res.text);
+  const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1];
+  const path = out ?? new URL(`../.e2e-${name ?? 'backup.json'}`, import.meta.url);
+  writeFileSync(path, res.text);
+  console.log(`backup ${name}: ${res.text.length} B in ${(performance.now() - t0).toFixed(0)} ms → ${path}`);
+  console.log(`  format ${file.format} v${file.version}, venue ${file.venue}, status ${file.status}, db ${Buffer.from(file.db, 'base64').length} B`);
+}
+
+async function modeSteps() {
+  const res = await fetch(`${base}/cdn-cgi/local/explorer/api/local/observability/query`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sql: "SELECT name, duration_ms FROM spans WHERE name IN ('fetch', 'alarm') AND start_ms > (strftime('%s','now') - 600) * 1000 ORDER BY start_ms",
+    }),
+  });
+  const rows = (await res.json()).result.rows;
+  const ms = rows.map((r) => r[1]).sort((a, b) => a - b);
+  const pct = (p) => ms[Math.min(ms.length - 1, Math.floor((p / 100) * ms.length))];
+  console.log(`${ms.length} Durable Object calls in the last 10 minutes: p50 ${pct(50)} ms, p90 ${pct(90)} ms, p99 ${pct(99)} ms, max ${ms.at(-1)} ms`);
 }
 
 async function modeLoad(code, key, n) {
@@ -242,6 +303,9 @@ try {
   else if (mode === 'check') await modeCheck(args[0], args[1]);
   else if (mode === 'import') await modeImport(args[0], args[1]);
   else if (mode === 'load') await modeLoad(args[0], args[1], Number(args[2] ?? 20));
+  else if (mode === 'terms') await modeTerms(args[0], args[1], args[2], args[3]);
+  else if (mode === 'export') await modeExport(args[0], args[1]);
+  else if (mode === 'steps') await modeSteps();
   else throw new Error(`unknown mode ${mode}`);
 } catch (err) {
   console.error('E2E FAILED:', err.message);

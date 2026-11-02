@@ -9,14 +9,15 @@
  *   @fastify/static → no-op (screens are Workers static assets)
  *   other node:*    → left to wrangler's nodejs_compat (crypto, events, path, url, net, os, child_process)
  *
- * One adapter patches source (scripts/db-adapter.mjs): db.ts `transaction()` says BEGIN IMMEDIATE / COMMIT,
- * which a Durable Object refuses; here it calls the storage's transactionSync() instead. The build and
- * test/db-adapter.test.ts fail loudly if that code moves.
+ * Two adapters patch source (scripts/db-adapter.mjs): db.ts `transaction()` says BEGIN IMMEDIATE / COMMIT and
+ * guard.ts `safely()` says SAVEPOINT, which a Durable Object refuses; here they call the storage's own
+ * transactions instead. The build and test/db-adapter.test.ts fail loudly if that code moves.
  */
 import { build } from 'esbuild';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { patchDbSource } from './scripts/db-adapter.mjs';
+import { patchDbSource, patchGuardSource } from './scripts/db-adapter.mjs';
+import { hubSchemaTemplate } from './scripts/hub-schema.mjs';
 
 const at = (p) => fileURLToPath(new URL(p, import.meta.url));
 const HUB_SRC = at('../hub/src/');
@@ -36,6 +37,13 @@ const cloudHub = {
     b.onResolve({ filter: /^@ts-hub\// }, (args) => ({ path: HUB_SRC + args.path.slice('@ts-hub/'.length) }));
     b.onResolve({ filter: /\.wasm$/ }, () => ({ path: './sql-wasm.wasm', external: true }));
     b.onResolve({ filter: /^virtual:hub-migrations$/ }, () => ({ path: 'hub-migrations', namespace: 'virtual' }));
+    b.onResolve({ filter: /^virtual:hub-schema$/ }, () => ({ path: 'hub-schema', namespace: 'virtual-schema' }));
+    // A new café's schema, made by the HUB's own migrations here and created in small steps there (scripts/hub-schema.mjs).
+    b.onLoad({ filter: /.*/, namespace: 'virtual-schema' }, async () => ({
+      contents: `export const HUB_SCHEMA = ${JSON.stringify(await hubSchemaTemplate())};\n`,
+      loader: 'js',
+      watchDirs: [MIGRATIONS_DIR],
+    }));
     b.onLoad({ filter: /.*/, namespace: 'virtual' }, () => {
       const files = readdirSync(MIGRATIONS_DIR).filter((f) => /^\d+_.+\.sql$/.test(f)).sort();
       const migrations = Object.fromEntries(files.map((f) => [f, readFileSync(MIGRATIONS_DIR + f, 'utf8')]));
@@ -48,6 +56,10 @@ const cloudHub = {
     });
     b.onLoad({ filter: /[\\/]apps[\\/]hub[\\/]src[\\/]db\.ts$/ }, (args) => ({
       contents: patchDbSource(readFileSync(args.path, 'utf8')),
+      loader: 'ts',
+    }));
+    b.onLoad({ filter: /[\\/]apps[\\/]hub[\\/]src[\\/]guard\.ts$/ }, (args) => ({
+      contents: patchGuardSource(readFileSync(args.path, 'utf8')),
       loader: 'ts',
     }));
   },

@@ -24,6 +24,8 @@ interface DurableObjectStorage {
   readonly sql: SqlStorage;
   transactionSync<T>(fn: () => T): T;
   setAlarm(scheduledTime: number | Date): Promise<void>;
+  getAlarm(): Promise<number | null>;
+  deleteAlarm(): Promise<void>;
   deleteAll(): Promise<void>;
 }
 

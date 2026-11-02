@@ -7,11 +7,15 @@
  *   this   → "ping" every 15 s, server → "pong"    → event `ping` (the watchdog in useHub.tsx sees life)
  *
  * The cloud answers "ping" without waking the café's object (setWebSocketAutoResponse). A dropped socket
- * reconnects by itself after 2 s, like EventSource does, with `error` fired meanwhile.
+ * reconnects by itself, like EventSource does, with `error` fired meanwhile — after 2 s, then longer while the
+ * cloud stays out of reach (each attempt is a billed request), back to 2 s once it is open again. Every `open`
+ * (the first and each reconnect) makes the screens re-read everything (useHub.tsx, cafe.ts useCounterEvents),
+ * so nothing that happened while the socket was down is missed.
  */
 
 const PING_MS = 15_000;
 const RETRY_MS = 2000;
+const RETRY_MAX_MS = 30_000;
 
 export function installCloudEventSource(hubUrl: string): void {
   const NativeEventSource = window.EventSource;
@@ -33,6 +37,7 @@ export function installCloudEventSource(hubUrl: string): void {
     #ws: WebSocket | null = null;
     #ping: ReturnType<typeof setInterval> | undefined;
     #retry: ReturnType<typeof setTimeout> | undefined;
+    #retryMs = RETRY_MS;
 
     constructor(url: string | URL, init?: EventSourceInit) {
       super();
@@ -49,6 +54,7 @@ export function installCloudEventSource(hubUrl: string): void {
       ws.onopen = () => {
         if (this.#ws !== ws) return;
         this.readyState = 1;
+        this.#retryMs = RETRY_MS;
         this.#fire(new Event('open'), this.onopen);
         clearInterval(this.#ping);
         this.#ping = setInterval(() => {
@@ -76,7 +82,8 @@ export function installCloudEventSource(hubUrl: string): void {
         this.readyState = 0;
         this.#fire(new Event('error'), this.onerror);
         clearTimeout(this.#retry);
-        this.#retry = setTimeout(() => this.#connect(), RETRY_MS);
+        this.#retry = setTimeout(() => this.#connect(), this.#retryMs);
+        this.#retryMs = Math.min(RETRY_MAX_MS, this.#retryMs * 2);
       };
     }
 

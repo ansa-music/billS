@@ -284,6 +284,18 @@ export function guardManualMode(db: Db, now: number): string | null {
   return raised;
 }
 
+/**
+ * External timers (HubDeps.timers): when the manual-mode rule would raise its alert — null while manual mode is
+ * off, the rule is off, or the alert for this stretch of manual mode was already raised.
+ */
+export function guardManualModeDueAt(db: Db): number | null {
+  const settings = getGuardSettings(db).manualMode;
+  const mode = getManualMode(db);
+  if (!settings.enabled || !mode.enabled || mode.since === null) return null;
+  if (readState(db).fired[`manual:${mode.since}`] !== undefined) return null;
+  return mode.since + settings.minutes * 60_000;
+}
+
 /** 5. A manual discount above the limit, or many manual discounts by one person in a shift. */
 export function guardDiscount(
   db: Db,

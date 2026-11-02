@@ -29,6 +29,12 @@ type SqlValue = ArrayBuffer | string | number | null;
 export type SQLInputValue = null | number | bigint | string | Uint8Array;
 
 let pending: SqlStorageLike | null = null;
+/** COST_DEBUG (wrangler var): statements that read or write more rows than this are noted (the SQL text only). */
+let costDebug = 0;
+
+export function setCostDebug(rows: number): void {
+  costDebug = rows > 0 ? rows : 0;
+}
 
 /** Must run right before openDb(): the next `new DatabaseSync()` opens this storage. */
 export function provideStorage(storage: SqlStorageLike): void {
@@ -90,6 +96,8 @@ const TX_SQL = /^\s*(BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE)\b/i;
 export class DatabaseSync {
   readonly #storage: SqlStorageLike;
   readonly stats: SqlStats = { rowsRead: 0, rowsWritten: 0, statements: 0 };
+  /** COST_DEBUG: the statements above the threshold since the caller last emptied this. */
+  readonly costly: string[] = [];
   #inTransaction = false;
   #open = true;
 
@@ -114,6 +122,9 @@ export class DatabaseSync {
     this.stats.rowsRead += cursor.rowsRead;
     this.stats.rowsWritten += cursor.rowsWritten;
     this.stats.statements++;
+    if (costDebug && (cursor.rowsRead > costDebug || cursor.rowsWritten > costDebug)) {
+      this.costly.push(`rr=${cursor.rowsRead} rw=${cursor.rowsWritten} ${sql.replace(/\s+/g, ' ').slice(0, 120)}`);
+    }
     return rows.map(toRow);
   }
 
@@ -155,6 +166,18 @@ export class DatabaseSync {
         this.#inTransaction = false;
       }
     });
+  }
+
+  /**
+   * A transaction inside the current one (SQLite savepoint): `fn`'s writes are undone when it throws, the outer
+   * transaction goes on. guard.ts `safely()` calls this instead of SAVEPOINT (see build.mjs).
+   */
+  savepointSync(fn: () => void): void {
+    if (!this.#inTransaction) {
+      this.transactionSync(fn);
+      return;
+    }
+    this.#storage.transactionSync(fn);
   }
 
   close(): void {

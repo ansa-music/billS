@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { AuthStaff, BusinessType, HubState, Role } from '@bills/domain';
 import { primaryRole, rolesLabel } from '@bills/domain';
@@ -16,7 +16,11 @@ import { BrandMark } from './BrandMark.tsx';
 import { TRIAL } from './demo-hub/trial-store.ts';
 import { TrialBadge } from './trial/TrialBadge.tsx';
 import { TrialWatchMenuItem } from './trial/TrialWatch.tsx';
+import { CLOUD } from './cloud/cloud-cafe.ts';
 import './cafe/staff-touch.css';
+
+/** «Облачная касса» (cloud/CloudCafe.tsx): the café, its code, «Скачать копию». Only in the cloud build. */
+const CloudBadge = CLOUD ? lazy(() => import('./cloud/CloudCafe.tsx').then((m) => ({ default: m.CloudBadge }))) : null;
 
 /** Badge counts by route path (unpaid checks, lamp problems …). */
 export type NavBadges = Record<string, { count: number; tone: 'info' | 'danger' }>;
@@ -108,6 +112,11 @@ function SidebarImpl({
         <NavLinks routes={routes} active={active} badges={badges} />
       </div>
       {TRIAL && <TrialBadge />}
+      {CloudBadge && (
+        <Suspense fallback={null}>
+          <CloudBadge />
+        </Suspense>
+      )}
       <div className="sidebar-foot" data-online={online || undefined} title={online ? 'Касса на связи' : 'Нет связи с кассой'}>
         <span className="conn-dot" aria-hidden="true" />
         <span className="nav-label">{online ? 'Касса на связи' : 'Нет связи с кассой'}</span>
@@ -254,6 +263,11 @@ function BottomNavImpl({
               </div>
             )}
             {TRIAL && <TrialBadge place="sheet" />}
+            {CloudBadge && (
+              <Suspense fallback={null}>
+                <CloudBadge place="sheet" />
+              </Suspense>
+            )}
           </div>
         </>
       )}

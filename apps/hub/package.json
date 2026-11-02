@@ -7,7 +7,7 @@
     "dev": "node --env-file-if-exists=../../.env --watch src/main.ts",
     "start": "node --env-file-if-exists=../../.env src/main.ts",
     "demo": "node --env-file-if-exists=../../.env src/demo.ts",
-    "test": "node --test --test-concurrency=1 \"test/**/*.test.ts\""
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.ts\" && node test/lean-run.mjs"
   },
   "dependencies": {
     "@bills/domain": "*",

@@ -3,7 +3,10 @@
  * (`trials.snapshot`: base64 of the whole SQLite file): the real HUB code under Node, a café set up by
  * setupTrialClub like the welcome screen does, a shift and a few counter orders at different stages.
  *
- *   node scripts/make-trial-snapshot.ts <out.b64> [manager key]
+ *   node scripts/make-trial-snapshot.ts <out.b64> [manager key] [days] [orders a day]
+ *
+ * Defaults: 3 days × 8 orders (~0.8 MB). A busy two weeks — `… 583104 14 150` — makes the 3–6 MB café the
+ * chunked import is measured with (README.md).
  *
  * The browser makes the file with sql.js `db.export()`; here it is node:sqlite `VACUUM INTO` — the same
  * SQLite file format and the same migrations.
@@ -19,13 +22,15 @@ import { setupTrialClub } from '../../hub/src/trial.ts';
 
 const out = process.argv[2];
 const key = process.argv[3] ?? '583104';
-if (!out) {
-  console.error('usage: node scripts/make-trial-snapshot.ts <out.b64> [manager key]');
+const days = Number(process.argv[4] ?? 3);
+const perDay = Number(process.argv[5] ?? 8);
+if (!out || !(days >= 1) || !(perDay >= 1)) {
+  console.error('usage: node scripts/make-trial-snapshot.ts <out.b64> [manager key] [days] [orders a day]');
   process.exit(2);
 }
 
 const dir = mkdtempSync(join(tmpdir(), 'ts-trial-'));
-const start = Date.now() - 3 * 24 * 3600_000;
+const start = Date.now() - days * 24 * 3600_000;
 const clock = new ManualClock(start);
 const db = openDb(join(dir, 'trial.db'), start);
 const hub = new Hub({ db, clock, lampDriver: new SimulatorLampDriver({ latencyMs: 0 }), guardIntervalMs: 0 });
@@ -33,15 +38,17 @@ setupTrialClub(hub, { venue: 'Кофейня «Тюльпан»', managerName: '
 
 const actor = 'Мадина';
 const catalog = hub.bar.catalog();
-const products = catalog.products.filter((p) => p.isActive);
+// Items with a piece count (cakes) run out over a long run: drinks only.
+const products = catalog.products.filter((p) => p.isActive && p.stock === null);
 let made = 0;
-for (let day = 0; day < 3; day++) {
-  clock.set(start + day * 24 * 3600_000 + 9 * 3600_000);
+const step = Math.max(1, Math.floor((12 * 60) / perDay));
+for (let day = 0; day < days; day++) {
+  clock.set(start + day * 24 * 3600_000 + 8 * 3600_000);
   const shift = hub.shifts.open({ openingFloat: 2_000_00, actor });
   let cash = 2_000_00;
-  for (let i = 0; i < 8; i++) {
-    clock.advance(17 * 60_000);
-    const p = products[(day * 8 + i) % products.length]!;
+  for (let i = 0; i < perDay; i++) {
+    clock.advance(step * 60_000);
+    const p = products[(day * perDay + i) % products.length]!;
     const options = p.options.filter((g) => g.required && g.choices.length).map((g) => g.choices[0]!.id);
     const price = p.price + p.options.filter((g) => g.required && g.choices.length).reduce((n, g) => n + g.choices[0]!.priceDelta, 0);
     const res = hub.counter.create({
@@ -53,13 +60,14 @@ for (let day = 0; day < 3; day++) {
     }) as unknown as { order?: { id: string }; id?: string };
     const id = res.order?.id ?? res.id!;
     // The last day leaves a few orders at the bar.
-    const stages = day < 2 || i < 5 ? (['PREPARING', 'READY', 'ISSUED'] as const) : i === 5 ? (['PREPARING'] as const) : ([] as const);
+    const last = day === days - 1;
+    const stages = !last || i < perDay - 3 ? (['PREPARING', 'READY', 'ISSUED'] as const) : i === perDay - 3 ? (['PREPARING'] as const) : ([] as const);
     for (const stage of stages) hub.counter.stage({ orderId: id, stage, actor });
     if (i % 3 === 0) cash += price;
     made++;
   }
   // Every day but the last ends with the shift closed; the last one is still open.
-  if (day < 2) {
+  if (day < days - 1) {
     clock.advance(30 * 60_000);
     hub.shifts.close({ shiftId: shift.id, countedCash: cash, actor });
   }

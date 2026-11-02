@@ -8,11 +8,12 @@ import { afterCommit, one, run, transaction } from './db.ts';
 import { HubError } from './errors.ts';
 import { HubEvents } from './events.ts';
 import type { BusinessType, GuardSettings, GuardSettingsPatch } from '@bills/domain';
-import { getGuardSettings, guardManualMode, guardStaffNames, guardTableOpened, setGuardSettings } from './guard.ts';
+import { getGuardSettings, guardManualMode, guardManualModeDueAt, guardStaffNames, guardTableOpened, setGuardSettings } from './guard.ts';
 import type { LicenseOptions } from './license.ts';
 import { LicenseService } from './license.ts';
 import { purgeIdempotencyKeys } from './idempotency.ts';
 import { record } from './journal.ts';
+import { setLeanReads, setOutbox } from './lean.ts';
 import type { LampOptions } from './lamps/controller.ts';
 import { DEFAULT_BLINK_TIMES, LampController } from './lamps/controller.ts';
 import type { LampDriver } from './lamps/driver.ts';
@@ -23,7 +24,7 @@ import { PowerMonitor, setPowerSettings } from './power/monitor.ts';
 import type { UpsSource } from './power/ups.ts';
 import { CheckService } from './checks.ts';
 import { CounterService } from './counter.ts';
-import { PrepaidService } from './prepaid.ts';
+import { nextPrepaidDueAt, PrepaidService } from './prepaid.ts';
 import { ReportService } from './reports.ts';
 import type { StopSessionInput } from './sessions.ts';
 import { SessionService } from './sessions.ts';
@@ -69,7 +70,40 @@ export interface HubDeps {
   demo?: boolean;
   /** How often «Сторож» checks timed rules (manual lamp mode left on). 0 disables the timer. Default 30 s. */
   guardIntervalMs?: number;
+  /**
+   * Who runs the HUB's background work. 'own' (default, the club PC and the browser trial): start() arms the
+   * intervals. 'external': nothing is armed — the host calls `tick(now)` on its requests and from its own alarm
+   * at `nextWakeAt(now)`, which is set only while some job has a deadline (a «Сторож» rule, a prepaid game, a
+   * booking). For the cloud café (apps/cloud-hub): a Durable Object with a pending timer never sleeps and is
+   * billed for every second awake. With external timers there are no hardware polls (lamp current, UPS), no
+   * cloud sync, and start() resends no lamp states (lamps.recover and its «hub.recovered» journal entry would be
+   * written on every wake-up, and the cloud has no lamps).
+   */
+  timers?: 'own' | 'external';
+  /** Lean reads (lean.ts): GET /api/state reads what can change, not the whole history. Default off. */
+  leanReads?: boolean;
+  /** false: a HUB that never syncs does not queue journal entries for the TS cloud (lean.ts). Default true. */
+  outbox?: boolean;
 }
+
+/**
+ * A piece of the HUB's background work as `tick()` runs it (external timers, HubDeps.timers). `everyMs`: at most
+ * this often from ticks on requests; `dueAt`: when the job next has real work — the host's alarm is set for the
+ * earliest one, and a job without a deadline never wakes anyone.
+ */
+export interface BackgroundJob {
+  name: string;
+  everyMs: number;
+  run(now: number): void;
+  dueAt?(now: number): number | null;
+}
+
+/** External timers: the idempotency purge looks at the oldest key at most this often while awake… */
+const PURGE_CHECK_MS = 10 * 60_000;
+/** …and purges once that key is this much older than the TTL (a few purges a day, never on every wake-up). */
+const PURGE_SLACK_MS = 6 * 60 * 60 * 1000;
+/** External timers: prepaid games are re-checked this often on requests; their deadlines set the alarm. */
+const PREPAID_TICK_MS = 60_000;
 
 /** The club server: wires storage, lamps and game rules together. */
 export class Hub {
@@ -103,12 +137,19 @@ export class Hub {
   readonly #reconcileIntervalMs: number;
   readonly #isManager: (actor: string) => boolean;
   readonly #guardIntervalMs: number;
+  readonly #externalTimers: boolean;
+  readonly #jobs: BackgroundJob[] = [];
+  readonly #lastRun = new Map<string, number>();
   #reconcileTimer: NodeJS.Timeout | undefined;
   #guardTimer: NodeJS.Timeout | undefined;
 
   constructor(deps: HubDeps) {
     this.db = deps.db;
     this.clock = deps.clock;
+    this.#externalTimers = deps.timers === 'external';
+    if (this.#externalTimers && deps.sync) throw new Error('HUB: cloud sync needs its own timers (timers: external has none)');
+    if (deps.leanReads) setLeanReads(deps.db, true);
+    if (deps.outbox === false) setOutbox(deps.db, false);
     this.#reconcileIntervalMs = deps.reconcileIntervalMs ?? 60_000;
     this.#isManager = deps.isManager ?? managerMatcher(['Управляющий']);
     this.#guardIntervalMs = deps.guardIntervalMs ?? 30_000;
@@ -172,6 +213,90 @@ export class Hub {
     this.events.on('changed', (e) => {
       if (e.kind === 'session' && e.tableId) this.#guardTable(e.tableId);
     });
+    if (this.#externalTimers) this.#registerJobs();
+  }
+
+  /** The background work as jobs for `tick()` (external timers). The club PC arms the same work in start(). */
+  #registerJobs(): void {
+    this.addBackgroundJob({
+      name: 'purge',
+      everyMs: PURGE_CHECK_MS,
+      run: (now) => {
+        // One row: the oldest key (keys are inserted in time order). The full purge scans a day of keys.
+        const oldest = one<{ created_at: number }>(this.db, 'SELECT created_at FROM idempotency_keys ORDER BY rowid LIMIT 1');
+        if (oldest && oldest.created_at < now - IDEMPOTENCY_TTL_MS - PURGE_SLACK_MS) purgeIdempotencyKeys(this.db, now - IDEMPOTENCY_TTL_MS);
+      },
+    });
+    this.addBackgroundJob({ name: 'reconcile', everyMs: this.#reconcileIntervalMs, run: () => void this.lamps.reconcile() });
+    if (this.#guardIntervalMs > 0) {
+      this.addBackgroundJob({
+        name: 'guard',
+        everyMs: this.#guardIntervalMs,
+        run: () => void this.guardTick(),
+        dueAt: () => guardManualModeDueAt(this.db),
+      });
+    }
+    this.addBackgroundJob({
+      name: 'prepaid',
+      everyMs: PREPAID_TICK_MS,
+      run: () => this.prepaid.sync(),
+      dueAt: () => nextPrepaidDueAt(this.db),
+    });
+  }
+
+  /** The background work runs from `tick()`, not from the HUB's own timers (HubDeps.timers = 'external'). */
+  get externalTimers(): boolean {
+    return this.#externalTimers;
+  }
+
+  /** External timers: one more piece of background work for `tick()` (bookings.ts adds its «не пришёл» sweep). */
+  addBackgroundJob(job: BackgroundJob): void {
+    if (!this.#externalTimers) throw new Error('HUB: background jobs are for timers: external');
+    this.#jobs.push(job);
+  }
+
+  /**
+   * External timers: runs the background work that is due — every job whose `everyMs` passed since it last ran
+   * in this process, and every job whose deadline (`dueAt`) has come. The host calls it at the start of its
+   * requests and from its alarm. A failing job is logged and never breaks the request. Returns what ran.
+   */
+  tick(now: number = this.clock.now()): string[] {
+    const ran: string[] = [];
+    for (const job of this.#jobs) {
+      const last = this.#lastRun.get(job.name);
+      let due = last === undefined || now - last >= job.everyMs;
+      if (!due && job.dueAt) {
+        const at = job.dueAt(now);
+        due = at !== null && at <= now;
+      }
+      if (!due) continue;
+      this.#lastRun.set(job.name, now);
+      try {
+        job.run(now);
+        ran.push(job.name);
+      } catch (err) {
+        console.error(`[hub] background job ${job.name} failed`, err);
+      }
+    }
+    return ran;
+  }
+
+  /**
+   * External timers: the earliest deadline of any background job (a «Сторож» rule, the end of a prepaid game, a
+   * booking's «не пришёл»), or null when nothing is waiting — then the host needs no alarm at all.
+   */
+  nextWakeAt(now: number = this.clock.now()): number | null {
+    let next: number | null = null;
+    for (const job of this.#jobs) {
+      let at: number | null = null;
+      try {
+        at = job.dueAt ? job.dueAt(now) : null;
+      } catch (err) {
+        console.error(`[hub] background job ${job.name}: no deadline`, err);
+      }
+      if (at !== null && (next === null || at < next)) next = at;
+    }
+    return next;
   }
 
   /** «Сторож»: timed rules (manual lamp mode left on too long). The timer calls it; tests may too. */
@@ -194,8 +319,15 @@ export class Hub {
     return setGuardSettings(this.db, this.clock.now(), this.events, actor, patch);
   }
 
-  /** Restores lamps and pending commands after a (re)start. */
+  /**
+   * Restores lamps and pending commands after a (re)start. With external timers (HubDeps.timers) nothing is
+   * armed and nothing is written: prepaid games follow the HUB's change events, the rest comes from `tick()`.
+   */
   start(): void {
+    if (this.#externalTimers) {
+      this.prepaid.listen();
+      return;
+    }
     purgeIdempotencyKeys(this.db, this.clock.now() - IDEMPOTENCY_TTL_MS);
     this.lamps.recover();
     this.prepaid.start();

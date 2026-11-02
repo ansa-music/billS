@@ -31,8 +31,8 @@ function render() {
 // (#/link/<secret>, «Подключить устройство») makes this page a phone or tablet working through the cash
 // desk; a watch link (#/watch/<token>, «Смотреть с телефона») opens the cash desk's latest data read-only.
 if (import.meta.env.VITE_CLOUD_HUB === '1') {
-  // «Облачная касса» (prototype, apps/cloud-hub): the café's HUB is in the TS cloud; the device only needs
-  // the café code once, then the usual sign-in. Live updates come over a WebSocket (cloud/cloud-events.ts).
+  // «Облачная касса» (apps/cloud-hub): the café's HUB is in the TS cloud; the device only needs the café code
+  // once (or a link #/cafe/<code>), then the usual sign-in. Live updates come over a WebSocket (cloud/cloud-events.ts).
   void startCloud();
 } else if (import.meta.env.VITE_DEMO_LOCAL === '1' && import.meta.env.VITE_TRIAL === '1') {
   const linked = linkTarget();
@@ -128,6 +128,17 @@ async function startCloud(): Promise<void> {
   if (!code) {
     root.render(<ui.CloudCafeCode />);
     return;
+  }
+  // A café this device has not seen yet (a link, a new code): is it there? A known one opens at once.
+  const cloud = await import('./cloud/cloud-cafe.ts');
+  if (!cloud.rememberedVenue()) {
+    const check = await cloud.checkCafe(code);
+    if (!check.ok && check.problem !== 'offline') {
+      if (check.problem === 'unknown') cloud.forgetCafe();
+      root.render(<ui.CloudCafeCode problem={check.problem} />);
+      return;
+    }
+    if (check.ok) cloud.rememberCafe(code, check.hello.venue);
   }
   events.installCloudEventSource(cloudHubUrl(code));
   root.render(

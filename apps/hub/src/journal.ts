@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Db } from './db.ts';
 import { one, run } from './db.ts';
+import { outboxEnabled } from './lean.ts';
 
 export const SYSTEM = 'system';
 
@@ -12,7 +13,10 @@ export interface JournalEntry {
   data: Record<string, unknown>;
 }
 
-/** Writes an audit record and queues the same event for the cloud. Call inside a transaction. */
+/**
+ * Writes an audit record and queues the same event for the cloud. Call inside a transaction.
+ * A HUB that never syncs (Hub deps `outbox: false`, lean.ts — the cloud café) writes the audit record only.
+ */
 export function record(db: Db, at: number, entry: JournalEntry): void {
   const data = JSON.stringify(entry.data);
   run(
@@ -25,7 +29,7 @@ export function record(db: Db, at: number, entry: JournalEntry): void {
     entry.entityId,
     data,
   );
-  run(db, 'INSERT INTO outbox (at, topic, payload) VALUES (?, ?, ?)', at, entry.action, JSON.stringify(entry));
+  if (outboxEnabled(db)) run(db, 'INSERT INTO outbox (at, topic, payload) VALUES (?, ?, ?)', at, entry.action, JSON.stringify(entry));
 }
 
 export interface AlertInput {

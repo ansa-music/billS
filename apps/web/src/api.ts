@@ -12,7 +12,7 @@ import type {
   SessionView,
   TlsStatus,
 } from '@bills/domain';
-import { CLOUD, cloudHubUrl } from './cloud/cloud-cafe.ts';
+import { CLOUD, cloudHeaders, cloudHubUrl } from './cloud/cloud-cafe.ts';
 
 export class HubRequestError extends Error {
   readonly code: string;
@@ -53,7 +53,7 @@ function errorText(code: string, message: string | undefined): string {
  * Where the HUB is. Empty (the usual case): the screen is served by the HUB itself or by
  * Vite with a proxy, and requests go to the same origin. The public demo on Firebase Hosting
  * is built with VITE_HUB_URL=https://<demo-hub>.onrender.com and calls it cross-origin (CORS).
- * «Облачная касса» (VITE_CLOUD_HUB=1, prototype): the café's HUB in the TS cloud, `/c/<café code>`.
+ * «Облачная касса» (VITE_CLOUD_HUB=1): the café's HUB in the TS cloud, `/c/<café code>`.
  */
 export const HUB_URL = (CLOUD ? cloudHubUrl() : (import.meta.env.VITE_HUB_URL ?? '')).trim().replace(/\/+$/, '');
 
@@ -61,6 +61,9 @@ export const HUB_URL = (CLOUD ? cloudHubUrl() : (import.meta.env.VITE_HUB_URL ??
 export function hubUrl(path: string): string {
   return HUB_URL + path;
 }
+
+/** What a screen says when the request did not get through («Облачная касса»: the café lives in the TS cloud). */
+const OFFLINE_TEXT = CLOUD ? 'Нет связи с облаком TS' : 'Нет связи с HUB';
 
 /** Fired on window when the HUB answers 401 to a request made with the current token. */
 export const UNAUTHORIZED_EVENT = 'bills:unauthorized';
@@ -81,7 +84,8 @@ export function getAuthToken(): string | null {
 
 function withAuth(headers: Record<string, string>, token: string | null): Record<string, string> {
   if (token) headers.authorization = `Bearer ${token}`;
-  return headers;
+  // «Облачная касса»: this device's id for the login throttle (cloud/cloud-cafe.ts); nothing in other builds.
+  return CLOUD ? { ...headers, ...cloudHeaders() } : headers;
 }
 
 /**
@@ -129,7 +133,7 @@ export async function fetchJson<T>(path: string): Promise<T> {
   try {
     res = await fetch(hubUrl(path), { cache: 'no-store', headers: withAuth({}, token) });
   } catch {
-    throw new HubRequestError(0, 'OFFLINE', 'Нет связи с HUB');
+    throw new HubRequestError(0, 'OFFLINE', OFFLINE_TEXT);
   }
   if (res.status === 401) notifyUnauthorized(token);
   if (!res.ok) throw await toError(res);
@@ -160,7 +164,7 @@ export async function command<T>(
 ): Promise<T> {
   const key = idempotencyKey ?? newKey();
   const token = authToken;
-  let lastError: Error = new HubRequestError(0, 'OFFLINE', 'Нет связи с HUB');
+  let lastError: Error = new HubRequestError(0, 'OFFLINE', OFFLINE_TEXT);
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) await sleep(500 * attempt);
     let res: Response;
@@ -178,7 +182,7 @@ export async function command<T>(
         body: JSON.stringify(body),
       });
     } catch {
-      lastError = new HubRequestError(0, 'OFFLINE', 'Нет связи с HUB');
+      lastError = new HubRequestError(0, 'OFFLINE', OFFLINE_TEXT);
       continue;
     }
     if (res.status >= 500) {
@@ -201,11 +205,11 @@ export async function loginWithKey(body: LoginRequest): Promise<LoginResponse> {
   try {
     res = await fetch(hubUrl('/api/auth/login'), {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'idempotency-key': newKey() },
+      headers: withAuth({ 'content-type': 'application/json', 'idempotency-key': newKey() }, null),
       body: JSON.stringify(body),
     });
   } catch {
-    throw new HubRequestError(0, 'OFFLINE', 'Нет связи с HUB');
+    throw new HubRequestError(0, 'OFFLINE', OFFLINE_TEXT);
   }
   if (!res.ok) throw await toError(res);
   return (await res.json()) as LoginResponse;
@@ -299,7 +303,7 @@ async function devGet<T>(path: string): Promise<T | null> {
   try {
     res = await fetch(hubUrl(path), { cache: 'no-store', headers: withAuth({}, authToken) });
   } catch {
-    throw new HubRequestError(0, 'OFFLINE', 'Нет связи с HUB');
+    throw new HubRequestError(0, 'OFFLINE', OFFLINE_TEXT);
   }
   if (res.status === 404) return null;
   if (!res.ok) throw await toError(res);
@@ -315,7 +319,7 @@ async function devPost<T>(path: string, patch: object): Promise<T> {
       body: JSON.stringify(patch),
     });
   } catch {
-    throw new HubRequestError(0, 'OFFLINE', 'Нет связи с HUB');
+    throw new HubRequestError(0, 'OFFLINE', OFFLINE_TEXT);
   }
   if (!res.ok) throw await toError(res);
   return (await res.json()) as T;

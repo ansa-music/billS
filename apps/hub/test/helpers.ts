@@ -55,6 +55,8 @@ export class Harness {
       lampDriver: driver,
       lampOptions: FAST_LAMPS,
       monitorOptions: { intervalMs: 0, alertAfterMs: 60_000 },
+      // test/lean-run.mjs runs the money and counter suites again with lean reads (lean.ts): same results.
+      ...(process.env.HUB_TEST_LEAN === '1' ? { leanReads: true } : {}),
       ...deps,
     });
     const app = buildApp(hub, {

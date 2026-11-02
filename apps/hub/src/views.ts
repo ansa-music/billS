@@ -37,6 +37,7 @@ import {
 import type { Db, Param } from './db.ts';
 import { all, one } from './db.ts';
 import { HubError } from './errors.ts';
+import { leanReads } from './lean.ts';
 import { getManualMode } from './manual-mode.ts';
 import { parseOptionNames } from './order-lines.ts';
 
@@ -365,22 +366,32 @@ export function loadOrder(db: Db, id: string): OrderView {
   return toOrderViews(db, [row])[0]!;
 }
 
+const OPEN_ORDERS_SQL = `SELECT o.* FROM bar_orders o JOIN table_sessions s ON s.id = o.session_id
+       WHERE o.club_id = ? AND o.status = 'OPEN'
+         AND (s.status IN ('OPENING', 'ACTIVE', 'AWAITING_PAYMENT') OR o.check_id IS NULL)
+       ORDER BY o.created_at`;
+
+/**
+ * The same rows (lean.ts), found through the live games (`ix_table_sessions_status`, `ix_bar_orders_session`) and
+ * the orders on no check (`ix_bar_orders_check`) instead of a scan of every bar order ever taken — counter orders
+ * of a coffee shop included. Ties in `created_at` keep the old order: the old plan scanned in rowid order.
+ */
+const OPEN_ORDERS_LEAN_SQL = `SELECT o.* FROM bar_orders o
+       WHERE o.rowid IN (
+           SELECT o2.rowid FROM table_sessions s JOIN bar_orders o2 ON o2.session_id = s.id AND o2.status = 'OPEN'
+            WHERE s.status IN ('OPENING', 'ACTIVE', 'AWAITING_PAYMENT')
+           UNION
+           SELECT o3.rowid FROM bar_orders o3 JOIN table_sessions s3 ON s3.id = o3.session_id
+            WHERE o3.check_id IS NULL AND o3.status = 'OPEN')
+         AND o.club_id = ?
+       ORDER BY o.created_at, o.rowid`;
+
 /**
  * Open bar orders on games that are live or waiting for payment, plus open orders on
  * no check whose game is over (paid on a check of their own); totals per game.
  */
 function openOrders(db: Db, club: string): { orders: OrderView[]; bySession: Map<string, number> } {
-  const orders = toOrderViews(
-    db,
-    all<OrderRow>(
-      db,
-      `SELECT o.* FROM bar_orders o JOIN table_sessions s ON s.id = o.session_id
-       WHERE o.club_id = ? AND o.status = 'OPEN'
-         AND (s.status IN ('OPENING', 'ACTIVE', 'AWAITING_PAYMENT') OR o.check_id IS NULL)
-       ORDER BY o.created_at`,
-      club,
-    ),
-  );
+  const orders = toOrderViews(db, all<OrderRow>(db, leanReads(db) ? OPEN_ORDERS_LEAN_SQL : OPEN_ORDERS_SQL, club));
   const bySession = new Map<string, number>();
   for (const o of orders) bySession.set(o.sessionId, (bySession.get(o.sessionId) ?? 0) + o.total);
   return { orders, bySession };
@@ -454,7 +465,9 @@ export function buildState(db: Db, now: number, power: PowerView, sync: SyncStat
      WHERE resolved_at IS NULL ORDER BY at DESC LIMIT 20`,
   );
 
-  const checks = loadChecksWhere(db, "c.club_id = ? AND c.status = 'OPEN' ORDER BY c.number", club.id);
+  // `+c.number` (lean.ts): the open checks by their status index and then sorted, instead of every check of the
+  // club walked in number order to pick the open ones.
+  const checks = loadChecksWhere(db, `c.club_id = ? AND c.status = 'OPEN' ORDER BY ${leanReads(db) ? '+' : ''}c.number`, club.id);
   const open = openShiftRow(db, club.id);
   const shift = open ? toShiftView(db, open) : null;
 
@@ -717,10 +730,61 @@ export function toShiftView(db: Db, row: ShiftRow): ShiftView {
     openedAt: row.opened_at,
     openedBy: row.opened_by,
     openingFloat: row.opening_float,
-    expectedCash: row.expected_cash ?? shiftTotals(shiftLedger(db, row)).expectedCash,
+    expectedCash: row.expected_cash ?? openShiftExpectedCash(db, row),
     closedAt: row.closed_at,
     closedBy: row.closed_by,
     countedCash: row.counted_cash,
     difference: row.difference,
   };
+}
+
+/**
+ * Lean reads (lean.ts): a running tally of the open shift's cash per database, so GET /api/state reads only the
+ * payments and cash movements added since the last call instead of the whole shift. Payments and movements are
+ * only ever inserted (never updated or deleted), and rowids only grow, so «rowid above the last one counted» is
+ * exactly what is new. Inside a transaction the full ledger is read and the tally left alone: a rolled-back row
+ * must never be counted, and its rowid may be used again.
+ */
+interface ShiftCashTally {
+  shiftId: string;
+  openingFloat: number;
+  lastPayment: number;
+  lastMovement: number;
+  /** Cash sales minus cash refunds. */
+  netCash: number;
+  deposits: number;
+  withdrawals: number;
+}
+
+const shiftCashTallies = new WeakMap<Db, ShiftCashTally>();
+
+function openShiftExpectedCash(db: Db, row: ShiftRow): number {
+  if (!leanReads(db) || db.isTransaction) return shiftTotals(shiftLedger(db, row)).expectedCash;
+  let t = shiftCashTallies.get(db);
+  if (!t || t.shiftId !== row.id || t.openingFloat !== row.opening_float) {
+    t = { shiftId: row.id, openingFloat: row.opening_float, lastPayment: 0, lastMovement: 0, netCash: 0, deposits: 0, withdrawals: 0 };
+  }
+  const tally = t;
+  for (const p of all<{ rid: number; kind: 'PAYMENT' | 'REFUND'; method: PaymentMethod; amount: number }>(
+    db,
+    'SELECT rowid AS rid, kind, method, amount FROM payments WHERE shift_id = ? AND rowid > ? ORDER BY rowid',
+    row.id,
+    tally.lastPayment,
+  )) {
+    if (p.method === 'CASH') tally.netCash += p.kind === 'PAYMENT' ? p.amount : -p.amount;
+    tally.lastPayment = p.rid;
+  }
+  for (const m of all<{ rid: number; kind: 'DEPOSIT' | 'WITHDRAWAL'; amount: number }>(
+    db,
+    'SELECT rowid AS rid, kind, amount FROM cash_movements WHERE shift_id = ? AND rowid > ? ORDER BY rowid',
+    row.id,
+    tally.lastMovement,
+  )) {
+    if (m.kind === 'DEPOSIT') tally.deposits += m.amount;
+    else tally.withdrawals += m.amount;
+    tally.lastMovement = m.rid;
+  }
+  shiftCashTallies.set(db, tally);
+  // shiftTotals: openingFloat + net cash + deposits − withdrawals.
+  return tally.openingFloat + tally.netCash + tally.deposits - tally.withdrawals;
 }

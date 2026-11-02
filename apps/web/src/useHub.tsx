@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import type { Action, BusinessType, HubState, LicenseStatus, MeResponse, OpenTableRequest, Role } from '@bills/domain';
 import { HubRequestError, UNAUTHORIZED_EVENT, command, fetchJson, fetchState, getAuthToken, hubUrl } from './api.ts';
 import { AUTH_CHANGED_EVENT, actorName, readAuth, writeAuth } from './auth.ts';
-import { CLOUD } from './cloud/cloud-cafe.ts';
+import { CLOUD, CLOUD_SAFETY_POLL_MS } from './cloud/cloud-cafe.ts';
 
 /**
  * One live connection to the HUB for the whole app: SSE for change events,
@@ -114,8 +114,9 @@ export function useHubConnection(): HubConnection {
         connect();
       }
     }, 10_000);
-    // «Облачная касса»: the WebSocket brings every change; a poll there is a billed request (cloud/cloud-cafe.ts).
-    const poll = setInterval(() => void refresh(), CLOUD ? 120_000 : 15_000);
+    // «Облачная касса»: the WebSocket brings every change and a reconnect (onopen above) re-reads at once; a poll
+    // there is a billed request that wakes the café (cloud/cloud-cafe.ts).
+    const poll = setInterval(() => void refresh(), CLOUD ? CLOUD_SAFETY_POLL_MS : 15_000);
     const onAuthChanged = () => {
       unauthorized.current = getAuthToken() === null;
       if (!unauthorized.current) void refresh();

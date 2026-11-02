@@ -145,6 +145,16 @@ export function sweepNoShows(db: Db, now: number): number {
   return due.length;
 }
 
+/** External timers: when the next booking that has not come turns into «не пришёл»; null with none waiting. */
+export function nextNoShowAt(db: Db): number | null {
+  const hold = syncRow(db).hold_minutes;
+  const row = one<{ at: number | null }>(
+    db,
+    "SELECT MIN(starts_at) AS at FROM bookings WHERE local_status IS NULL AND cloud_status IN ('PENDING', 'CONFIRMED')",
+  );
+  return row?.at == null ? null : row.at + hold * 60_000;
+}
+
 interface TableRow {
   id: string;
   name: string;
@@ -302,7 +312,12 @@ const idParam = { type: 'string', minLength: 1, maxLength: 100 } as const;
  */
 export function registerBookingRoutes(app: FastifyInstance, hub: Hub): BookingService {
   const bookings = new BookingService(hub);
-  bookings.start();
+  if (hub.externalTimers) {
+    // The cloud café (HubDeps.timers = 'external'): the sweep runs from hub.tick(), its alarm at the next no-show.
+    hub.addBackgroundJob({ name: 'bookings', everyMs: SWEEP_MS, run: () => void bookings.sweep(), dueAt: () => nextNoShowAt(hub.db) });
+  } else {
+    bookings.start();
+  }
   app.addHook('onClose', async () => bookings.stop());
 
   app.get<{ Querystring: { from?: number; to?: number } }>(

@@ -15,6 +15,11 @@ declare module '*.wasm' {
   export default module;
 }
 
+declare module 'virtual:hub-schema' {
+  /** The HUB's schema after all migrations, made at build time (scripts/hub-schema.mjs). */
+  export const HUB_SCHEMA: import('./importer.ts').SchemaTemplate;
+}
+
 declare module 'virtual:hub-migrations' {
   /** File name → SQL of every apps/hub/src/migrations/NNN_name.sql, bundled by build.mjs. */
   export const MIGRATIONS: Readonly<Record<string, string>>;
@@ -33,15 +38,6 @@ declare module '@ts-hub/idempotency.ts' {
 
 declare module '@ts-hub/clock.ts' {
   export const systemClock: { now(): number };
-}
-
-declare module '@ts-hub/demo-license.ts' {
-  export const DEMO_LICENSE_KEYS: Readonly<Record<string, string>>;
-  export function installDemoLicense(
-    license: unknown,
-    now: number,
-    trial?: { startedAt: number; days?: number; endsAt?: number; companyName: string; permanent?: boolean },
-  ): Promise<boolean>;
 }
 
 declare module '@ts-hub/trial.ts' {
@@ -68,22 +64,37 @@ declare module '@ts-hub/hub.ts' {
       db: unknown;
       clock: { now(): number };
       lampDriver: unknown;
-      license?: { mode: 'enforce' | 'off'; publicKeys: Readonly<Record<string, string>>; hubId?: string };
+      license?: {
+        mode: 'enforce' | 'off';
+        publicKeys: Readonly<Record<string, string>>;
+        hubId?: string;
+        terms?: (now: number) => import('@bills/domain').LicenseStatus;
+      };
       guardIntervalMs?: number;
       reconcileIntervalMs?: number;
       monitorOptions?: { intervalMs?: number };
+      timers?: 'own' | 'external';
+      leanReads?: boolean;
+      outbox?: boolean;
     });
-    readonly license: { init(): Promise<void>; readonly hubId: string };
+    readonly license: { init(): Promise<void>; readonly hubId: string; status(): import('@bills/domain').LicenseStatus };
     readonly events: {
       on(event: 'changed', listener: (e: ChangeEvent) => void): unknown;
       off(event: 'changed', listener: (e: ChangeEvent) => void): unknown;
+      changed(e: ChangeEvent): void;
     };
     readonly auth: {
       issueFixedKeys(keys: ReadonlyArray<{ roles: readonly string[]; name: string; key: string }>): unknown[];
+      resolve(token: string): { actor: { id: string | null; name: string; roles: readonly string[] } } | null;
+      revokeKey(keyId: string, actor: { id: string | null; name: string; role: string; roles: string[] }): unknown;
     };
-    readonly prepaid: { start(): void };
+    readonly settings: {
+      updateClub(input: { settings?: { display?: { showRoster?: boolean } }; actor: string }): unknown;
+    };
     state(): { club: { id: string; name: string }; serverNow: number };
     start(): void;
+    tick(now?: number): string[];
+    nextWakeAt(now?: number): number | null;
     close(): void;
   }
 }

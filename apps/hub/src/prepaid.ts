@@ -104,6 +104,15 @@ export class PrepaidService {
     this.#timer.unref?.();
   }
 
+  /**
+   * External timers (HubDeps.timers): follows the HUB's change events like start() does, but arms no interval
+   * and syncs nothing now — the host's `tick()` runs `sync()`, and its alarm comes at `nextPrepaidDueAt`.
+   */
+  listen(): void {
+    this.#events.off('changed', this.#onChange);
+    this.#events.on('changed', this.#onChange);
+  }
+
   close(): void {
     clearInterval(this.#timer);
     this.#events.off('changed', this.#onChange);
@@ -508,4 +517,18 @@ export class PrepaidService {
       },
     });
   }
+}
+
+/**
+ * External timers: when a running prepaid game next needs the HUB — its 5-minute blink, else its end; null with
+ * no such game. Games still waiting for their deadline get it from the HUB's change events (the lamp turned on).
+ */
+export function nextPrepaidDueAt(db: Db): number | null {
+  const row = one<{ at: number | null }>(
+    db,
+    `SELECT MIN(CASE WHEN warned_at IS NULL THEN deadline_at - ? ELSE deadline_at END) AS at
+     FROM prepaid_games WHERE settled_at IS NULL AND ended_at IS NULL AND deadline_at IS NOT NULL`,
+    PREPAID_WARNING_MS,
+  );
+  return row?.at ?? null;
 }

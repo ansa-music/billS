@@ -8,69 +8,11 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DatabaseSync as NodeDb } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { patchDbSource } from '../scripts/db-adapter.mjs';
-import type { SqlCursorLike, SqlStorageLike } from '../src/shims/sqlite.ts';
 import { DatabaseSync, provideStorage } from '../src/shims/sqlite.ts';
-
-type Value = ArrayBuffer | string | number | null;
-
-class FakeStorage implements SqlStorageLike {
-  readonly db = new NodeDb(':memory:');
-  #depth = 0;
-
-  constructor() {
-    this.db.exec('PRAGMA foreign_keys = ON');
-  }
-
-  readonly sql = {
-    exec: (query: string, ...bindings: Value[]): SqlCursorLike => {
-      if (/^\s*(BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE)\b/i.test(query)) throw new Error('To execute a transaction, please use the state.storage.transactionSync() API');
-      if (/^\s*PRAGMA\s+(journal_mode|synchronous|busy_timeout)\b/i.test(query)) throw new Error('not authorized: SQLITE_AUTH');
-      const args = bindings.map((b) => (b instanceof ArrayBuffer ? new Uint8Array(b) : b));
-      let rows: Array<Record<string, Value>> = [];
-      let written = 0;
-      // Several statements (a migration file): run them all, no rows back — like the storage's exec.
-      if (args.length === 0 && query.trim().replace(/;+$/, '').includes(';')) {
-        this.db.exec(query);
-      } else {
-        const st = this.db.prepare(query);
-        if (st.columns().length > 0) {
-          rows = (st.all(...(args as never[])) as Array<Record<string, unknown>>).map((r) => {
-            for (const k in r) if (r[k] instanceof Uint8Array) r[k] = (r[k] as Uint8Array).slice().buffer;
-            return r as Record<string, Value>;
-          });
-        } else {
-          written = Number(st.run(...(args as never[])).changes);
-        }
-      }
-      return {
-        rowsRead: rows.length,
-        rowsWritten: written,
-        toArray: () => rows,
-        [Symbol.iterator]: () => rows[Symbol.iterator](),
-      };
-    },
-  };
-
-  transactionSync<T>(fn: () => T): T {
-    const name = `t${++this.#depth}`;
-    this.db.exec(`SAVEPOINT ${name}`);
-    try {
-      const out = fn();
-      this.db.exec(`RELEASE ${name}`);
-      return out;
-    } catch (err) {
-      this.db.exec(`ROLLBACK TO ${name}`);
-      this.db.exec(`RELEASE ${name}`);
-      throw err;
-    } finally {
-      this.#depth--;
-    }
-  }
-}
+import { FakeStorage } from './fake-storage.ts';
 
 function open(): { db: DatabaseSync; storage: FakeStorage } {
   const storage = new FakeStorage();
@@ -148,6 +90,25 @@ test('statements behave like node:sqlite: changes, last id, errors, values', () 
   assert.throws(() => ins.run('a', 0, null), (e: Error & { code?: string }) => e.code === 'ERR_SQLITE_ERROR' && /UNIQUE/.test(e.message));
   assert.throws(() => db.prepare('SELECT ?').get(undefined), (e: Error & { code?: string }) => e.code === 'ERR_INVALID_ARG_TYPE');
   assert.throws(() => db.prepare('SELECT :x').get({ x: 1 }), /Named SQL parameters/);
+});
+
+test('a savepoint inside a transaction undoes only its own writes («Сторож» rules, guard.ts safely)', () => {
+  const { db } = open();
+  db.exec('CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)');
+  hubDb.transaction(db, () => {
+    hubDb.run(db, 'INSERT INTO t (name) VALUES (?)', 'command');
+    assert.throws(() =>
+      db.savepointSync(() => {
+        hubDb.run(db, 'INSERT INTO t (name) VALUES (?)', 'rule');
+        throw new Error('rule failed');
+      }),
+    );
+    db.savepointSync(() => void hubDb.run(db, 'INSERT INTO t (name) VALUES (?)', 'rule ok'));
+  });
+  assert.deepEqual(
+    db.prepare('SELECT name FROM t ORDER BY id').all().map((r) => r.name),
+    ['command', 'rule ok'],
+  );
 });
 
 test('BEGIN in SQL is refused with a pointer to the adapter', () => {

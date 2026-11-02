@@ -1,0 +1,71 @@
+/* «Облачная касса» (VITE_CLOUD_HUB=1): the café line before sign-in and the details of the menu badge. */
+
+.cloud-gate {
+  position: fixed;
+  left: 50%;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 12px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  margin: 0;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  box-shadow: var(--shadow-sm, none);
+}
+
+.cloud-gate-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cloud-gate-code,
+.cloud-code-value {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.cloud-code-box {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.cloud-code-value {
+  font-size: var(--fs-xl, 1.5rem);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.cloud-code-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cloud-details .btn {
+  min-height: 44px;
+}
+
+@media (max-width: 480px) {
+  .cloud-gate {
+    left: 16px;
+    right: 16px;
+    transform: none;
+    width: auto;
+  }
+}

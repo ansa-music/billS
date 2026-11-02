@@ -28,6 +28,12 @@ export interface LicenseOptions {
   publicKeys: Readonly<Record<string, string>>;
   /** This HUB's id as licenses name it; default `club:<local club id>`. */
   hubId?: string;
+  /**
+   * No signed license at all: the status comes from terms the host keeps — the cloud café (apps/cloud-hub), whose
+   * terms TS sets through its admin API, so no signing key has to live in the cloud. With `terms` nothing is read
+   * from or written to `license_state`, no limits apply and installing a license is refused.
+   */
+  terms?: (now: number) => LicenseStatus;
 }
 
 export interface LicenseServiceDeps {
@@ -56,6 +62,7 @@ export class LicenseService {
   #mode: 'enforce' | 'off';
   readonly #publicKeys: Readonly<Record<string, string>>;
   readonly #hubIdOption: string | undefined;
+  readonly #terms: ((now: number) => LicenseStatus) | undefined;
   /** The verified payload in force; null without one (or when the stored one failed the check). */
   #payload: LicensePayload | null = null;
   /** The stored text failed verifyLicense on start. */
@@ -74,6 +81,16 @@ export class LicenseService {
     this.#mode = deps.options?.mode ?? 'off';
     this.#publicKeys = deps.options?.publicKeys ?? {};
     this.#hubIdOption = deps.options?.hubId || undefined;
+    this.#terms = deps.options?.terms;
+  }
+
+  /** The status comes from the host's terms (LicenseOptions.terms), not from a signed license. */
+  get fromTerms(): boolean {
+    return this.#terms !== undefined;
+  }
+
+  #refuseWithTerms(): void {
+    if (this.#terms) throw new HubError(409, 'LICENSE_FROM_TS', 'Доступ этой кофейни задаёт TS: лицензию вставлять не нужно.');
   }
 
   /** Stops checking licenses (the demo, when a trial license cannot be made in this browser). */
@@ -97,6 +114,10 @@ export class LicenseService {
 
   /** Reads and verifies the stored license. Call once before serving requests. */
   async init(): Promise<void> {
+    if (this.#terms) {
+      this.#initialized = true;
+      return;
+    }
     const row = this.#row();
     this.#highWater = Math.max(row.high_water, 0);
     this.#highWaterWritten = this.#highWater;
@@ -125,6 +146,7 @@ export class LicenseService {
 
   /** The asynchronous half of install: signature and shape. */
   async verify(text: string): Promise<LicensePayload> {
+    this.#refuseWithTerms();
     const check = await verifyLicense(text.trim(), this.#publicKeys);
     if (!check.ok) throw new HubError(422, 'LICENSE_INVALID', check.message);
     return check.license;
@@ -132,6 +154,7 @@ export class LicenseService {
 
   /** The synchronous half: HUB id, age, storage and audit. `payload` must come from `verify(text)`. */
   installVerified(text: string, payload: LicensePayload, source: InstallSource, actor?: string): LicenseResponse {
+    this.#refuseWithTerms();
     const now = this.#clock.now();
     if (!payload.hubIds.includes(this.hubId)) {
       throw new HubError(422, 'LICENSE_INVALID', 'Лицензия выдана для другого филиала (другого HUB)');
@@ -180,6 +203,7 @@ export class LicenseService {
 
   /** Where the license stands now (also when not enforced: what it would say). */
   status(): LicenseStatus {
+    if (this.#terms) return this.#terms(this.#clock.now());
     if (!this.#initialized) this.#initSync();
     const now = this.#clock.now();
     this.#bumpHighWater(now);

@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Prototype: the HUB in a Cloudflare Worker, one Durable Object (SQLite) per café.",
+  "description": "TS cloud cash desk: the HUB in a Cloudflare Worker, one Durable Object (SQLite) per café.",
   "scripts": {
     "build": "node build.mjs",
     "build:web": "node scripts/build-web.mjs",
-    "dev": "wrangler dev --ip 127.0.0.1 --port 8790 --var ADMIN_TOKEN:local-admin",
+    "dev": "wrangler dev --ip 127.0.0.1 --port 8790 --var ADMIN_TOKEN:local-admin --var ALLOWED_ORIGINS:http://localhost:5173",
     "test": "node --test \"test/**/*.test.ts\"",
     "e2e": "node scripts/e2e.mjs",
     "trial-snapshot": "node scripts/make-trial-snapshot.ts"

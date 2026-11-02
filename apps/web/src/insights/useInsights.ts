@@ -3,9 +3,13 @@ import type { InsightsView, StockForecastItem } from '@bills/domain';
 import { fetchJson } from '../api.ts';
 import { usePolling } from '../cafe/cafe.ts';
 import { useHub } from '../useHub.tsx';
+import { CLOUD, CLOUD_SAFETY_POLL_MS } from '../cloud/cloud-cafe.ts';
 
-/** The HUB caches the answer for a minute: asking more often changes nothing. */
-export const INSIGHTS_POLL_MS = 60_000;
+/**
+ * The HUB caches the answer for a minute: asking more often changes nothing. «Облачная касса»: the answer reads
+ * four weeks of sales and the café's object forgets the cache when it sleeps — a rare safety poll there.
+ */
+export const INSIGHTS_POLL_MS = CLOUD ? CLOUD_SAFETY_POLL_MS : 60_000;
 
 /**
  * GET /api/insights: «Умные подсказки» and the stock forecast. Only senior staff see it

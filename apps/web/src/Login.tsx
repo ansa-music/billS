@@ -5,7 +5,7 @@ import { SHORT_KEY_LENGTH, deviceNameFromUserAgent, isDemoKeyShape, keyKindOf, n
 import { HubRequestError } from './api.ts';
 import { readDevice, useAuth, writeDevice } from './auth.ts';
 import { BrandMark } from './BrandMark.tsx';
-import { CLOUD } from './cloud/cloud-cafe.ts';
+import { CLOUD, CLOUD_SAFETY_POLL_MS } from './cloud/cloud-cafe.ts';
 import { DemoKeys, useDemo } from './demo.tsx';
 import { navigate, useLocation } from './router.tsx';
 import { fetchRoster } from './onboarding/setup.ts';
@@ -16,7 +16,7 @@ const LONG_PLACEHOLDER = 'TECH-XXXX-XXXX-XXXX-XXXX';
 const LONG_HINT = 'Длинный ключ выглядит как TECH-XXXX-XXXX-XXXX-XXXX или MGR-XXXX-XXXX-XXXX-XXXX.';
 const BAD_KEY = 'Неверный ключ';
 /** How often the list of names is refreshed while the screen waits (people arrive from the cabinet). */
-const ROSTER_REFRESH_MS = CLOUD ? 120_000 : 15_000;
+const ROSTER_REFRESH_MS = CLOUD ? CLOUD_SAFETY_POLL_MS : 15_000;
 
 /**
  * Who is signing in: a person picked on «Кто на смене?», anyone with six digits (no list, or «меня
