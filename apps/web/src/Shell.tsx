@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { AuthStaff, BusinessType, HubState } from '@bills/domain';
-import { rolesLabel } from '@bills/domain';
+import type { AuthStaff, BusinessType, HubState, Role } from '@bills/domain';
+import { primaryRole, rolesLabel } from '@bills/domain';
 import { businessOf } from './cafe/cafe.ts';
 import { CloudStatus } from './CloudStatus.tsx';
 import { formatClock } from './format.ts';
@@ -16,6 +16,7 @@ import { BrandMark } from './BrandMark.tsx';
 import { TRIAL } from './demo-hub/trial-store.ts';
 import { TrialBadge } from './trial/TrialBadge.tsx';
 import { TrialWatchMenuItem } from './trial/TrialWatch.tsx';
+import './cafe/staff-touch.css';
 
 /** Badge counts by route path (unpaid checks, lamp problems …). */
 export type NavBadges = Record<string, { count: number; tone: 'info' | 'danger' }>;
@@ -123,6 +124,50 @@ export const Sidebar = memo(
 /** Phones: the first sections as tabs, the rest (and who is signed in) in the «Ещё» sheet. */
 const PHONE_TABS = 4;
 
+/**
+ * A coffee shop's phone tabs by role: the pages that person opens most, in that order; every
+ * other page they may open is one tap away under «Ещё». The primary role decides (a cashier who
+ * is also a waiter gets the cashier's tabs). The platform roles see what a director sees.
+ */
+const CAFE_TABS: Partial<Record<Role, readonly string[]>> = {
+  owner: ['/owner', '/stats', '/checks', '/stock'],
+  tech: ['/owner', '/stats', '/checks', '/stock'],
+  manager: ['/owner', '/stats', '/checks', '/stock'], // Директор: выручка и отчёты
+  admin: ['/pos', '/checks', '/stats', '/stock'], // Управляющий
+  senior: ['/pos', '/checks', '/barista', '/stats'],
+  cashier: ['/pos', '/checks', '/barista', '/stock'],
+  bartender: ['/barista', '/pos', '/checks', '/stock'], // Бариста
+  waiter: ['/pos', '/barista', '/board'],
+};
+
+/**
+ * Which pages are tabs and which go under «Ещё». A coffee shop orders the tabs by role and
+ * always keeps «Ещё» (a shared tablet or phone: who is signed in and «Сменить» live there);
+ * a billiard club keeps the first PHONE_TABS in menu order, «Ещё» only when they do not fit.
+ */
+function phoneTabs(
+  routes: RouteDef[],
+  business: BusinessType | undefined,
+  roles: readonly Role[] | undefined,
+): { tabs: RouteDef[]; rest: RouteDef[] } {
+  if (business !== 'cafe') {
+    const fits = routes.length <= PHONE_TABS + 1;
+    return { tabs: fits ? routes : routes.slice(0, PHONE_TABS), rest: fits ? [] : routes.slice(PHONE_TABS) };
+  }
+  const role = primaryRole(roles ?? []);
+  const preferred = (role ? CAFE_TABS[role] : undefined) ?? [];
+  const tabs = preferred
+    .map((path) => routes.find((r) => r.path === path))
+    .filter((r): r is RouteDef => r !== undefined)
+    .slice(0, PHONE_TABS);
+  // Pages the table does not name (a role without an entry): fill up in menu order.
+  for (const r of routes) {
+    if (tabs.length >= PHONE_TABS) break;
+    if (!tabs.includes(r) && !preferred.includes(r.path) && r.path !== '/board') tabs.push(r);
+  }
+  return { tabs, rest: routes.filter((r) => !tabs.includes(r)) };
+}
+
 function BottomNavImpl({
   routes,
   active,
@@ -140,9 +185,10 @@ function BottomNavImpl({
   onLogout?: (() => void) | undefined;
 }) {
   const [open, setOpen] = useState(false);
-  const fits = routes.length <= PHONE_TABS + 1;
-  const tabs = fits ? routes : routes.slice(0, PHONE_TABS);
-  const rest = fits ? [] : routes.slice(PHONE_TABS);
+  const { tabs, rest } = phoneTabs(routes, business, staff?.roles);
+  const cafe = business === 'cafe';
+  // A coffee shop always has «Ещё»: who is signed in and «Сменить» are there.
+  const hasMore = rest.length > 0 || (cafe && staff !== undefined);
   const restActive = rest.find((r) => r.path === active);
   const restCount = rest.reduce((sum, r) => sum + (badges[r.path]?.count ?? 0), 0);
   const restTone = rest.some((r) => (badges[r.path]?.count ?? 0) > 0 && badges[r.path]?.tone === 'danger') ? 'danger' : 'info';
@@ -157,9 +203,9 @@ function BottomNavImpl({
 
   return (
     <>
-      <nav className="bottom-nav" aria-label="Разделы" style={{ gridTemplateColumns: `repeat(${tabs.length + (rest.length ? 1 : 0)}, minmax(0, 1fr))` }}>
+      <nav className="bottom-nav" aria-label="Разделы" style={{ gridTemplateColumns: `repeat(${tabs.length + (hasMore ? 1 : 0)}, minmax(0, 1fr))` }}>
         <NavLinks routes={tabs} active={active} badges={badges} />
-        {rest.length > 0 && (
+        {hasMore && (
           <button
             type="button"
             className="nav-link nav-more"
@@ -179,7 +225,7 @@ function BottomNavImpl({
       {open && (
         <>
           <div className="more-backdrop" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="more-sheet" role="dialog" aria-label="Все разделы">
+          <div className="more-sheet" role="dialog" aria-label="Все разделы" data-cafe={cafe || undefined}>
             <div className="more-grip" aria-hidden="true" />
             {staff && (
               <div className="more-who">
@@ -202,9 +248,11 @@ function BottomNavImpl({
                 )}
               </div>
             )}
-            <div className="more-links">
-              <NavLinks routes={rest} active={active} badges={badges} onNavigate={() => setOpen(false)} />
-            </div>
+            {rest.length > 0 && (
+              <div className="more-links">
+                <NavLinks routes={rest} active={active} badges={badges} onNavigate={() => setOpen(false)} />
+              </div>
+            )}
             {TRIAL && <TrialBadge place="sheet" />}
           </div>
         </>
@@ -276,6 +324,22 @@ export function Popover({
   );
 }
 
+/**
+ * `<html data-business="cafe">` while a coffee shop's staff screens are open: the touch styles
+ * for phones and tablets (cafe/staff-touch.css) apply to the café only — dialogs render into
+ * <body>, outside the shell, so the mark sits on <html>. A billiard club gets no attribute.
+ */
+function useVenueMark(business: BusinessType): void {
+  useEffect(() => {
+    const html = document.documentElement;
+    if (business !== 'cafe') return;
+    html.dataset.business = 'cafe';
+    return () => {
+      delete html.dataset.business;
+    };
+  }, [business]);
+}
+
 const THEME_LABEL: Record<ThemePreference, string> = {
   auto: 'Тема: как в настройках клуба',
   dark: 'Тема: тёмная',
@@ -298,6 +362,7 @@ export function Topbar(props: {
 }) {
   const { state, staff } = props;
   const business = businessOf(state.settings);
+  useVenueMark(business);
   const fullscreen = useFullscreen();
   const alerts = state.alerts;
   const fullscreenLabel = fullscreen.active ? 'Выйти из полноэкранного режима' : 'На весь экран';
@@ -420,7 +485,14 @@ export function Topbar(props: {
           )}
         </Popover>
 
-        <button type="button" className="icon-btn topbar-extra" onClick={props.onTheme} title={THEME_LABEL[props.theme]} aria-label={THEME_LABEL[props.theme]}>
+        {/* A coffee shop's shared tablet is passed between people: «Сменить» in one tap (tablets only, see staff-touch.css). */}
+        {business === 'cafe' && (
+          <button type="button" className="topbar-switch" onClick={props.onLogout} title="Выйти и сменить сотрудника">
+            <Icon name="logout" size={20} />
+            <span>Сменить</span>
+          </button>
+        )}
+        <button type="button" className="icon-btn topbar-extra topbar-theme" onClick={props.onTheme} title={THEME_LABEL[props.theme]} aria-label={THEME_LABEL[props.theme]}>
           <Icon name={THEME_ICON[props.theme]} />
         </button>
         {fullscreen.supported && (

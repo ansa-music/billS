@@ -111,9 +111,10 @@ function ReportBody({ report, club }: { report: ShiftReport; club: HubState['clu
               {ROWS.map(([label, key]) => (
                 <tr key={key} className={key === 'total' ? 'report-total' : undefined}>
                   <th scope="row">{label}</th>
-                  <td>{money(report.sales[key])}</td>
-                  <td>{money(report.refunds[key])}</td>
-                  <td>{money(report.net[key])}</td>
+                  {/* data-label: the column name for the card view on a coffee shop's phone. */}
+                  <td data-label="Продажи">{money(report.sales[key])}</td>
+                  <td data-label="Возвраты">{money(report.refunds[key])}</td>
+                  <td data-label="Итого">{money(report.net[key])}</td>
                 </tr>
               ))}
             </tbody>

@@ -168,10 +168,12 @@
   min-width: var(--control);
 }
 
-/* Modals */
+/* Modals: a 560px card on tablets and PCs; on phones the shared full-screen sheet (styles.css). */
 
-.stock-modal {
-  width: min(560px, calc(100vw - 24px));
+@media (min-width: 561px) {
+  .stock-modal {
+    width: min(560px, calc(100vw - 32px));
+  }
 }
 
 .stock-form {
@@ -307,6 +309,8 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-2);
+  /* «Сумма по накладной» wraps to two lines on a phone: keep both inputs on one line. */
+  align-items: end;
 }
 
 .stock-total {
@@ -689,13 +693,85 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  /* Tablets: the name gets the room, the amount only what it needs (right-aligned, so the
+     amounts of all rows line up before the buttons). */
+  .stock-item {
+    grid-template-columns: minmax(0, 1fr) fit-content(190px) auto;
+  }
+
+  .stock-item-qty {
+    justify-items: end;
+    text-align: right;
+  }
+
+  .stock-item-tags {
+    justify-content: flex-end;
+  }
+
+  /* What an option changes: «добавить / вместо базы» on one line, «заменить» on two
+     («заменить [молоко] ↓» then «[овсяное] [мл] [убрать]»). */
   .stock-option-line,
   .stock-option-line:has(.stock-arrow) {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(96px, 130px) auto;
+    grid-template-areas: 'mode to qty del';
+  }
+
+  .stock-option-line:has(.stock-arrow) {
+    grid-template-areas:
+      'mode from from arrow'
+      'to to qty del';
+  }
+
+  .stock-opt-mode {
+    grid-area: mode;
+  }
+
+  .stock-opt-from {
+    grid-area: from;
+  }
+
+  .stock-opt-to {
+    grid-area: to;
+  }
+
+  .stock-opt-qty {
+    grid-area: qty;
+  }
+
+  .stock-opt-del {
+    grid-area: del;
   }
 
   .stock-option-line .stock-arrow {
-    display: none;
+    grid-area: arrow;
+    justify-self: center;
+    font-size: var(--fs-lg);
+    transform: rotate(90deg);
+  }
+}
+
+/* Phones and tablets up to a 1280 px landscape one (and any touch screen): every button and
+   chip ≥ 48 px. A 1366 px PC keeps its sizes. */
+@media (max-width: 1300px), (pointer: coarse) {
+  .stock-tab .btn:not(.btn-large, .stock-add),
+  .stock-tab .chip,
+  .stock-form .seg-chips .chip {
+    min-height: max(48px, var(--control));
+  }
+
+  .stock-item-actions .btn,
+  .stock-line-head .btn,
+  .stock-recipe-line .btn,
+  .stock-option-line .btn,
+  .stock-choice-head .btn {
+    min-width: max(48px, var(--control));
+  }
+}
+
+/* Two stat tiles per line below 768 px (sections.css): «На сумму» takes the whole second line. */
+@media (max-width: 767px) {
+  .stock-tab > .stat-row > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
   }
 }
 
@@ -715,13 +791,39 @@
   }
 }
 
-@media (max-width: 640px) {
-  .stock-tabs {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
+/* Phones and portrait tablets: each ingredient is a card — the name (it may take two or three
+   lines) and the amount on top, the warning under them across the card, then the buttons.
+   The warning and the buttons never squeeze the name. */
+@media (max-width: 900px) {
   .stock-item {
     grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .stock-item-main {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .stock-item-qty {
+    display: contents;
+  }
+
+  .stock-qty {
+    grid-row: 1;
+    grid-column: 2;
+    align-self: start;
+    text-align: right;
+  }
+
+  .stock-item-tags {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .stock-item-tags:empty {
+    display: none;
   }
 
   .stock-item-actions {
@@ -732,10 +834,15 @@
   .stock-item-actions .btn {
     flex: 1;
   }
+}
 
-  .stock-item-qty {
-    text-align: right;
-    justify-items: end;
+@media (max-width: 640px) {
+  .stock-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stock-item {
+    padding: var(--space-3);
   }
 
   .stock-add {
@@ -769,10 +876,18 @@
   .stock-option-line,
   .stock-option-line:has(.stock-arrow) {
     grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'mode mode'
+      'to to'
+      'qty del';
   }
 
-  .stock-option-line select {
-    grid-column: 1 / -1;
+  .stock-option-line:has(.stock-arrow) {
+    grid-template-areas:
+      'mode mode'
+      'from arrow'
+      'to to'
+      'qty del';
   }
 
   .stock-count-head {

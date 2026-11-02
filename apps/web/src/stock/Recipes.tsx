@@ -217,8 +217,8 @@ function RecipeEditor({
     if (saved) load(saved);
   };
 
-  const ingredientSelect = (value: string, onChange: (id: string) => void, label: string, extra?: IngredientView[]) => (
-    <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label} disabled={!canEdit}>
+  const ingredientSelect = (value: string, onChange: (id: string) => void, label: string, extra?: IngredientView[], className?: string) => (
+    <select className={className} value={value} onChange={(e) => onChange(e.target.value)} aria-label={label} disabled={!canEdit}>
       <option value="">— сырьё —</option>
       {[...active, ...(extra ?? [])].map((i) => (
         <option key={i.id} value={i.id}>
@@ -324,6 +324,7 @@ function RecipeEditor({
                     return (
                       <li key={o.key} className="stock-option-line">
                         <select
+                          className="stock-opt-mode"
                           value={o.mode}
                           onChange={(e) => setOption({ key: o.key, mode: e.target.value as RecipeOptionMode })}
                           aria-label="Что сделать"
@@ -337,12 +338,12 @@ function RecipeEditor({
                         </select>
                         {o.mode === 'swap' && (
                           <>
-                            {ingredientSelect(o.replacesId, (id) => setOption({ key: o.key, replacesId: id }), 'Что заменить', archivedIn(o.replacesId))}
+                            {ingredientSelect(o.replacesId, (id) => setOption({ key: o.key, replacesId: id }), 'Что заменить', archivedIn(o.replacesId), 'stock-opt-from')}
                             <span className="stock-arrow" aria-hidden="true">→</span>
                           </>
                         )}
-                        {ingredientSelect(o.ingredientId, (id) => setOption({ key: o.key, ingredientId: id }), 'Сырьё', archivedIn(o.ingredientId))}
-                        <label className="stock-qty-input">
+                        {ingredientSelect(o.ingredientId, (id) => setOption({ key: o.key, ingredientId: id }), 'Сырьё', archivedIn(o.ingredientId), 'stock-opt-to')}
+                        <label className="stock-qty-input stock-opt-qty">
                           <input
                             inputMode="decimal"
                             value={o.quantity}
@@ -354,7 +355,7 @@ function RecipeEditor({
                           <span>{ing?.unit ?? ''}</span>
                         </label>
                         {canEdit && (
-                          <button type="button" className="btn btn-small" aria-label="Убрать" onClick={change(() => setOptions((l) => l.filter((x) => x.key !== o.key)))}>
+                          <button type="button" className="btn btn-small stock-opt-del" aria-label="Убрать" onClick={change(() => setOptions((l) => l.filter((x) => x.key !== o.key)))}>
                             <Icon name="trash" size={16} />
                           </button>
                         )}

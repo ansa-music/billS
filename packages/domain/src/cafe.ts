@@ -226,21 +226,105 @@ export function nextCounterNumber(last: number | null | undefined): number {
 }
 
 /**
+ * A handed-over order can be called back to «Готов» for this long: «Выдан» tapped by
+ * mistake, or the guest came back for the cup. After that ISSUED is final.
+ */
+export const COUNTER_RECALL_MS = 15 * 60_000;
+
+/** Whether an order handed over at `issuedAt` may still be called back at `now`. */
+export function canRecallOrder(issuedAt: number | null | undefined, now: number): boolean {
+  if (typeof issuedAt !== 'number' || !Number.isFinite(issuedAt)) return false;
+  const age = now - issuedAt;
+  return age >= 0 && age <= COUNTER_RECALL_MS;
+}
+
+/**
  * Whether the barista may move an order from one stage to another. Forward one
  * step or straight to ISSUED (handed over at once); back one step to fix a tap
- * by mistake. ISSUED is final.
+ * by mistake. ISSUED goes back only to READY, only within COUNTER_RECALL_MS of
+ * the hand-over (`recall` says when it was and what time it is now); without
+ * `recall` ISSUED is final.
  */
-export function canMoveStage(from: CounterStage, to: CounterStage): boolean {
-  if (from === to || from === 'ISSUED') return false;
+export function canMoveStage(
+  from: CounterStage,
+  to: CounterStage,
+  recall?: { issuedAt: number | null | undefined; now: number },
+): boolean {
+  if (from === to) return false;
+  if (from === 'ISSUED') return to === 'READY' && recall !== undefined && canRecallOrder(recall.issuedAt, recall.now);
   const a = COUNTER_STAGES.indexOf(from);
   const b = COUNTER_STAGES.indexOf(to);
   return b === a + 1 || b === a - 1 || to === 'ISSUED';
+}
+
+/** The stage a step back leads to (the barista's «назад» and undo); null for a new order. */
+export function previousStage(stage: CounterStage): CounterStage | null {
+  const i = COUNTER_STAGES.indexOf(stage);
+  return i > 0 ? COUNTER_STAGES[i - 1]! : null;
 }
 
 /** The stage the barista's big button leads to; null when ISSUED. */
 export function nextStage(stage: CounterStage): CounterStage | null {
   const i = COUNTER_STAGES.indexOf(stage);
   return i >= 0 && i < COUNTER_STAGES.length - 1 ? COUNTER_STAGES[i + 1]! : null;
+}
+
+/**
+ * Options the barista must not miss — plant or lactose-free milk, decaf, no sugar: the most
+ * common mistake at the bar is the wrong milk. The barista's screen shows them in colour.
+ */
+const ATTENTION_OPTION = /(овсян|миндал|кокос|соев|рисов|фундук|растит|безлакт|без лакт|декаф|без кофеин|без сахар)/i;
+export function isAttentionOption(name: string): boolean {
+  return ATTENTION_OPTION.test(name);
+}
+
+/** «Капучино · L · Овсяное» → «Капучино»: the product without the options (shown on their own line). */
+export function counterItemName(item: { title: string; optionNames: readonly string[] }): string {
+  const parts = item.title.split(' · ');
+  return item.optionNames.length > 0 && parts.length > item.optionNames.length
+    ? parts.slice(0, parts.length - item.optionNames.length).join(' · ')
+    : item.title;
+}
+
+/** One line of «Всего в работе»: «Капучино ×4 (Овсяное 2)». */
+export interface AllDayLine {
+  name: string;
+  qty: number;
+  /** How many of them carry an option the barista must not miss, by option name. */
+  attention: Array<{ option: string; qty: number }>;
+}
+
+/**
+ * «Всего в работе» (KDS «All Day»): what is left to make over the new and the preparing orders,
+ * by product, most first, with the must-not-miss options counted apart — the barista makes
+ * drinks in batches and does not re-read every card. Cancelled orders do not count.
+ */
+export function allDayCounts(
+  orders: ReadonlyArray<{ stage: CounterStage; status: string; items: ReadonlyArray<{ title: string; optionNames: readonly string[]; qty: number }> }>,
+): AllDayLine[] {
+  const lines = new Map<string, { qty: number; attention: Map<string, number> }>();
+  for (const order of orders) {
+    if (order.status === 'CANCELLED' || (order.stage !== 'NEW' && order.stage !== 'PREPARING')) continue;
+    for (const item of order.items) {
+      if (!(item.qty > 0)) continue;
+      const name = counterItemName(item);
+      const line = lines.get(name) ?? { qty: 0, attention: new Map<string, number>() };
+      line.qty += item.qty;
+      for (const option of item.optionNames) {
+        if (isAttentionOption(option)) line.attention.set(option, (line.attention.get(option) ?? 0) + item.qty);
+      }
+      lines.set(name, line);
+    }
+  }
+  return [...lines]
+    .map(([name, l]) => ({
+      name,
+      qty: l.qty,
+      attention: [...l.attention]
+        .map(([option, qty]) => ({ option, qty }))
+        .sort((a, b) => b.qty - a.qty || a.option.localeCompare(b.option, 'ru')),
+    }))
+    .sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name, 'ru'));
 }
 
 // ── HTTP API (HUB) ──────────────────────────────────────────────────────────

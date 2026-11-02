@@ -20,6 +20,7 @@ import type {
   ShiftReport,
   ShiftView,
 } from '@bills/domain';
+import { COUNTER_RECALL_MS } from '@bills/domain';
 import { all, MIGRATIONS_DIR, one, openDb } from '../src/db.ts';
 import { seedDemo } from '../src/seed.ts';
 import { SimulatorLampDriver } from '../src/lamps/simulator.ts';
@@ -315,7 +316,7 @@ test('numbers run through the working day and start over at 06:00; live numbers 
 
 // ─── The bar: stages and the guest board ────────────────────────────────────
 
-test('stages: forward a step, back a step, straight to issued; issued is final; times are kept', async (t) => {
+test('stages: forward a step, back a step, straight to issued; issued only back to ready, for a while; times are kept', async (t) => {
   const h = harness(t);
   const hub = await cafe(h);
   const { order } = await taken(hub, [{ product: 'Чёрный' }]);
@@ -337,15 +338,34 @@ test('stages: forward a step, back a step, straight to issued; issued is final; 
     [issued.body.stage, issued.body.readyAt, issued.body.issuedAt],
     ['ISSUED', MONDAY_NOON + 120_000, MONDAY_NOON + 150_000],
   );
+  // Issued goes back only to «Готов» (recall: «Выдан» by mistake), keeping the ready time.
+  assertError(await stage(hub, order.id, 'PREPARING'), 409, 'STAGE_NOT_ALLOWED');
+  h.clock.advance(COUNTER_RECALL_MS);
+  const recalled = await stage(hub, order.id, 'READY');
+  assert.deepEqual(
+    [recalled.body.stage, recalled.body.readyAt, recalled.body.issuedAt],
+    ['READY', MONDAY_NOON + 120_000, null],
+  );
+  await stage(hub, order.id, 'ISSUED');
+  h.clock.advance(COUNTER_RECALL_MS + 1);
   const late = await stage(hub, order.id, 'READY');
   assertError(late, 409, 'STAGE_NOT_ALLOWED');
-  assert.match(late.body.error?.message ?? '', /уже выдан/);
+  assert.match(late.body.error?.message ?? '', /вернуть нельзя/);
+  const other = await stage(hub, order.id, 'NEW');
+  assertError(other, 409, 'STAGE_NOT_ALLOWED');
+  assert.match(other.body.error?.message ?? '', /уже выдан/);
 
+  // Handed over straight from «Новый»: called back, it is ready from now on.
   const straight = await taken(hub, [{ product: 'Зелёный' }]);
   assert.equal((await stage(hub, straight.order.id, 'ISSUED')).body.stage, 'ISSUED');
+  const callBack = await stage(hub, straight.order.id, 'READY');
+  assert.deepEqual([callBack.body.stage, callBack.body.readyAt], ['READY', h.clock.now()]);
   const moves = all<{ data: string }>(hub.db, "SELECT data FROM audit_log WHERE action = 'counter.stage' ORDER BY id");
-  assert.equal(moves.length, 6);
+  assert.equal(moves.length, 9);
   assert.deepEqual(JSON.parse(moves[0]!.data), { counterNumber: 1, from: 'NEW', to: 'PREPARING', service: 'HERE', status: 'OPEN' });
+  assert.deepEqual(JSON.parse(moves[5]!.data), { counterNumber: 1, from: 'ISSUED', to: 'READY', service: 'HERE', status: 'OPEN', recalled: true });
+  const board = await get<{ ready: Array<{ number: number }> }>(hub, '/api/counter/board');
+  assert.deepEqual(board.body.ready.map((r) => r.number), [2]);
 });
 
 test('board and list: making (oldest first), ready, issued gone from the board; list keeps the last issued at the end', async (t) => {
