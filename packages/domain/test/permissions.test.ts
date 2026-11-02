@@ -276,9 +276,11 @@ test('a coffee shop: its «Управляющий» (admin) hires and keys only 
   }
 });
 
-test('a coffee shop: the waiter takes orders for the barista; the money stays with the till', () => {
+test('a coffee shop: the waiter takes orders with their money; a billiard waiter does not take money', () => {
   assert.ok(can('waiter', 'counter.take', 'cafe'));
-  assert.ok(!can('waiter', 'payment.take', 'cafe'));
+  assert.ok(can('waiter', 'payment.take', 'cafe'));
+  assert.ok(!can('waiter', 'payment.take'));
+  assert.ok(!can('waiter', 'payment.take', 'billiards'));
   // A waiter who is also a cashier takes the money; so do the barista and everyone above.
   assert.ok(can(['waiter', 'cashier'], 'payment.take', 'cafe'));
   for (const role of ['bartender', 'cashier', 'senior', 'admin', 'manager'] as const) {

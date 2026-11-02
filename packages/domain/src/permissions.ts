@@ -275,6 +275,8 @@ export const ACTION_NAMES = Object.keys(ACTIONS) as Action[];
  *    drawer, takes the X and Z reports, and settles a «счёт потом» check (a shift does not close
  *    while one is open; the counter already takes payment) — still no menu, revenue page,
  *    refunds, discounts, staff or settings;
+ *  - the waiter takes an order with its money (card, QR, cash), as the counter always allowed;
+ *    without an open shift they still send it to the barista «без оплаты»;
  *  - its «Управляющий» (admin) hires and keys the staff below them (CAFE_ASSIGNABLE_ROLES).
  */
 export const CAFE_GRANTS: Partial<Record<Action, readonly Role[]>> = {
@@ -282,7 +284,7 @@ export const CAFE_GRANTS: Partial<Record<Action, readonly Role[]>> = {
   'shift.close': ['bartender'],
   'shift.cash': ['bartender'],
   'shift.report': ['bartender'],
-  'payment.take': ['bartender'],
+  'payment.take': ['bartender', 'waiter'],
   'staff.edit': ['admin'],
 };
 
