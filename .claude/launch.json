@@ -44,6 +44,24 @@
       "port": 5400
     },
     {
+      "name": "lead",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/local.mjs", "--hub-port=4420", "--web-port=5420", "--db=lead"],
+      "port": 5420
+    },
+    {
+      "name": "lead-cafe",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/local.mjs", "--hub-port=4430", "--web-port=5430", "--db=lead-cafe", "--business=cafe"],
+      "port": 5430
+    },
+    {
+      "name": "lead-cloud",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--env-file=C:/Users/User/AppData/Local/Temp/claude/C--Users-User--claude-spares-spare-jKL4eh/8171d584-9025-4aa9-895c-b6c96ac0a52e/scratchpad/lead-cloud.env", "apps/cloud/src/main.ts"],
+      "port": 4320
+    },
+    {
       "name": "ui-check",
       "runtimeExecutable": "node",
       "runtimeArgs": ["scripts/local.mjs", "--hub-port=4610", "--web-port=5610", "--db=ui-check"],
@@ -66,6 +84,12 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["--env-file=.env.alt", "node_modules/vite/bin/vite.js", "apps/web"],
       "port": 5190
+    },
+    {
+      "name": "ds-cafe",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/local.mjs", "--hub-port=4660", "--web-port=5660", "--db=ds-cafe", "--business=cafe"],
+      "port": 5660
     }
   ]
 }
