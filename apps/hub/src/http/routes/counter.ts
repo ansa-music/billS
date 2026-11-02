@@ -58,7 +58,8 @@ export const createSchema = {
 /**
  * Coffee shop counter (packages/domain cafe.ts). Taking an order includes its payment
  * (`counter.take`: cashier, barista and up); the barista moves stages (`counter.stage`);
- * cancelling is a bar order cancel (`order.cancel`). The guest screen's board is public.
+ * cancelling (deleting a check) is the manager's and the administrator's (`counter.cancel`):
+ * the order stays CANCELLED with who and why. The guest screen's board is public.
  */
 export function registerCounterRoutes(app: FastifyInstance, hub: Hub): void {
   app.post<{ Body: CreateCounterOrderRequest }>('/api/counter/orders', { schema: { body: createSchema } }, async (req, reply) =>
@@ -107,7 +108,7 @@ export function registerCounterRoutes(app: FastifyInstance, hub: Hub): void {
         reply,
         hub,
         (actor) => ({ status: 200, body: hub.counter.cancel({ orderId: req.params.orderId, reason: req.body.reason, actor }) }),
-        'order.cancel',
+        'counter.cancel',
       ),
   );
 

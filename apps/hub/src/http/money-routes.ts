@@ -12,6 +12,7 @@ import type {
   SetDiscountRequest,
 } from '@bills/domain';
 import { CASH_MOVEMENT_KINDS, DISCOUNT_KINDS, PAYMENT_METHODS } from '@bills/domain';
+import { closeFor, shiftFor } from '../blind.ts';
 import type { Hub } from '../hub.ts';
 import { emptyBody, guard, runCommand } from './command.ts';
 
@@ -273,9 +274,9 @@ export function registerMoneyRoutes(app: FastifyInstance, hub: Hub): void {
         req,
         reply,
         hub,
-        (actor) => ({
+        (actor, who) => ({
           status: 201,
-          body: hub.shifts.open({ openingFloat: req.body.openingFloat, actor }),
+          body: shiftFor(who.roles, hub.shifts.open({ openingFloat: req.body.openingFloat, actor })),
         }),
         'shift.open',
       ),
@@ -302,15 +303,16 @@ export function registerMoneyRoutes(app: FastifyInstance, hub: Hub): void {
         req,
         reply,
         hub,
-        (actor) => ({
+        (actor, who) => ({
           status: 200,
-          body: hub.shifts.moveCash({ shiftId: req.params.shiftId, ...req.body, actor }),
+          body: shiftFor(who.roles, hub.shifts.moveCash({ shiftId: req.params.shiftId, ...req.body, actor })),
         }),
         'shift.cash',
       ),
   );
 
-  app.get<{ Params: { shiftId: string } }>('/api/shifts/:shiftId/report', { preHandler: guard('checks.view') }, async (req) =>
+  // X and Z reports are the shift's money: managers, administrators, seniors (stats.view), not the cashier.
+  app.get<{ Params: { shiftId: string } }>('/api/shifts/:shiftId/report', { preHandler: guard('stats.view') }, async (req) =>
     hub.shifts.report(req.params.shiftId),
   );
 
@@ -335,9 +337,10 @@ export function registerMoneyRoutes(app: FastifyInstance, hub: Hub): void {
         req,
         reply,
         hub,
-        (actor) => ({
+        (actor, who) => ({
           status: 200,
-          body: hub.shifts.close({ shiftId: req.params.shiftId, ...req.body, actor }),
+          // A cashier counts blind: no expected cash, no difference, no Z report in the answer.
+          body: closeFor(who.roles, hub.shifts.close({ shiftId: req.params.shiftId, ...req.body, actor })),
         }),
         'shift.close',
       ),

@@ -23,6 +23,7 @@ import {
   PAYMENT_METHODS,
 } from '@bills/domain';
 import { getJson } from '../api.ts';
+import { useHub } from '../useHub.tsx';
 import type { Desk, DeskProps } from './desk.ts';
 import { useAction, useDesk, useLoad } from './desk.ts';
 import { currencySymbol, describeDifference, formatWhen, METHOD_LABEL } from './format.ts';
@@ -45,6 +46,8 @@ type ShiftDialog =
 export function ShiftPanel(props: DeskProps) {
   const desk = useDesk(props);
   const { shift, club, serverNow } = desk.state;
+  // The shift's money (expected cash, X report) is stats.view: a cashier counts the drawer blind.
+  const seesMoney = useHub().can('stats.view');
   const [dialog, setDialog] = useState<ShiftDialog | null>(null);
   const close = () => setDialog(null);
   const xPrint = useAction();
@@ -66,10 +69,14 @@ export function ShiftPanel(props: DeskProps) {
           <p className="hint">
             Открыта {formatWhen(shift.openedAt, club.timezone, serverNow)} · {shift.openedBy}
           </p>
-          <div className="shift-cash">
-            <span>Наличных в кассе</span>
-            <strong className="money">{formatMoney(shift.expectedCash, club.currency)}</strong>
-          </div>
+          {seesMoney && shift.expectedCash !== null ? (
+            <div className="shift-cash">
+              <span>Наличных в кассе</span>
+              <strong className="money">{formatMoney(shift.expectedCash, club.currency)}</strong>
+            </div>
+          ) : (
+            <p className="hint">Сумму в кассе и X-отчёт видят старший смены, администратор и управляющий.</p>
+          )}
           <div className="shift-actions">
             <button
               type="button"
@@ -85,26 +92,32 @@ export function ShiftPanel(props: DeskProps) {
             >
               Изъять
             </button>
-            <button type="button" className="btn btn-small" onClick={() => setDialog({ kind: 'x-report', shiftId: shift.id })}>
-              X-отчёт
-            </button>
+            {seesMoney && (
+              <button type="button" className="btn btn-small" onClick={() => setDialog({ kind: 'x-report', shiftId: shift.id })}>
+                X-отчёт
+              </button>
+            )}
             <button type="button" className="btn btn-small" onClick={() => setDialog({ kind: 'checks', shiftId: shift.id })}>
               Чеки смены
             </button>
           </div>
-          <div className="shift-print">
-            <PaperSwitch />
-            <button
-              type="button"
-              className="btn btn-small"
-              title="Печать X-отчёта"
-              disabled={xPrint.pending}
-              onClick={() => printX(shift.id)}
-            >
-              Печать X
-            </button>
-          </div>
-          <FormError error={xPrint.error?.message} />
+          {seesMoney && (
+            <>
+              <div className="shift-print">
+                <PaperSwitch />
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  title="Печать X-отчёта"
+                  disabled={xPrint.pending}
+                  onClick={() => printX(shift.id)}
+                >
+                  Печать X
+                </button>
+              </div>
+              <FormError error={xPrint.error?.message} />
+            </>
+          )}
           <button type="button" className="btn btn-outline-danger" onClick={() => setDialog({ kind: 'close', shift })}>
             Закрыть смену
           </button>
@@ -123,7 +136,14 @@ export function ShiftPanel(props: DeskProps) {
           desk={desk}
           shift={shift ?? dialog.shift}
           onClose={close}
-          onClosed={(report) => setDialog({ kind: 'z-report', report })}
+          onClosed={(report, number) => {
+            if (report) setDialog({ kind: 'z-report', report });
+            else {
+              // Blind count: no Z report for a cashier; the manager sees it in «Счета».
+              close();
+              desk.notify(`Смена №${number} закрыта`);
+            }
+          }}
         />
       )}
       {dialog?.kind === 'z-report' && <ReportDialog kind="Z" report={dialog.report} club={club} onClose={close} />}
@@ -189,7 +209,7 @@ function CashMovementDialog({
       const minor = parseMoney(amount, currency);
       if (minor === null) throw new Error('Проверьте сумму');
       assertCashAmount(minor);
-      if (!deposit) assertCashAvailable(shift.expectedCash, minor);
+      if (!deposit && shift.expectedCash !== null) assertCashAvailable(shift.expectedCash, minor);
       const body: CashMovementRequest = { kind, amount: minor, reason: assertReason(reason) };
       await desk.send<ShiftView>(`/api/shifts/${shift.id}/cash`, body);
       desk.notify(`${deposit ? 'Внесено' : 'Изъято'} ${formatMoney(minor, currency)}`);
@@ -213,9 +233,11 @@ function CashMovementDialog({
       }
     >
       <form id={formId} className="cash-form" onSubmit={submit}>
-        <p className="muted">
-          Наличных в кассе: <strong className="money">{formatMoney(shift.expectedCash, currency)}</strong>
-        </p>
+        {shift.expectedCash !== null && (
+          <p className="muted">
+            Наличных в кассе: <strong className="money">{formatMoney(shift.expectedCash, currency)}</strong>
+          </p>
+        )}
         <MoneyField label={`Сумма, ${currencySymbol(currency)}`} value={amount} onChange={setAmount} autoFocus />
         <TextField
           label="Причина"
@@ -242,7 +264,8 @@ function CloseShiftDialog({
   desk: Desk;
   shift: ShiftView;
   onClose: () => void;
-  onClosed: (report: ShiftReport) => void;
+  /** The Z report, or null for someone who counts blind. */
+  onClosed: (report: ShiftReport | null, number: number) => void;
 }) {
   const { currency } = desk.state.club;
   const [counted, setCounted] = useState('');
@@ -251,7 +274,10 @@ function CloseShiftDialog({
   const formId = useId();
 
   const countedCash = counted.trim() === '' ? null : parseMoney(counted, currency);
-  const diff = countedCash === null ? null : describeDifference(cashDifference(countedCash, shift.expectedCash), currency);
+  // Blind count (no stats.view): the HUB sends no expected cash, so no difference is shown either.
+  const expected = shift.expectedCash;
+  const diff =
+    countedCash === null || expected === null ? null : describeDifference(cashDifference(countedCash, expected), currency);
   const unpaidLeft =
     desk.state.unpaid.length > 0 || desk.state.checks.length > 0 || unbilledOrders(desk.state).length > 0;
 
@@ -261,7 +287,7 @@ function CloseShiftDialog({
       if (countedCash === null) throw new Error('Укажите, сколько наличных в кассе');
       const body: CloseShiftRequest = { countedCash, ...(note.trim() ? { note: note.trim() } : {}) };
       const res = await desk.send<CloseShiftResponse>(`/api/shifts/${shift.id}/close`, body);
-      onClosed(res.report);
+      onClosed(res.report, shift.number);
     });
   };
 
@@ -284,17 +310,21 @@ function CloseShiftDialog({
       }
     >
       <form id={formId} className="cash-form" onSubmit={submit}>
-        <div className="shift-cash">
-          <span>Ожидается в кассе</span>
-          <strong className="money">{formatMoney(shift.expectedCash, currency)}</strong>
-        </div>
+        {expected !== null ? (
+          <div className="shift-cash">
+            <span>Ожидается в кассе</span>
+            <strong className="money">{formatMoney(expected, currency)}</strong>
+          </div>
+        ) : (
+          <p className="hint">Пересчитайте наличные в кассе и введите сумму. Сверку сделает управляющий.</p>
+        )}
         <MoneyField
           label={`Пересчитано наличных, ${currencySymbol(currency)}`}
           value={counted}
           onChange={setCounted}
           autoFocus
         />
-        {counted.trim() !== '' && (
+        {counted.trim() !== '' && (expected !== null || countedCash === null) && (
           <p className="diff diff-big" data-sign={diff?.sign} aria-live="polite">
             {diff ? diff.text : 'Проверьте сумму'}
           </p>

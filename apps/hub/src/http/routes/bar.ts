@@ -90,7 +90,7 @@ export function registerBarRoutes(app: FastifyInstance, hub: Hub): void {
       runCommand(req, reply, hub, (actor) => ({
         status: 200,
         body: hub.bar.updateProduct({ ...req.body, id: req.params.id, actor }),
-      }), 'catalog.edit'),
+      }), stopListOnly(req.body) ? 'catalog.stop' : 'catalog.edit'),
   );
 
   app.get<{ Params: { sessionId: string } }>(
@@ -154,4 +154,13 @@ export function registerBarRoutes(app: FastifyInstance, hub: Hub): void {
         body: hub.bar.cancelOrder({ orderId: req.params.orderId, reason: req.body.reason, actor }),
       }), 'order.cancel'),
   );
+}
+
+/**
+ * The stop list: a body that only puts a product off the menu or back (`{ isActive }`) is
+ * `catalog.stop` — the barista does that when something runs out. Anything else is the menu.
+ */
+export function stopListOnly(body: object | null | undefined): boolean {
+  const keys = Object.keys(body ?? {});
+  return keys.length === 1 && keys[0] === 'isActive';
 }

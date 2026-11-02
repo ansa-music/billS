@@ -214,6 +214,7 @@ export function PosPage() {
 
   const noShift = state.shift === null;
   const canOrder = canNow('counter.take');
+  const canDesign = canNow('catalog.edit');
   const orderBlocked = blockedReason('counter.take');
   const canSend = online && canOrder && !empty && !broken;
   const canPayNow = canSend && !noShift;
@@ -601,16 +602,19 @@ export function PosPage() {
                 </div>
               )}
             </div>
-            <button
-              type="button"
-              className="ts-design-toggle"
-              aria-pressed={designing}
-              aria-label={designing ? 'Готово' : 'Редактировать дизайн'}
-              onClick={() => setDesigning((d) => !d)}
-            >
-              <span aria-hidden="true">✎</span>{' '}
-              <span className="ts-design-toggle-text">{designing ? 'Готово' : 'Редактировать дизайн'}</span>
-            </button>
+            {/* The tiles' look is part of the menu: the manager's and the administrator's (catalog.edit). */}
+            {canDesign && (
+              <button
+                type="button"
+                className="ts-design-toggle"
+                aria-pressed={designing}
+                aria-label={designing ? 'Готово' : 'Редактировать дизайн'}
+                onClick={() => setDesigning((d) => !d)}
+              >
+                <span aria-hidden="true">✎</span>{' '}
+                <span className="ts-design-toggle-text">{designing ? 'Готово' : 'Редактировать дизайн'}</span>
+              </button>
+            )}
           </div>
           {multiplier !== null && (
             <p className="pos-mult-note" role="status">
@@ -648,7 +652,7 @@ export function PosPage() {
             <p className="empty">В меню пока нет товаров. Добавьте их в разделе «Меню».</p>
           ) : tiles.length === 0 ? (
             <p className="empty pos-noresult">Ничего не нашлось по «{query}».</p>
-          ) : designing ? (
+          ) : designing && canDesign ? (
             <EditGrid
               tiles={tiles}
               looks={tileLook.looks.tiles}
@@ -906,14 +910,17 @@ export function PosPage() {
                     <strong>{money(due)}</strong>
                   </div>
                   <div className="pos-express" role="group" aria-label="Оплата в одно нажатие">
-                    <button type="button" className="pos-express-btn" disabled={!canPayNow} onClick={() => pay('CASH')}>
-                      Без сдачи<kbd className="pos-kbd">Enter</kbd>
+                    <button type="button" className="pos-express-btn" data-method="CASH" disabled={!canPayNow} onClick={() => pay('CASH')}>
+                      <span className="pos-express-name">{METHOD_LABEL.CASH}</span>
+                      <kbd className="pos-kbd">без сдачи · Enter</kbd>
                     </button>
-                    <button type="button" className="pos-express-btn" disabled={!canPayNow} onClick={() => pay('CARD')}>
-                      {METHOD_LABEL.CARD}<kbd className="pos-kbd">F2</kbd>
+                    <button type="button" className="pos-express-btn" data-method="CARD" disabled={!canPayNow} onClick={() => pay('CARD')}>
+                      <span className="pos-express-name">{METHOD_LABEL.CARD}</span>
+                      <kbd className="pos-kbd">F2</kbd>
                     </button>
-                    <button type="button" className="pos-express-btn" disabled={!canPayNow} onClick={() => pay('QR')}>
-                      {METHOD_LABEL.QR}<kbd className="pos-kbd">F3</kbd>
+                    <button type="button" className="pos-express-btn" data-method="QR" disabled={!canPayNow} onClick={() => pay('QR')}>
+                      <span className="pos-express-name">{METHOD_LABEL.QR}</span>
+                      <kbd className="pos-kbd">F3</kbd>
                     </button>
                   </div>
                   <button type="button" className="pos-paybar" disabled={empty || broken || !canOrder} onClick={() => setMode('pay')}>
@@ -1241,18 +1248,30 @@ function PayView({
         <strong>{money(total)}</strong>
       </div>
 
-      <div className="pos-pay-quick" role="group" aria-label="Наличные: сумма от гостя">
-        <button type="button" className="pos-cash-btn pos-cash-exact" disabled={!canPay} onClick={() => onPay('CASH')}>
-          <small>Наличные</small>
-          Без сдачи
+      {/* The three ways to pay, big and first: read from a step away, one tap each. */}
+      <div className="pos-pay-methods" role="group" aria-label="Способ оплаты">
+        <button type="button" className="pos-method" data-method="CASH" disabled={!canPay} onClick={() => onPay('CASH')}>
+          {METHOD_LABEL.CASH}
+          <small>без сдачи</small>
         </button>
-        {quick.map((q) => (
-          <button key={q} type="button" className="pos-cash-btn" disabled={!canPay} onClick={() => onPay('CASH', { tendered: q })}>
-            <small>сдача {money(q - total)}</small>
-            {money(q)}
-          </button>
-        ))}
+        <button type="button" className="pos-method" data-method="CARD" disabled={!canPay} onClick={() => onPay('CARD')}>
+          {METHOD_LABEL.CARD}
+        </button>
+        <button type="button" className="pos-method" data-method="QR" disabled={!canPay} onClick={() => onPay('QR')}>
+          {METHOD_LABEL.QR}
+        </button>
       </div>
+
+      {quick.length > 0 && (
+        <div className="pos-pay-quick" role="group" aria-label="Наличные: сумма от гостя">
+          {quick.map((q) => (
+            <button key={q} type="button" className="pos-cash-btn" disabled={!canPay} onClick={() => onPay('CASH', { tendered: q })}>
+              <small>сдача {money(q - total)}</small>
+              {money(q)}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="pos-pay-cash">
         <div className="pos-display" aria-live="polite">
@@ -1291,15 +1310,6 @@ function PayView({
             Принять {money(typed ?? total)}
           </button>
         )}
-      </div>
-
-      <div className="pos-pay-methods">
-        <button type="button" className="pos-method" disabled={!canPay} onClick={() => onPay('CARD')}>
-          {METHOD_LABEL.CARD}
-        </button>
-        <button type="button" className="pos-method" disabled={!canPay} onClick={() => onPay('QR')}>
-          {METHOD_LABEL.QR}
-        </button>
       </div>
 
       <div className="pos-pay-extra">

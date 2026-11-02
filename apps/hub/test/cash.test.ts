@@ -144,7 +144,7 @@ test('a shift opens with a float, takes deposits and withdrawals and closes with
   assert.equal(closed.body.shift.expectedCash, 13000_00);
   assert.equal(closed.body.shift.countedCash, 12900_00);
   assert.equal(closed.body.shift.difference, -100_00);
-  const z = closed.body.report;
+  const z = closed.body.report!;
   assert.equal(z.kind, 'Z');
   assert.equal(z.expectedCash, 13000_00);
   assert.equal(z.countedCash, 12900_00);
@@ -407,8 +407,8 @@ test('the shift cannot close while a game or a check is unpaid', async (t) => {
   assert.equal((await pay(hub, check.id, [{ method: 'CASH', amount: 1500_00 }])).status, 200);
   const closed = await closeShift(hub, shift.id, 2500_00);
   assert.equal(closed.status, 200);
-  assert.equal(closed.body.report.kind, 'Z');
-  assert.equal(closed.body.report.difference, 0);
+  assert.equal(closed.body.report!.kind, 'Z');
+  assert.equal(closed.body.report!.difference, 0);
   assert.equal(sessionStatus(hub, running.body.id), 'ACTIVE'); // a running game does not block closing
 });
 
@@ -574,8 +574,8 @@ test('a game with money on its check cannot be voided; voided games do not block
 
   const closed = await closeShift(hub, shift.id, 4000_00);
   assert.equal(closed.status, 200);
-  assert.equal(closed.body.report.difference, 0);
-  assert.equal(closed.body.report.cancelledGames, 2);
+  assert.equal(closed.body.report!.difference, 0);
+  assert.equal(closed.body.report!.cancelledGames, 2);
 });
 
 test('a repeated payment with the same key is taken once', async (t) => {

@@ -7,7 +7,9 @@ import {
   cashDifference,
   shiftTotals,
   splitRevenue,
+  summarizeCancelled,
 } from '@bills/domain';
+import { archiveEntries } from './archive.ts';
 import type { Clock } from './clock.ts';
 import type { Db } from './db.ts';
 import { afterCommit, one, run, transaction } from './db.ts';
@@ -149,9 +151,14 @@ export class ShiftService {
   report(shiftId: string): ShiftReport {
     const row = loadShiftRow(this.#db, shiftId);
     if (row.status === 'CLOSED' && row.z_report) {
-      const z = JSON.parse(row.z_report) as ShiftReport;
-      // Z reports fixed before the time/bar split (migration 012) get it from the checks of that shift.
-      return z.revenue ? z : { ...z, revenue: revenueOf(loadChecksWhere(this.#db, 'c.closed_shift_id = ?', row.id)) };
+      const z = JSON.parse(row.z_report) as Partial<ShiftReport> & Omit<ShiftReport, 'revenue' | 'cancelled'>;
+      // Z reports fixed before the time/bar split (migration 012) get it from the checks of that shift,
+      // and those fixed before «Отменённые» get the cancellations of the shift from the database.
+      return {
+        ...z,
+        revenue: z.revenue ?? revenueOf(loadChecksWhere(this.#db, 'c.closed_shift_id = ?', row.id)),
+        cancelled: z.cancelled ?? cancelledIn(this.#db, row, row.closed_at ?? this.#clock.now()),
+      };
     }
     return buildReport(this.#db, row, 'X', this.#clock.now(), null);
   }
@@ -287,7 +294,13 @@ function buildReport(db: Db, row: ShiftRow, kind: 'X' | 'Z', now: number, counte
     revenue: revenueOf(paidChecks),
     cancelledGames,
     movements: cashMovements(db, row.id),
+    cancelled: cancelledIn(db, row, row.closed_at ?? now),
   };
+}
+
+/** «Отменённые» of a shift: orders and games cancelled between its opening and `until` (inclusive). */
+function cancelledIn(db: Db, row: ShiftRow, until: number): ShiftReport['cancelled'] {
+  return summarizeCancelled(archiveEntries(db, row.club_id, row.opened_at, until + 1));
 }
 
 /** Paid checks split into time and bar, each check's discount spread over both. */

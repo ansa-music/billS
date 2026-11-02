@@ -2,6 +2,7 @@ import { isWeakShortKey, SHORT_KEY_LENGTH } from '@bills/domain';
 import { one, run, transaction } from './db.ts';
 import type { Hub } from './hub.ts';
 import { seedEmptyClub } from './seed.ts';
+import { seedSampleStock } from './stock-sample.ts';
 import { applyTemplate } from './templates.ts';
 
 /**
@@ -42,6 +43,10 @@ export function setupTrialClub(hub: Hub, setup: TrialSetup): boolean {
   });
   if (!created) return false;
   hub.auth.issueFixedKeys([{ roles: ['manager'], name: managerName, key: setup.key }]);
-  if (setup.withMenu) applyTemplate(hub, 'menu-cafe', managerName);
+  if (setup.withMenu) {
+    applyTemplate(hub, 'menu-cafe', managerName);
+    // «Склад» working at once: sample raw materials and recipes for the sample drinks.
+    seedSampleStock(hub, managerName);
+  }
   return true;
 }

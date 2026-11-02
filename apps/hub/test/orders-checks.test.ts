@@ -592,7 +592,7 @@ test('the shift cannot close while an open order is on no check', async (t) => {
   assert.equal((await pay(hub, check.id, [{ method: 'CASH', amount: 600_00 }])).status, 200);
   const closed = await closeShift(hub, shift.id, 3600_00);
   assert.equal(closed.status, 200);
-  assert.equal(closed.body.report.difference, 0);
+  assert.equal(closed.body.report!.difference, 0);
 });
 
 // ─── 10. Revenue in the X/Z report ──────────────────────────────────────────
@@ -622,8 +622,8 @@ test('the shift report splits revenue into time and bar, discount included', asy
 
   const closed = await closeShift(hub, shift.id, 1000_00 + 2880_00);
   assert.equal(closed.status, 200);
-  assert.equal(closed.body.report.kind, 'Z');
-  assert.deepEqual(closed.body.report.revenue, { time: 1800_00, bar: 1080_00 });
+  assert.equal(closed.body.report!.kind, 'Z');
+  assert.deepEqual(closed.body.report!.revenue, { time: 1800_00, bar: 1080_00 });
 });
 
 // ─── 11. Audit and outbox ───────────────────────────────────────────────────

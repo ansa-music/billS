@@ -1172,10 +1172,13 @@ a.stat-tile:active {
   }
 }
 
-/* Dialogs: one look for ui.tsx <Modal> and cash/Modal.tsx — head, scrolling body, pinned foot. */
+/* Dialogs: one look for ui.tsx <Modal> and cash/Modal.tsx — head, scrolling body, pinned foot.
+   Big and touch-friendly (a coffee shop works them standing, from a step away): 640px wide,
+   16px text, 56px buttons, 52px fields; a full-screen sheet on phones. */
 
 .modal {
-  width: min(560px, calc(100vw - 32px));
+  width: min(640px, calc(100vw - 32px));
+  font-size: var(--fs-base);
   max-width: none;
   max-height: calc(100vh - 32px);
   max-height: calc(100dvh - 32px);
@@ -1195,7 +1198,7 @@ a.stat-tile:active {
 }
 
 .modal.modal-wide {
-  width: min(720px, calc(100vw - 32px));
+  width: min(820px, calc(100vw - 32px));
 }
 
 .modal::backdrop {
@@ -1218,21 +1221,21 @@ html:has(.modal[open]) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 60px;
-  padding: 8px 8px 8px 20px;
+  min-height: 68px;
+  padding: 8px 8px 8px 24px;
   border-bottom: 1px solid var(--border);
 }
 
 .modal-head h2 {
-  font-size: var(--fs-lg);
+  font-size: var(--fs-xl);
   font-weight: 700;
   letter-spacing: -0.01em;
   min-width: 0;
 }
 
 .modal-close {
-  width: 44px;
-  height: 44px;
+  width: var(--control-lg);
+  height: var(--control-lg);
   flex: none;
   display: grid;
   place-items: center;
@@ -1256,15 +1259,15 @@ html:has(.modal[open]) {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 20px;
+  padding: var(--space-5);
   display: grid;
-  gap: 16px;
+  gap: var(--space-4);
   align-content: start;
 }
 
 .modal-foot {
-  padding: 12px 20px;
-  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  padding: var(--space-4) var(--space-5);
+  padding-bottom: max(var(--space-4), env(safe-area-inset-bottom));
   border-top: 1px solid var(--border);
   background: var(--surface);
   display: grid;
@@ -1274,7 +1277,7 @@ html:has(.modal[open]) {
 .modal-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-3);
 }
 
 .modal-actions .btn {
@@ -1295,16 +1298,71 @@ html:has(.modal[open]) {
   font-size: 16px; /* below 16px iOS zooms the page on focus */
 }
 
-/* Phones: a full-width sheet from the bottom. */
+/* Big controls inside every dialog: buttons ≥56px, fields ≥52px, labels and hints readable. */
+.modal .btn {
+  min-height: var(--control-lg);
+  padding: 0 var(--space-5);
+  font-size: var(--fs-base);
+  border-radius: var(--radius-md);
+}
+
+.modal .modal-foot .btn,
+.modal .modal-actions .btn {
+  font-size: var(--fs-lg);
+}
+
+.modal :is(input:not([type='checkbox']):not([type='radio']), select) {
+  min-height: 52px;
+  font-size: var(--fs-lg);
+  padding: 10px 14px;
+}
+
+.modal textarea {
+  min-height: 96px;
+  font-size: var(--fs-lg);
+}
+
+.modal .field {
+  font-size: var(--fs-base);
+  gap: var(--space-2);
+}
+
+.modal :is(.hint, .muted, .form-error, .check) {
+  font-size: var(--fs-base);
+}
+
+.modal .check input {
+  width: 24px;
+  height: 24px;
+}
+
+/* Phones: a full-screen sheet (the buttons stay pinned at the bottom, under the thumb). */
 @media (max-width: 560px) {
   .modal,
-  .modal.modal-wide {
+  .modal.modal-wide,
+  .modal.modal-options {
     width: 100%;
-    max-height: 94vh;
-    max-height: 94dvh;
-    margin: auto 0 0;
-    border-width: 1px 0 0;
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    max-width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    max-height: 100vh;
+    max-height: 100dvh;
+    margin: 0;
+    border-width: 0;
+    border-radius: 0;
+  }
+
+  .modal-body {
+    padding: var(--space-4);
+  }
+
+  .modal-foot {
+    padding: var(--space-3) var(--space-4);
+    padding-bottom: max(var(--space-3), env(safe-area-inset-bottom));
+  }
+
+  .modal-actions .btn {
+    flex: 1 1 100%;
   }
 
   .modal[open] {

@@ -30,6 +30,7 @@ import { SessionService } from './sessions.ts';
 import { SettingsService } from './settings.ts';
 import { ShiftService } from './shifts.ts';
 import { StaffService } from './staff.ts';
+import { StockService } from './stock.ts';
 import type { ManualMode } from './manual-mode.ts';
 import { getManualMode, isManualMode, managerMatcher, setManualMode } from './manual-mode.ts';
 import type { SyncOptions } from './sync.ts';
@@ -91,6 +92,8 @@ export class Hub {
   readonly counter: CounterService;
   /** Staff, roles, PINs, audit log. */
   readonly staff: StaffService;
+  /** «Склад»: raw materials, recipes, deliveries, counts (stock.ts). */
+  readonly stock: StockService;
   /** Owner summary. */
   readonly reports: ReportService;
   /** Access keys and login sessions. */
@@ -162,6 +165,7 @@ export class Hub {
     this.bar = new BarService(common);
     this.counter = new CounterService({ ...common, checks: this.checks });
     this.staff = new StaffService({ ...common, limits });
+    this.stock = new StockService(common);
     this.reports = new ReportService(common);
     this.auth = new AuthService({ ...common, demo: deps.demo === true });
     // «Сторож»: a game opened on a table right after the previous one stopped.

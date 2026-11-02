@@ -14,6 +14,7 @@ import type { SimulatorUps } from '../power/ups.ts';
 import type { VersionInfo } from '../version.ts';
 import { versionInfo } from '../version.ts';
 import { registerBookingRoutes } from '../bookings.ts';
+import { registerStockRoutes } from './routes/stock.ts';
 import { registerAuth } from './auth.ts';
 import type { AuthHookOptions } from './auth.ts';
 import { actorOf, emptyBody, guard, runCommand } from './command.ts';
@@ -21,6 +22,8 @@ import { registerHallRoutes } from './hall-routes.ts';
 import { registerMoneyRoutes } from './money-routes.ts';
 import { registerBarRoutes } from './routes/bar.ts';
 import { registerCounterRoutes } from './routes/counter.ts';
+import { registerArchiveRoutes } from './routes/archive.ts';
+import { shiftFor } from '../blind.ts';
 import { registerGuestRoutes } from './routes/guest.ts';
 import { registerExtendRoutes } from './routes/prepaid-extend.ts';
 import { registerLicenseRoutes } from './routes/license.ts';
@@ -135,7 +138,12 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   registerHallRoutes(app, hub, runCommand);
 
   // Managers also see who is behind a «Сторож» alert (club.edit); everyone else — the text only.
-  app.get('/api/state', { preHandler: guard('hall.view') }, async (req) => hub.state({ staffNames: can(actorOf(req).roles, 'club.edit') }));
+  app.get('/api/state', { preHandler: guard('hall.view') }, async (req) => {
+    const roles = actorOf(req).roles;
+    const state = hub.state({ staffNames: can(roles, 'club.edit') });
+    // Blind count: the cash expected in the drawer is shift money (stats.view).
+    return { ...state, shift: shiftFor(roles, state.shift) };
+  });
 
   app.post<{ Params: { tableId: string }; Body: { tariffId?: string; prepaidMinutes?: number } }>(
     '/api/tables/:tableId/open',
@@ -323,6 +331,7 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   registerSettingsRoutes(app, hub);
   registerBarRoutes(app, hub);
   registerCounterRoutes(app, hub);
+  registerArchiveRoutes(app, hub);
   registerGuestRoutes(app, hub);
   registerExtendRoutes(app, hub);
   registerLoyaltyRoutes(app, hub);
@@ -333,6 +342,7 @@ export function buildApp(hub: Hub, options: AppOptions = {}): FastifyInstance {
   registerLicenseRoutes(app, hub);
   registerTemplateRoutes(app, hub);
   registerBookingRoutes(app, hub);
+  registerStockRoutes(app, hub);
 
   // Server-sent events: screens refetch /api/state when something changes.
   app.get('/api/events', (req, reply) => {

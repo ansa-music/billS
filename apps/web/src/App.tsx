@@ -38,6 +38,7 @@ import { BaristaPage } from './cafe/Barista.tsx';
 import { BoardPage } from './cafe/Board.tsx';
 import { CafeReports } from './cafe/Reports.tsx';
 import { PosPage } from './cafe/Pos.tsx';
+import { StockPage } from './stock/StockPage.tsx';
 import { GuestPage } from './guest/GuestPage.tsx';
 import { ConnectPage } from './onboarding/Connect.tsx';
 import { CafeNeedsCounterModule } from './onboarding/CafeLicense.tsx';
@@ -54,6 +55,7 @@ const PAGES: Record<string, (query: URLSearchParams, business: BusinessType) => 
   '/stats': (_query, business) => (business === 'cafe' ? <CafeReports /> : <StatsSection />),
   '/tariffs': () => <TariffsSection />,
   '/bar': () => <BarMenuPage />,
+  '/stock': () => <StockPage />,
   '/staff': () => <StaffPage />,
   '/journal': (query) => <JournalSection params={query} />,
   '/equipment': () => <EquipmentSection />,

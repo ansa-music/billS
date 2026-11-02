@@ -1,7 +1,10 @@
 import { Fragment, useRef, useState } from 'react';
 import type { CheckView, CreateCheckRequest, Minor, SessionView } from '@bills/domain';
 import { formatMoney } from '@bills/domain';
+import type { CancelTarget } from '../cafe/CounterCancelDialog.tsx';
+import { CounterCancelDialog } from '../cafe/CounterCancelDialog.tsx';
 import { formatClock, formatMinutes } from '../format.ts';
+import { useHub } from '../useHub.tsx';
 import { CancelDialog } from './CancelDialog.tsx';
 import type { DeskProps } from './desk.ts';
 import { toActionError, useDesk } from './desk.ts';
@@ -22,6 +25,12 @@ export function UnpaidPanel(props: DeskProps) {
 
   const [paying, setPaying] = useState<CheckView | null>(null);
   const [cancelling, setCancelling] = useState<SessionView | null>(null);
+  // A coffee shop check (counter orders, no table) is cancelled only by the manager or the administrator.
+  const canCancelCounter = useHub().canNow('counter.cancel');
+  const [cancelOrder, setCancelOrder] = useState<CancelTarget | null>(null);
+  const counterOrdersOf = (c: CheckView) => [
+    ...new Set(c.items.filter((i) => i.kind === 'ORDER' && i.orderId && i.tableId == null).map((i) => i.orderId!)),
+  ];
   /** What a check is being opened for: a game id, an order id or `table:<id>` for all orders of a table. */
   const [creating, setCreating] = useState<string | null>(null);
   const creatingRef = useRef(false);
@@ -79,6 +88,20 @@ export function UnpaidPanel(props: DeskProps) {
                     >
                       Оплатить
                     </button>
+                    {canCancelCounter &&
+                      c.paid - c.refunded === 0 &&
+                      counterOrdersOf(c).map((orderId) => (
+                        <button
+                          key={orderId}
+                          type="button"
+                          className="btn btn-small btn-ghost"
+                          onClick={() =>
+                            setCancelOrder({ orderId, number: null, total: c.total, summary: checkSummary(c, names, money) })
+                          }
+                        >
+                          Отменить
+                        </button>
+                      ))}
                   </div>
                 </li>
               ))}
@@ -190,6 +213,19 @@ export function UnpaidPanel(props: DeskProps) {
 
       {paying && <PayDialog key={paying.id} desk={desk} initial={paying} onClose={() => setPaying(null)} />}
       {cancelling && <CancelDialog desk={desk} session={cancelling} onClose={() => setCancelling(null)} />}
+      {cancelOrder && (
+        <CounterCancelDialog
+          target={cancelOrder}
+          actor={props.actor}
+          currency={currency}
+          onClose={() => setCancelOrder(null)}
+          onDone={(message) => {
+            setCancelOrder(null);
+            desk.notify(message);
+            void props.refresh();
+          }}
+        />
+      )}
     </section>
   );
 }

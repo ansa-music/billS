@@ -66,9 +66,43 @@ test('several roles: rights are the union (waiter + cashier)', () => {
 
 test('a bartender works the bar, not the tables or the till', () => {
   assert.ok(can('bartender', 'order.create'));
-  assert.ok(can('bartender', 'catalog.edit'));
   assert.ok(!can('bartender', 'table.open'));
   assert.ok(!can('bartender', 'payment.take'));
+});
+
+test('a barista (bartender) does not change the menu, but keeps the stop list', () => {
+  assert.ok(!can('bartender', 'catalog.edit'));
+  assert.ok(can('bartender', 'catalog.stop'));
+  assert.ok(can('bartender', 'catalog.view'));
+  for (const role of ['manager', 'admin'] as const) assert.ok(can(role, 'catalog.edit'), role);
+  for (const role of ['senior', 'cashier', 'waiter'] as const) assert.ok(!can(role, 'catalog.edit'), role);
+  assert.ok(can('cashier', 'catalog.stop'));
+  assert.ok(!can('waiter', 'catalog.stop'));
+  // A change: refused on a read-only license, needs the bar module.
+  assert.equal(decide('bartender', 'catalog.stop', { readOnly: true, modules: allModules }), 'read_only');
+  assert.equal(decide('bartender', 'catalog.stop', { readOnly: false, modules: { ...allModules, bar: false } }), 'module_off');
+});
+
+test('only the manager and the administrator cancel a counter order (delete a check)', () => {
+  for (const role of ['manager', 'admin'] as const) assert.ok(can(role, 'counter.cancel'), role);
+  for (const role of ['senior', 'cashier', 'bartender', 'waiter'] as const) assert.ok(!can(role, 'counter.cancel'), role);
+  assert.ok(can(['bartender', 'cashier'], 'counter.take'));
+  assert.ok(!can(['bartender', 'cashier'], 'counter.cancel'));
+  // The billiard bar keeps its own right.
+  assert.ok(can('bartender', 'order.cancel'));
+  assert.ok(can('cashier', 'order.cancel'));
+  assert.equal(decide('admin', 'counter.cancel', { readOnly: false, modules: { ...allModules, bar: false } }), 'module_off');
+  assert.equal(decide('admin', 'counter.cancel', { readOnly: true, modules: allModules }), 'read_only');
+});
+
+test('revenue (stats.view) is for the manager, the administrator and the senior; checks for the barista too', () => {
+  for (const role of ['manager', 'admin', 'senior'] as const) assert.ok(can(role, 'stats.view'), role);
+  for (const role of ['cashier', 'bartender', 'waiter'] as const) assert.ok(!can(role, 'stats.view'), role);
+  for (const role of ['manager', 'admin', 'senior', 'cashier', 'bartender'] as const) assert.ok(can(role, 'checks.view'), role);
+  assert.ok(!can('waiter', 'checks.view'));
+  // The cashier still opens and closes the shift (counting the drawer blind).
+  assert.ok(can('cashier', 'shift.open'));
+  assert.ok(can('cashier', 'shift.close'));
 });
 
 test('the senior of a shift approves refunds and discounts; the admin runs settings', () => {

@@ -18,7 +18,9 @@ export interface ChangeEvent {
     /** Counter orders of a coffee shop: taken, moved to a stage, cancelled (GET /api/counter/orders, /board). */
     | 'counter'
     /** Guest requests from the QR page (guest.ts): created, accepted, rejected; QR settings. */
-    | 'guest';
+    | 'guest'
+    /** «Склад» (stock.ts): ingredients, recipes, deliveries, counts, write-offs. */
+    | 'stock';
   tableId?: string;
 }
 

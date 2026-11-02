@@ -367,7 +367,7 @@ export class BarService {
         throw new HubError(409, 'CHECK_HAS_PAYMENTS', 'По счёту с этим заказом уже есть оплата — заказ нельзя отменить');
       }
 
-      returnOrderStock(db, order.id, now);
+      returnOrderStock(db, order.id, now, input.actor);
       run(
         db,
         `UPDATE bar_orders SET status = 'CANCELLED', cancelled_at = ?, cancelled_by = ?, cancel_reason = ?, updated_at = ?

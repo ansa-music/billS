@@ -3,6 +3,7 @@ import { CafeError, orderItemAmount, priceLine, validateCounterLines } from '@bi
 import type { Db } from './db.ts';
 import { all, one, run } from './db.ts';
 import { HubError } from './errors.ts';
+import { consumeForOrder, returnForOrder } from './stock.ts';
 
 /**
  * Lines of a bar order — on a game or at the counter: priced from the menu with the
@@ -32,6 +33,8 @@ export interface PricedOrderLine {
   /** «Капучино · L · Овсяное». */
   title: string;
   optionNames: string[];
+  /** Chosen option choice ids: the recipe (stock.ts) follows them. */
+  choiceIds: string[];
 }
 
 /** Option groups as stored; a damaged value reads as none rather than breaking the menu. */
@@ -97,12 +100,13 @@ export function priceOrderLines(db: Db, club: string, items: readonly CounterLin
       amount: orderItemAmount(priced.unitPrice, it.qty),
       title: priced.title,
       optionNames: priced.optionNames,
+      choiceIds: [...(it.options ?? [])],
     };
   });
   return lines;
 }
 
-/** Writes the lines of a new order and takes tracked stock down. */
+/** Writes the lines of a new order and takes tracked stock down, raw materials by recipe too (stock.ts). */
 export function insertOrderLines(db: Db, orderId: string, lines: readonly PricedOrderLine[], now: number): void {
   lines.forEach((line, i) => {
     // Line ids carry the line number so the lines keep the order they were taken in (views sort by created_at, id).
@@ -130,10 +134,16 @@ export function insertOrderLines(db: Db, orderId: string, lines: readonly Priced
       );
     }
   });
+  consumeForOrder(
+    db,
+    orderId,
+    lines.map((l) => ({ productId: l.product.id, qty: l.qty, choiceIds: l.choiceIds })),
+    now,
+  );
 }
 
-/** Tracked stock of a cancelled order's lines comes back. */
-export function returnOrderStock(db: Db, orderId: string, now: number): void {
+/** Tracked stock of a cancelled order's lines comes back, and the raw materials its sale took. */
+export function returnOrderStock(db: Db, orderId: string, now: number, actor?: string): void {
   for (const it of all<{ product_id: string; qty: number }>(
     db,
     'SELECT product_id, qty FROM bar_order_items WHERE order_id = ?',
@@ -141,6 +151,7 @@ export function returnOrderStock(db: Db, orderId: string, now: number): void {
   )) {
     run(db, 'UPDATE products SET stock = stock + ?, updated_at = ? WHERE id = ? AND stock IS NOT NULL', it.qty, now, it.product_id);
   }
+  returnForOrder(db, orderId, now, actor);
 }
 
 /** Lines for the audit record. */

@@ -16,6 +16,9 @@ import {
   usePolling,
   useSoundSetting,
 } from './cafe.ts';
+import type { CancelTarget } from './CounterCancelDialog.tsx';
+import { CounterCancelDialog } from './CounterCancelDialog.tsx';
+import { StopListDialog } from './StopList.tsx';
 import './cafe.css';
 
 const COLUMNS: Array<{ stage: CounterStage; title: string; empty: string }> = [
@@ -44,13 +47,18 @@ const FRESH_MS = 8000;
  * order beeps (can be muted on this device) and flashes.
  */
 export function BaristaPage() {
-  const { actor, online, version, blockedReason } = useHub();
+  const { actor, online, version, blockedReason, canNow, state, notify } = useHub();
   const serverNow = useServerNow();
   const { toast, show, clear } = useToast();
   // HUB change events (version) refresh at once; the poll covers a HUB without counter events.
   const { data, error, reload } = usePolling(fetchCounterOrders, COUNTER_POLL_MS, version);
   const [soundOn, setSoundOn] = useSoundSetting();
   const blocked = blockedReason('counter.stage');
+  // Cancelling an order is the manager's and the administrator's; the stop list is for the bar.
+  const canCancel = canNow('counter.cancel');
+  const canStop = canNow('catalog.stop');
+  const [cancelling, setCancelling] = useState<CancelTarget | null>(null);
+  const [stopOpen, setStopOpen] = useState(false);
 
   // Optimistic stage while the command is in flight: the card moves at once.
   const [moving, setMoving] = useState<ReadonlyMap<string, CounterStage>>(new Map());
@@ -118,6 +126,11 @@ export function BaristaPage() {
           {data ? `В работе: ${orders.filter((o) => o.stage !== 'ISSUED' && o.status !== 'CANCELLED').length}` : error ? `Нет данных: ${error}` : 'Загрузка…'}
         </p>
         <div className="row">
+          {canStop && (
+            <button type="button" className="btn btn-small" onClick={() => setStopOpen(true)}>
+              Стоп-лист
+            </button>
+          )}
           <a className="btn btn-small barista-board-link" href={hrefFor('/board')}>
             <Icon name="tv" size={18} /> Экран для гостей
           </a>
@@ -156,6 +169,17 @@ export function BaristaPage() {
                       fresh={fresh.has(o.id)}
                       busy={moving.has(o.id) || !online || blocked !== null}
                       onMove={(to) => void move(o, to)}
+                      onCancel={
+                        canCancel && o.status === 'OPEN'
+                          ? () =>
+                              setCancelling({
+                                orderId: o.id,
+                                number: o.number,
+                                total: o.total,
+                                summary: o.items.map((it) => (it.qty > 1 ? `${productNameOf(it)} ×${it.qty}` : productNameOf(it))).join(', '),
+                              })
+                          : undefined
+                      }
                     />
                   ))}
                 </ul>
@@ -164,6 +188,20 @@ export function BaristaPage() {
           );
         })}
       </div>
+      {cancelling && (
+        <CounterCancelDialog
+          target={cancelling}
+          actor={actor}
+          currency={state.club.currency}
+          onClose={() => setCancelling(null)}
+          onDone={(message) => {
+            setCancelling(null);
+            show(message);
+            void reload();
+          }}
+        />
+      )}
+      {stopOpen && <StopListDialog actor={actor} onClose={() => setStopOpen(false)} notify={notify} />}
       <Toast message={toast} onClose={clear} />
     </section>
   );
@@ -175,12 +213,15 @@ function OrderCard({
   fresh,
   busy,
   onMove,
+  onCancel,
 }: {
   order: CounterOrderView;
   age: number;
   fresh: boolean;
   busy: boolean;
   onMove: (to: CounterStage) => void;
+  /** Only for the manager and the administrator, on an unpaid order. */
+  onCancel?: () => void;
 }) {
   const next = nextStage(o.stage);
   const back: CounterStage | null = o.stage === 'PREPARING' ? 'NEW' : o.stage === 'READY' ? 'PREPARING' : null;
@@ -214,6 +255,11 @@ function OrderCard({
       </ul>
       {o.note && <p className="barista-note">{o.note}</p>}
       <div className="barista-actions">
+        {onCancel && (
+          <button type="button" className="btn btn-small btn-ghost barista-cancel" disabled={busy} onClick={onCancel}>
+            отменить
+          </button>
+        )}
         {back && (
           <button type="button" className="btn btn-small btn-ghost barista-back" disabled={busy} onClick={() => onMove(back)}>
             назад

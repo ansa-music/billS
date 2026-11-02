@@ -87,6 +87,25 @@ export function ShiftReportForm({ report, club }: { report: ShiftReport; club: C
       <Row label="Скидки" value={money(report.discounts)} />
       <Row label="Отменённых игр" value={report.cancelledGames} />
 
+      {/* «Отменённые»: absent only from a HUB older than this screen. */}
+      {report.cancelled && (
+        <>
+          <Sep />
+          <p className="pf-h">Отменённые</p>
+          <Row label="Количество" value={report.cancelled.count} />
+          <Row label="На сумму" value={money(report.cancelled.total)} strong />
+          {report.cancelled.items.map((e) => (
+            <div key={`${e.kind}:${e.id}`} className="pf-item">
+              <Row label={`${formatWhen(e.at, tz, report.openedAt)} ${e.title}`} value={money(e.amount)} />
+              <p className="pf-sub">
+                {e.by ?? '—'}
+                {e.reason ? ` · ${e.reason}` : ''}
+              </p>
+            </div>
+          ))}
+        </>
+      )}
+
       <Sep />
       <p className="pf-h">Внесения и изъятия</p>
       {report.movements.length === 0 ? (

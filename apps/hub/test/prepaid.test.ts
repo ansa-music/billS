@@ -475,9 +475,9 @@ test('a running paid prepaid game does not block closing the shift', async (t) =
 
   const closed = await closeShift(hub, shift.id, 3000_00);
   assert.equal(closed.status, 200);
-  assert.equal(closed.body.report.kind, 'Z');
-  assert.equal(closed.body.report.difference, 0);
-  assert.equal(closed.body.report.sales.CASH, 2000_00);
+  assert.equal(closed.body.report!.kind, 'Z');
+  assert.equal(closed.body.report!.difference, 0);
+  assert.equal(closed.body.report!.sales.CASH, 2000_00);
   assert.equal(sessionStatus(hub, paid.session.id), 'ACTIVE');
 
   // It still ends on its own after the shift is closed: nothing is owed.

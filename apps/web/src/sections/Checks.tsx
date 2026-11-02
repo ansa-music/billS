@@ -4,6 +4,7 @@ import { calculateChargeWithPauses, formatMoney, unpaidSpans } from '@bills/doma
 import { amountOf, isLive, playedMsOf } from '../hall.ts';
 import { fetchSessions, getJson } from '../api.ts';
 import { gameDue, orderSummary, owedTotal, placeName, unbilledOrders } from '../cash/lines.ts';
+import { ArchivePanel, DayChecksPanel } from '../cash/DayPanels.tsx';
 import { ShiftBanner } from '../cash/ShiftBanner.tsx';
 import { ShiftPanel } from '../cash/ShiftPanel.tsx';
 import { UnpaidPanel } from '../cash/UnpaidPanel.tsx';
@@ -145,7 +146,9 @@ export function ChecksSection() {
   const dayStart = workdayStart(serverNow, timezone);
   const day = useLive(() => fetchSessions(dayStart, dayStart + DAY_MS), [dayStart], hub.version);
   // Money actually taken (time and bar, after discounts and refunds) comes from the open shift's X report.
-  const shiftId = state.shift?.id ?? null;
+  // Day and shift totals are `stats.view` (manager, admin, senior): a cashier or a barista sees checks one by one.
+  const seesMoney = hub.can('stats.view');
+  const shiftId = seesMoney ? (state.shift?.id ?? null) : null;
   const shiftReport = useLive(
     () => (shiftId ? getJson<ShiftReport>(`/api/shifts/${shiftId}/report`) : Promise.resolve(null)),
     [shiftId],
@@ -192,8 +195,8 @@ export function ChecksSection() {
           detail={owing ? owingDetail : 'всё оплачено'}
           tone={owing ? 'info' : undefined}
         />
-        {!cafe && <StatTile label="Начислено за день" value={formatMoney(charged, currency)} detail={`время · ${played.length} ${plural(played.length, ['игра', 'игры', 'игр'])} с 06:00`} />}
-        <StatTile
+        {!cafe && seesMoney && <StatTile label="Начислено за день" value={formatMoney(charged, currency)} detail={`время · ${played.length} ${plural(played.length, ['игра', 'игры', 'игр'])} с 06:00`} />}
+        {seesMoney && <StatTile
           label="Оплачено за смену"
           value={report ? formatMoney(report.net.total, currency) : '—'}
           detail={
@@ -203,7 +206,7 @@ export function ChecksSection() {
                 ? 'считаем…'
                 : 'смена закрыта'
           }
-        />
+        />}
         {!cafe && (
           <StatTile
             label="Отмены и сбои света"
@@ -219,7 +222,7 @@ export function ChecksSection() {
           <ShiftPanel {...desk} />
           <UnpaidPanel {...desk} />
         </div>
-      ) : (
+      ) : cafe ? null : (
         <SectionCard title="Ждут оплаты" actions={<span className="hint">Оплату принимает кассир</span>}>
           {state.unpaid.length === 0 && unbilled.length === 0 ? (
             <EmptyState icon="check" title="Неоплаченных игр нет">
@@ -237,6 +240,11 @@ export function ChecksSection() {
           )}
         </SectionCard>
       )}
+
+      <div className="two-col day-col">
+        <DayChecksPanel />
+        <ArchivePanel />
+      </div>
 
       {!cafe && <div className="two-col">
         {cashDesk && state.unpaid.length > 0 && (

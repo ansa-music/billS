@@ -1,3 +1,4 @@
+import type { CancelledSummary } from './archive.ts';
 import type { DiscountKind, PaymentMethod } from './billing.ts';
 import type { ProductOptionGroup } from './cafe.ts';
 import type { SyncStatus } from './cloud.ts';
@@ -245,8 +246,11 @@ export interface ShiftView {
   openedAt: number;
   openedBy: string;
   openingFloat: Minor;
-  /** What should be in the drawer now (open) or at close. */
-  expectedCash: Minor;
+  /**
+   * What should be in the drawer now (open) or at close. null for someone without
+   * `stats.view` (a cashier, a barista): they count the drawer blind.
+   */
+  expectedCash: Minor | null;
   closedAt: number | null;
   closedBy: string | null;
   countedCash: Minor | null;
@@ -292,6 +296,11 @@ export interface ShiftReport extends ShiftTotals {
    */
   revenue: { time: Minor; bar: Minor };
   movements: CashMovementView[];
+  /**
+   * «Отменённые»: orders and games cancelled during the shift — count, sum and the list
+   * (time, number, sum, who, reason). Z reports fixed before it get it from the database.
+   */
+  cancelled: CancelledSummary;
 }
 
 /** POST /api/checks */
@@ -362,7 +371,8 @@ export interface CloseShiftRequest {
 
 export interface CloseShiftResponse {
   shift: ShiftView;
-  report: ShiftReport;
+  /** The Z report; null for someone without `stats.view` (blind count: no expected cash, no revenue). */
+  report: ShiftReport | null;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

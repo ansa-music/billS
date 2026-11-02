@@ -162,6 +162,19 @@ function describe(e: JournalEntry, state: HubState): Described {
       return { title: `Меню: новая категория «${str(d.name)}»`, icon: 'bar', cat: 'bar' };
     case 'category.updated':
       return { title: `Меню: изменена категория «${str(d.name) || str((d.was as Record<string, unknown> | undefined)?.name)}»`, icon: 'bar', cat: 'bar' };
+    // «Склад» (stock.ts)
+    case 'stock.supply':
+      return { title: `Склад: поставка от «${str(d.supplier)}»`, detail: money(d.total), icon: 'orders', cat: 'bar' };
+    case 'stock.count':
+      return { title: 'Склад: инвентаризация', detail: `разница ${money(d.diffCost)}`, icon: 'orders', cat: 'bar', bad: num(d.diffCost) < 0 };
+    case 'stock.writeoff':
+      return { title: `Склад: списано «${str(d.name)}» ${num(d.quantity).toLocaleString('ru-RU')} ${str(d.unit)}`, detail: str(d.reason), icon: 'orders', cat: 'bar' };
+    case 'stock.recipe_set':
+      return { title: `Склад: тех. карта «${str(d.name)}» изменена`, icon: 'orders', cat: 'bar' };
+    case 'stock.ingredient_created':
+      return { title: `Склад: новое сырьё «${str(d.name)}»`, icon: 'orders', cat: 'bar' };
+    case 'stock.ingredient_updated':
+      return { title: `Склад: сырьё «${str(d.name)}» изменено`, icon: 'orders', cat: 'bar' };
     // Club settings and staff
     case 'club.updated':
       return { title: 'Настройки изменены', detail: fieldsOf(d), icon: 'settings', cat: 'club' };

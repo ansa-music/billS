@@ -131,7 +131,8 @@ const CASH: readonly Role[] = [...M, 'admin', 'senior', 'cashier'];
 const SENIOR: readonly Role[] = [...M, 'admin', 'senior'];
 const ADMIN: readonly Role[] = [...M, 'admin'];
 const BAR: readonly Role[] = [...M, 'admin', 'senior', 'cashier', 'bartender', 'waiter'];
-const BAR_EDIT: readonly Role[] = [...M, 'admin', 'bartender'];
+/** The stop list: whoever stands at the bar (a barista included) puts a product off and back. */
+const BAR_STOP: readonly Role[] = [...M, 'admin', 'senior', 'cashier', 'bartender'];
 /**
  * The counter of a coffee shop: the cashier, the barista and the waiter take orders, payment
  * included, and move them along. A coffee shop has no tables to serve, so without these a waiter
@@ -147,8 +148,11 @@ export const ACTIONS = {
   // Hall
   'hall.view': STAFF,
   'hall.edit': ADMIN, // floor plan editor
-  'checks.view': CASH, // unpaid and paid checks of the day
-  'stats.view': CASH, // day summary
+  // Checks of the day, one by one (no day or shift totals): the cash desk and the barista.
+  'checks.view': [...CASH, 'bartender'],
+  // Money of the day and the shift: revenue, X and Z reports, cash expected in the drawer.
+  // Not for a cashier or a barista: they count the drawer blind at close.
+  'stats.view': SENIOR,
   'tariffs.view': STAFF, // read-only tariff map and calculator
   'equipment.view': SENIOR, // lamps, controller, simulator
   'table.open': FLOOR, // start a new game
@@ -159,10 +163,21 @@ export const ACTIONS = {
   'order.create': BAR,
   'order.cancel': [...CASH, 'bartender'],
   'catalog.view': STAFF,
-  'catalog.edit': BAR_EDIT,
+  // The menu itself (prices, products, categories, tile looks): a barista does not change it.
+  'catalog.edit': ADMIN,
+  // Stop list: put a product off the menu and back when it runs out («нет в наличии»).
+  'catalog.stop': BAR_STOP,
   // Coffee shop counter (cafe.ts)
   'counter.take': COUNTER, // take an order at the counter and its payment (POST /api/counter/orders)
   'counter.stage': COUNTER, // move an order NEW → PREPARING → READY → ISSUED
+  // Cancel (delete) a counter order or a coffee shop check: only the manager and the administrator.
+  // Nothing is erased: the order stays CANCELLED with who and why, and shows in «Архив».
+  'counter.cancel': ADMIN,
+  // Raw materials of a coffee shop (stock.ts): levels, recipes, deliveries, counts.
+  'stock.view': SENIOR, // levels, movements, recipes, counts
+  'stock.edit': ADMIN, // ingredients, recipes (граммовка), inventory counts
+  'stock.supply': [...M, 'admin', 'senior', 'cashier', 'bartender'], // receive a delivery (a barista too)
+  'stock.writeoff': SENIOR, // write off spilled or spoilt stock, with a reason
   // Club settings
   'settings.view': ADMIN,
   'club.edit': M, // name, time zone, currency
@@ -241,8 +256,14 @@ export const ACTION_MODULE: Partial<Record<Action, LicenseModule>> = {
   'order.cancel': 'bar',
   'catalog.view': 'bar',
   'catalog.edit': 'bar',
+  'catalog.stop': 'bar',
   'counter.take': 'bar',
+  'counter.cancel': 'bar',
   'counter.stage': 'bar',
+  'stock.view': 'bar',
+  'stock.edit': 'bar',
+  'stock.supply': 'bar',
+  'stock.writeoff': 'bar',
   'equipment.view': 'hardware',
   'lamp.blink': 'hardware',
   'power.edit': 'hardware',
@@ -265,6 +286,7 @@ export const READ_ONLY_ACTIONS: ReadonlySet<Action> = new Set<Action>([
   'alert.resolve',
   'catalog.view',
   'counter.stage',
+  'stock.view',
   'settings.view',
   'staff.view',
   'audit.view',

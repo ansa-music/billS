@@ -272,7 +272,7 @@ export class CounterService {
       if (order.check_id && netPaidOn(db, order.check_id) > 0) {
         throw new HubError(409, 'ORDER_PAID', 'Заказ оплачен — сначала оформите возврат в «Счетах»');
       }
-      returnOrderStock(db, order.id, now);
+      returnOrderStock(db, order.id, now, input.actor);
       run(
         db,
         `UPDATE bar_orders SET status = 'CANCELLED', cancelled_at = ?, cancelled_by = ?, cancel_reason = ?, updated_at = ?

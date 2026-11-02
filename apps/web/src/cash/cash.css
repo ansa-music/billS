@@ -644,3 +644,46 @@
   .pay-quick .btn, .pay-part { transition: none; }
   .pay-quick .btn:not(:disabled):active, .pay-part:active { transform: none; }
 }
+
+/* ── «Счета»: checks of the day and «Архив» ─────────────────────────────────── */
+.day-picker {
+  min-height: var(--control);
+  max-width: 100%;
+}
+
+.day-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.day-row-actions .hint {
+  white-space: normal;
+}
+
+.day-rows .row-sub,
+.archive-rows .row-sub {
+  white-space: normal;
+}
+
+.archive-sum {
+  font-size: var(--fs-base);
+  color: var(--text-2);
+}
+
+.archive-why {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.report-cancelled strong {
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .day-col .section-card :is(.section-card-head, header) {
+    flex-wrap: wrap;
+  }
+}

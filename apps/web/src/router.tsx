@@ -95,6 +95,8 @@ export const ROUTES: RouteDef[] = [
   { path: '/stats', title: 'Сводка', cafeTitle: 'Отчёты', icon: 'stats', action: 'stats.view' },
   { path: '/tariffs', title: 'Тарифы', icon: 'tariffs', action: 'tariffs.view', only: 'billiards' },
   { path: '/bar', title: 'Бар и меню', short: 'Бар', cafeTitle: 'Меню', cafeShort: 'Меню', icon: 'bar', action: 'catalog.edit' },
+  // A barista receives deliveries here too (stock.supply ⊇ stock.view); the other tabs need stock.view.
+  { path: '/stock', title: 'Склад', icon: 'orders', action: 'stock.supply', only: 'cafe' },
   { path: '/staff', title: 'Сотрудники', short: 'Персонал', icon: 'staff', action: 'staff.view' },
   { path: '/journal', title: 'Журнал', icon: 'journal', action: 'audit.view' },
   { path: '/equipment', title: 'Оборудование', short: 'Техника', icon: 'equipment', action: 'equipment.view', only: 'billiards' },
@@ -117,7 +119,7 @@ export function routeFor(path: string): RouteDef | undefined {
 }
 
 /** Navigation order in a coffee shop (the table above keeps the billiard club's order). */
-const CAFE_ORDER = ['/pos', '/barista', '/board', '/bar', '/checks', '/stats'];
+const CAFE_ORDER = ['/pos', '/barista', '/board', '/bar', '/stock', '/checks', '/stats'];
 
 /** Routes of this venue in navigation order, with its titles. */
 export function routesOf(type: BusinessType): RouteDef[] {

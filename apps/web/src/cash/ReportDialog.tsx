@@ -204,6 +204,37 @@ function ReportBody({ report, club }: { report: ShiftReport; club: HubState['clu
         </div>
       </dl>
 
+      {/* «Отменённые»: absent only from a HUB older than this screen. */}
+      {report.cancelled && (
+        <section aria-labelledby="report-cancelled-title">
+          <h3 className="cash-sub" id="report-cancelled-title">
+            Отменённые: {report.cancelled.count}
+            {report.cancelled.count > 0 && <> на {money(report.cancelled.total)}</>}
+          </h3>
+          {report.cancelled.items.length === 0 ? (
+            <p className="muted">Не было</p>
+          ) : (
+            <ul className="movements report-cancelled">
+              {report.cancelled.items.map((e) => (
+                <li key={`${e.kind}:${e.id}`}>
+                  <span className="muted money">{formatClock(e.at, tz)}</span>
+                  <span className="movement-reason">
+                    <strong>{e.title}</strong>
+                    {e.detail ? ` · ${e.detail}` : ''}
+                    <span className="muted">
+                      {' · '}
+                      {e.by ?? '—'}
+                      {e.reason ? ` · «${e.reason}»` : ''}
+                    </span>
+                  </span>
+                  <span className="money">{money(e.amount)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
       <section>
         <h3 className="cash-sub">Внесения и изъятия</h3>
         {report.movements.length === 0 ? (
