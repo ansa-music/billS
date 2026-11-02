@@ -3,6 +3,7 @@ import { formatMoney, PAYMENT_METHODS } from '@bills/domain';
 import { formatClock } from '../format.ts';
 import { describeDifference, formatDateTime, METHOD_LABEL } from './format.ts';
 import { FormError, Modal } from './Modal.tsx';
+import { useHub } from '../useHub.tsx';
 import { printShiftReport } from './print/ShiftReportForm.tsx';
 
 const ROWS: Array<[label: string, key: PaymentMethod | 'total']> = [
@@ -25,6 +26,7 @@ export function ReportDialog({
   onClose: () => void;
 }) {
   const title = (report?.kind ?? kind) === 'Z' ? 'Z-отчёт' : 'X-отчёт';
+  const { business } = useHub();
   return (
     <Modal
       title={title}
@@ -39,7 +41,7 @@ export function ReportDialog({
             type="button"
             className="btn btn-primary"
             disabled={!report}
-            onClick={() => report && printShiftReport(report, club)}
+            onClick={() => report && printShiftReport(report, club, business)}
           >
             Печать
           </button>
@@ -60,6 +62,7 @@ export function ReportDialog({
 function ReportBody({ report, club }: { report: ShiftReport; club: HubState['club'] }) {
   const money = (a: Minor) => formatMoney(a, club.currency);
   const tz = club.timezone;
+  const cafe = useHub().business === 'cafe';
   const diff = report.difference != null ? describeDifference(report.difference, club.currency, formatMoney(0, club.currency)) : null;
   return (
     <div className="report">
@@ -125,7 +128,7 @@ function ReportBody({ report, club }: { report: ShiftReport; club: HubState['clu
             </h3>
             <dl className="kv">
               {/* A coffee shop sells no time: only the bar. */}
-              {club.settings.business.type !== 'cafe' && (
+              {!cafe && (
                 <div>
                   <dt>Время</dt>
                   <dd>{money(report.revenue.time)}</dd>
@@ -141,7 +144,7 @@ function ReportBody({ report, club }: { report: ShiftReport; club: HubState['clu
               </div>
             </dl>
             <p className="hint">
-              {club.settings.business.type === 'cafe'
+              {cafe
                 ? 'По счетам, оплаченным в смену, за вычетом скидок.'
                 : 'По счетам, оплаченным в смену; скидка распределена между временем и баром.'}
             </p>

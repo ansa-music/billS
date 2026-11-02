@@ -1,4 +1,4 @@
-import type { HubState, Minor, ShiftReport } from '@bills/domain';
+import type { BusinessType, HubState, Minor, ShiftReport } from '@bills/domain';
 import { formatMoney, PAYMENT_METHODS } from '@bills/domain';
 import { formatWhen, METHOD_LABEL } from '../format.ts';
 import { formatStamp, Info, Row, Sep } from './blocks.tsx';
@@ -7,8 +7,8 @@ import { printForm } from './printForm.tsx';
 type Club = HubState['club'];
 type Totals = ShiftReport['sales'];
 
-export function printShiftReport(report: ShiftReport, club: Club): void {
-  printForm(<ShiftReportForm report={report} club={club} />);
+export function printShiftReport(report: ShiftReport, club: Club, business?: BusinessType): void {
+  printForm(<ShiftReportForm report={report} club={club} business={business} />);
 }
 
 function MethodTotals({ title, totals, money }: { title: string; totals: Totals; money: (a: Minor) => string }) {
@@ -24,7 +24,7 @@ function MethodTotals({ title, totals, money }: { title: string; totals: Totals;
 }
 
 /** X (interim) or Z (at close) report on the receipt printer. */
-export function ShiftReportForm({ report, club }: { report: ShiftReport; club: Club }) {
+export function ShiftReportForm({ report, club, business }: { report: ShiftReport; club: Club; business?: BusinessType | undefined }) {
   const money = (a: Minor) => formatMoney(a, club.currency);
   const tz = club.timezone;
   const z = report.kind === 'Z';
@@ -58,7 +58,7 @@ export function ShiftReportForm({ report, club }: { report: ShiftReport; club: C
           <Sep />
           <p className="pf-h">Выручка</p>
           <p>по счетам, оплаченным в смену</p>
-          {club.settings.business.type !== 'cafe' && <Row label="Время" value={money(report.revenue.time)} />}
+          {business !== 'cafe' && <Row label="Время" value={money(report.revenue.time)} />}
           <Row label="Бар" value={money(report.revenue.bar)} />
           <Row label="Итого" value={money(report.revenue.time + report.revenue.bar)} strong />
         </>

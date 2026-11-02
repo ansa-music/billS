@@ -57,7 +57,7 @@ export function ShiftPanel(props: DeskProps) {
   // Straight to the printer, without opening the report.
   const printX = (shiftId: string) =>
     void xPrint.run(async () => {
-      printShiftReport(await getJson<ShiftReport>(`/api/shifts/${shiftId}/report`), club);
+      printShiftReport(await getJson<ShiftReport>(`/api/shifts/${shiftId}/report`), club, business);
     });
 
   return (
