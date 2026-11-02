@@ -249,24 +249,26 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
 
   // The copy goes 2 minutes after the last change (or with the 5-minute report while busy), not every
   // 30 minutes (TRIAL_SNAPSHOT: why that fits Supabase Free); `force` — a move asked for it, changed or not.
-  let lastChangeAt: number | null = null;
+  // The HUB's last change of the café's data (orders, menu, staff…; a sign-in is none), saved with the café.
+  let lastChangeAt: number | null = info.changedAt ?? null;
   let forceCopy = false;
   let tooBig = false;
-  const snapshot = (force = false): { data: string; hash: string } | null => {
+  const snapshot = (force = false): { data: string; hash: string; takenAt: number } | null => {
     if (db.isTransaction) return null;
     if (!force && !trialSnapshotDueNow(Date.now(), { lastSnapshotAt: info.snapshotAt, lastChangeAt, watched: watched() })) return null;
     const bytes = db.export();
     tooBig = bytes.length > SNAPSHOT_MAX_BYTES;
     if (tooBig) return null;
     const hash = fingerprint(bytes);
-    return hash === info.snapshotHash && !force ? null : { data: toBase64(bytes), hash };
+    return hash === info.snapshotHash && !force ? null : { data: toBase64(bytes), hash, takenAt: Date.now() };
   };
   // «У меня уже есть TS — войти» (trial-move.ts): the café code, a fresh copy when a move asks, «Касса перенесена».
   const move = deskMove({
     info,
     persist: deps.persist,
     reportWithCopy: () => reportWithCopy(),
-    unsynced: () => !db.isTransaction && fingerprint(db.export()) !== info.snapshotHash,
+    // Changed after the last copy was taken (not mere background writes such as sessions).
+    unsynced: () => (info.changedAt ?? 0) > (info.snapshotAt ?? 0),
     onMoved: () => deps.onMoved?.(),
   });
 
@@ -296,6 +298,8 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
         const terms = await cloudTerms(info.cloudId!, info.cloudToken!);
         noteTrialCheck(true);
         take(terms);
+        // Approved: the first report (with it the café code, trial-move.ts) in a few seconds, not 5 minutes later.
+        if (!trialWaiting(terms.status)) setTimeout(() => void reportNow(), 3000);
         return terms;
       }
       const force = forceCopy;
@@ -304,7 +308,7 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
       const terms = await cloudReportWatching(info.cloudId!, info.cloudToken!, collectStats(db), snap?.data, move.fields(), (body) => move.onAnswer(body));
       noteTrialCheck(true);
       watchedByCloud = terms.watching === true;
-      if (snap) void deps.persist({ snapshotAt: Date.now(), snapshotHash: snap.hash });
+      if (snap) void deps.persist({ snapshotAt: snap.takenAt, snapshotHash: snap.hash });
       take(terms);
       return terms;
     } catch (err) {
@@ -362,6 +366,8 @@ export function startTrialCloud(deps: TrialCloudDeps): TrialCloudLink | null {
   let quietTimer: ReturnType<typeof setTimeout> | undefined;
   deps.onChange(() => {
     lastChangeAt = Date.now();
+    // Kept on the record itself: the saver writes it with this change (no extra save).
+    info.changedAt = lastChangeAt;
     clearTimeout(quietTimer);
     quietTimer = setTimeout(() => {
       if (lastChangeAt !== null && lastChangeAt > (info.snapshotAt ?? 0)) void reportNow();

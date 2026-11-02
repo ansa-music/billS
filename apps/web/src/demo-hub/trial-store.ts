@@ -64,8 +64,10 @@ export interface TrialInfo {
    * «У меня уже есть TS — войти» (trial-move.ts): the café code in clear, shown to the director (normalised,
    * 12 characters; never in a backup copy); when this computer became the cash desk by a move (its people sign
    * in with the codes they had); when it learned another computer took the cash desk over (read-only since),
-   * and whether it then had changes the cloud's copy lacked.
+   * and whether it then had changes the cloud's copy lacked — the HUB's last change of the café's data
+   * (`changedAt`, trial-cloud.ts) after the last copy was taken (`snapshotAt`).
    */
+  changedAt?: number;
   cafeCode?: string;
   movedIn?: number;
   movedAway?: number;
