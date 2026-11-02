@@ -2,8 +2,18 @@
  * «Пробные версии» of the platform cabinet: pure helpers (no browser globals, so `node --test`
  * runs them as is) — the trial's term, last activity and the backup file in words and shapes.
  */
-import type { TrialStats, TrialStatus, TrialView } from '@bills/domain';
+import type { TrialCloudMoveState, TrialPaidRequest, TrialsListResponse, TrialStats, TrialStatus, TrialView } from '@bills/domain';
 import {
+  TRIAL_CLOUD_MOVE,
+  TRIAL_PAID_NOTE_MAX,
+  canMarkPaid,
+  formatCafeCode,
+  paidDaysLeft,
+  paidEndsSoon,
+  parsePaidAmount,
+  shiftDay,
+  trialPaidRange,
+  trialPaidUntil,
   TRIAL_DEFAULT_TIMEZONE,
   TRIAL_EXTEND_MAX_DAYS,
   TRIAL_MESSAGE_MAX,
@@ -15,6 +25,9 @@ import {
 } from '@bills/domain';
 
 export type { TrialStats, TrialStatus, TrialView } from '@bills/domain';
+
+/** GET /platform/trials: the trials and whether the cloud cash desk is connected. */
+export type TrialsList = TrialsListResponse<TrialView>;
 
 /** GET /platform/trials/:id/snapshot: the trial's last SQLite file, base64. */
 export interface TrialSnapshot {
@@ -71,6 +84,13 @@ export function trialDate(ms: number, timeZone: string = TRIAL_ZONE): string {
   return formatIn(dayMonthFormats, timeZone, { day: 'numeric', month: 'long' }).format(ms);
 }
 
+const yearFormats = new Map<string, Intl.DateTimeFormat>();
+
+/** «12 ноября 2027» in the trial's zone: a paid term may run years ahead. */
+export function trialDateYear(ms: number, timeZone: string = TRIAL_ZONE): string {
+  return formatIn(yearFormats, timeZone, { day: 'numeric', month: 'long', year: 'numeric' }).format(ms).replace(/\s*г\.?$/, '');
+}
+
 /** YYYY-MM-DD of an instant in Almaty. */
 export function trialDay(ms: number): string {
   return trialCalendarDay(ms, TRIAL_ZONE);
@@ -104,9 +124,9 @@ export function endDateText(day: string): string {
   return trialDate(Date.UTC(y, m - 1, d, 12), 'UTC');
 }
 
-/** The status as the screen should treat it: an «active» trial past its end is already over. */
+/** The status as the screen should treat it: an «active» trial or a paid term past its end is already over. */
 export function effectiveStatus(t: Pick<TrialView, 'status' | 'endsAt'>, now: number): TrialStatus {
-  return t.status === 'active' && t.endsAt <= now ? 'expired' : t.status;
+  return (t.status === 'active' || t.status === 'paid') && t.endsAt <= now ? 'expired' : t.status;
 }
 
 /** A request still waiting for «Подтвердить» / «Отклонить». */
@@ -131,15 +151,19 @@ export function sortTrials<T extends Pick<TrialView, 'id' | 'status' | 'startedA
   return [...trials].sort((a, b) => Number(isRequest(b)) - Number(isRequest(a)) || key(b) - key(a) || a.id.localeCompare(b.id));
 }
 
-/** «Удалить» is offered for what does not run: a request, a rejected, ended or expired trial. */
-export function canDeleteTrial(t: Pick<TrialView, 'status' | 'endsAt'>, now: number): boolean {
+/**
+ * «Удалить» is offered for what does not run: a request, a rejected, ended or expired trial — never a café in the cloud
+ * (the row is the only link to it) or one that bought TS (the row keeps its payments).
+ */
+export function canDeleteTrial(t: Pick<TrialView, 'status' | 'endsAt'> & Partial<Pick<TrialView, 'cloud' | 'paid'>>, now: number): boolean {
+  if (t.cloud || t.paid) return false;
   const s = effectiveStatus(t, now);
   return s === 'pending' || s === 'rejected' || s === 'ended' || s === 'expired';
 }
 
-/** «Продлить» / «Дата окончания» / «Завершить» are for a trial TS approved (not for a request). */
+/** «Продлить» / «Дата окончания» are for a trial TS approved (not for a request, not for a paid café: «Продлить оплату»). */
 export function canChangeTerm(t: Pick<TrialView, 'status'>): boolean {
-  return t.status !== 'pending' && t.status !== 'rejected';
+  return t.status !== 'pending' && t.status !== 'rejected' && t.status !== 'paid';
 }
 
 /** «похоже на повтор: «Coffee book» (Аиша, с 1 ноября)» — the earlier trial a request repeats. */
@@ -171,12 +195,14 @@ export const TRIAL_STATUS_LABEL: Record<TrialStatus, string> = {
   expired: 'Истекла',
   rejected: 'Отклонена',
   permanent: 'Постоянная',
+  paid: 'Купили',
 };
 
 /** Colour of the chip, the same tones as the license chip: ok / warn (2 days or less, a request) / danger. */
 export function trialTone(t: Pick<TrialView, 'status' | 'endsAt'>, now: number): 'ok' | 'warn' | 'danger' {
   const status = effectiveStatus(t, now);
   if (status === 'permanent') return 'ok';
+  if (status === 'paid') return paidEndsSoon({ status, endsAt: t.endsAt }, now) ? 'warn' : 'ok';
   if (status === 'pending') return 'warn';
   if (status !== 'active') return 'danger';
   return trialDaysLeft(t, now) <= 2 ? 'warn' : 'ok';
@@ -187,10 +213,15 @@ export function trialTone(t: Pick<TrialView, 'status' | 'endsAt'>, now: number):
  * «ждёт подтверждения с 12 ноября, 14:30» / «отклонена 12 ноября» / «без срока».
  */
 export function trialTermText(
-  t: Pick<TrialView, 'status' | 'endsAt'> & Partial<Pick<TrialView, 'timezone' | 'requestedAt' | 'decidedAt' | 'startedAt'>>,
+  t: Pick<TrialView, 'status' | 'endsAt'> & Partial<Pick<TrialView, 'timezone' | 'requestedAt' | 'decidedAt' | 'startedAt' | 'paid'>>,
   now: number,
 ): string {
   const status = effectiveStatus(t, now);
+  if (status === 'paid') {
+    const left = paidDaysLeft(t.endsAt, now);
+    return `оплачено до ${trialDateYear(t.endsAt, t.timezone)} · ${plural(left, 'остался', 'осталось', 'осталось')} ${daysText(left)}`;
+  }
+  if (status === 'expired' && t.paid) return `оплата закончилась ${trialDateYear(t.endsAt, t.timezone)}`;
   if (status === 'pending') {
     const at = t.requestedAt ?? t.startedAt;
     return at ? `ждёт подтверждения с ${trialDate(at, t.timezone)}, ${formatIn(clockFormats, t.timezone ?? TRIAL_ZONE, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(at)}` : 'ждёт подтверждения';
@@ -311,4 +342,173 @@ export function trialBackup(t: Pick<TrialView, 'startedAt' | 'venue' | 'managerN
 /** «TS-kofe-tau-2026-10-29.ts-backup.json»: the day the copy was taken, in Almaty. */
 export function trialBackupFileName(venue: string, snapshotAt: number): string {
   return `TS-${latinName(venue)}-${trialDay(snapshotAt)}.ts-backup.json`;
+}
+
+// ---------------------------------------------------------------------------
+// «Облачная касса» (packages/domain/src/cloud-cafe.ts)
+
+/** «Перевести в облако» is offered for a trial TS approved that is not in the cloud yet. */
+export function canMoveToCloud(t: Pick<TrialView, 'status' | 'cloud'>): boolean {
+  return !t.cloud && t.status !== 'pending' && t.status !== 'rejected';
+}
+
+/** What the coffee shop is sent: the link, the café code and what to do (WhatsApp or copied). */
+export function cloudShareText(venue: string, url: string | null, code: string): string {
+  const where = url ? `${url}\n` : '';
+  return `Касса «${venue}» теперь в облаке TS — работает на любом телефоне и компьютере.\n${where}Код кофейни: ${formatCafeCode(code)}\nОткройте ссылку и войдите своим кодом — тем же, что раньше.`;
+}
+
+/** A WhatsApp link that opens a chat with the text ready (the person picks the contact). */
+export function whatsAppLink(text: string): string {
+  return `https://wa.me/?text=${encodeURIComponent(text)}`;
+}
+
+/** «сегодня в 14:32» / «2 ноября в 14:32» — when the last copy came, in the trial's zone. */
+export function copyTimeText(ms: number, now: number, timeZone: string = TRIAL_ZONE): string {
+  const time = formatIn(clockFormats, timeZone, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(ms);
+  return trialCalendarDay(ms, timeZone) === trialCalendarDay(now, timeZone) ? `сегодня в ${time}` : `${trialDate(ms, timeZone)} в ${time}`;
+}
+
+/** The steps of «Перевести в облако» in the cabinet, as a pure state machine (the same shape as the move between computers). */
+export type CloudMoveStep =
+  | { step: 'idle' }
+  /** «Перевести «…» в облако?» */
+  | { step: 'confirm' }
+  /** The cash desk is being asked for a fresh copy. */
+  | { step: 'asking' }
+  /** The cash desk is on line: waiting for its fresh copy until `until`. */
+  | { step: 'waiting'; requestedAt: number; snapshotAt: number | null; until: number }
+  /** Only an older copy: the person decides (offline — not on line; timeout — it did not answer). */
+  | { step: 'older'; snapshotAt: number; reason: 'offline' | 'timeout' }
+  /** The cash desk never sent a copy: nothing to move. */
+  | { step: 'empty' }
+  /** Importing into the cloud cash desk. */
+  | { step: 'moving'; acceptOlder: boolean }
+  | { step: 'done' }
+  | { step: 'error'; message: string };
+
+export type CloudMoveEvent =
+  | { type: 'open' }
+  | { type: 'cancel' }
+  | { type: 'confirm' }
+  | { type: 'started'; state: TrialCloudMoveState; now: number }
+  | { type: 'polled'; state: TrialCloudMoveState; now: number }
+  | { type: 'tick'; now: number }
+  | { type: 'stopWaiting' }
+  | { type: 'confirmOlder' }
+  | { type: 'moved' }
+  | { type: 'failed'; message: string };
+
+export const CLOUD_MOVE_IDLE: CloudMoveStep = { step: 'idle' };
+
+function cloudTimedOut(s: Extract<CloudMoveStep, { step: 'waiting' }>): CloudMoveStep {
+  return s.snapshotAt === null ? { step: 'empty' } : { step: 'older', snapshotAt: s.snapshotAt, reason: 'timeout' };
+}
+
+/** The next step of «Перевести в облако». Events that do not fit the step change nothing. */
+export function cloudMoveReducer(s: CloudMoveStep, e: CloudMoveEvent): CloudMoveStep {
+  switch (e.type) {
+    case 'open':
+      return s.step === 'idle' || s.step === 'error' ? { step: 'confirm' } : s;
+    case 'cancel':
+      return s.step === 'moving' || s.step === 'asking' ? s : CLOUD_MOVE_IDLE;
+    case 'confirm':
+      return s.step === 'confirm' ? { step: 'asking' } : s;
+    case 'started': {
+      if (s.step !== 'asking') return s;
+      const st = e.state;
+      if (st.cloud) return { step: 'done' };
+      if (st.requestedAt !== null) {
+        if (st.fresh) return { step: 'moving', acceptOlder: false };
+        return { step: 'waiting', requestedAt: st.requestedAt, snapshotAt: st.snapshotAt, until: e.now + TRIAL_CLOUD_MOVE.waitFreshMs };
+      }
+      if (st.snapshotAt === null) return { step: 'empty' };
+      return { step: 'older', snapshotAt: st.snapshotAt, reason: 'offline' };
+    }
+    case 'polled': {
+      if (s.step !== 'waiting') return s;
+      const st = e.state;
+      if (st.cloud) return { step: 'done' };
+      if (st.fresh) return { step: 'moving', acceptOlder: false };
+      const next = { ...s, snapshotAt: st.snapshotAt };
+      return e.now >= s.until ? cloudTimedOut(next) : next;
+    }
+    case 'tick':
+      return s.step === 'waiting' && e.now >= s.until ? cloudTimedOut(s) : s;
+    case 'stopWaiting':
+      return s.step === 'waiting' ? cloudTimedOut(s) : s;
+    case 'confirmOlder':
+      return s.step === 'older' ? { step: 'moving', acceptOlder: true } : s;
+    case 'moved':
+      return s.step === 'moving' ? { step: 'done' } : s;
+    case 'failed':
+      return s.step === 'idle' || s.step === 'done' ? s : { step: 'error', message: e.message };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// «Купили» (packages/domain/src/trial-paid.ts)
+
+/** A café that bought TS: it is listed in «Клиенты → Купили», not among the trials. */
+export function isBought(t: Pick<TrialView, 'paid'>): boolean {
+  return t.paid !== null && t.paid !== undefined;
+}
+
+/** «Купили» is offered for any approved café; for a paid one the same form is «Продлить оплату». */
+export function canBuy(t: Pick<TrialView, 'status'>): boolean {
+  return canMarkPaid(t.status);
+}
+
+/** The cafés that bought TS: running paid terms first (the soonest end on top), then the ones whose payment ran out, then the rest. */
+export function sortBought<T extends Pick<TrialView, 'id' | 'status' | 'endsAt'>>(list: readonly T[], now: number): T[] {
+  const rank = (t: T) => {
+    const s = effectiveStatus(t, now);
+    return s === 'paid' ? 0 : s === 'expired' ? 1 : 2;
+  };
+  return [...list].sort((a, b) => rank(a) - rank(b) || a.endsAt - b.endsAt || a.id.localeCompare(b.id));
+}
+
+/** «Скоро конец оплаты»: the mark in «Купили» (the same window as the owner's reminder). */
+export function paidSoon(t: Pick<TrialView, 'status' | 'endsAt'>, now: number): boolean {
+  return paidEndsSoon({ status: effectiveStatus(t, now), endsAt: t.endsAt }, now);
+}
+
+/** «150 000 ₸» or «—» for a payment without a sum. */
+export function paidAmountText(minor: number | null | undefined): string {
+  return minor === null || minor === undefined ? '—' : trialMoney(minor);
+}
+
+/** What the «Оплачено до» picker starts at: a month after the current paid date (or today), within the range. */
+export function paidDefaultUntil(t: Pick<TrialView, 'paid' | 'timezone'>, now: number): string {
+  const { min, max } = trialPaidRange(now, t.timezone);
+  const base = t.paid && t.paid.until >= min ? t.paid.until : min;
+  const next = shiftDay(base, 30);
+  return next > max ? max : next;
+}
+
+/** The «Купили» form → the request, or why not. */
+export function parsePaidForm(
+  form: { until: string; amount: string; note: string },
+  now: number,
+  timeZone: string,
+): { ok: true; body: TrialPaidRequest } | { ok: false; error: string } {
+  const until = trialPaidUntil(form.until.trim(), now, timeZone);
+  if (until === null) {
+    const { min, max } = trialPaidRange(now, timeZone);
+    return { ok: false, error: `«Оплачено до»: выберите дату с ${endDateText(min)} по ${endDateText(max)} ${max.slice(0, 4)}` };
+  }
+  const amount = parsePaidAmount(form.amount);
+  if (amount === undefined) return { ok: false, error: 'Сумма — число в тенге, например 150000 (или оставьте пустым)' };
+  const note = form.note.trim();
+  if (note.length > TRIAL_PAID_NOTE_MAX) return { ok: false, error: `Заметка — не длиннее ${TRIAL_PAID_NOTE_MAX} символов` };
+  return { ok: true, body: { until, amount, note: note || null } };
+}
+
+/** The cafés of the list split into new requests, trials and the ones that bought TS. */
+export function splitTrials<T extends Pick<TrialView, 'status' | 'paid'>>(list: readonly T[]): { requests: T[]; trials: T[]; bought: T[] } {
+  return {
+    requests: list.filter((t) => isRequest(t)),
+    trials: list.filter((t) => !isRequest(t) && !isBought(t)),
+    bought: list.filter((t) => isBought(t)),
+  };
 }

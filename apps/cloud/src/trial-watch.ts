@@ -7,7 +7,7 @@
  */
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { TrialReportAnswer, TrialTerms, TrialWatchLink, TrialWatchSnapshot, TrialWatchState, TrialWatchStatus } from '@bills/domain';
-import { isWatching, isWatchToken, TRIAL_WATCH, TRIAL_WATCH_RATE, TRIAL_WATCH_REVOKED_MESSAGE, trialStatus } from '@bills/domain';
+import { cloudCafeUrl, isWatching, isWatchToken, TRIAL_WATCH, TRIAL_WATCH_RATE, TRIAL_WATCH_REVOKED_MESSAGE, trialStatus } from '@bills/domain';
 import type { SqlDriver } from './db/driver.ts';
 import { CloudError } from './errors.ts';
 
@@ -159,8 +159,11 @@ async function viewerOf(db: SqlDriver, now: number, token: string | null, ip: st
   return viewer;
 }
 
-/** GET /trial/watch (viewer token): the venue, the terms and when the latest snapshot came — no snapshot. */
-export async function watchState(db: SqlDriver, now: number, token: string | null, ip: string): Promise<TrialWatchState> {
+/**
+ * GET /trial/watch (viewer token): the venue, the terms and when the latest snapshot came — no snapshot. Once the café
+ * is in the cloud cash desk, `cloud` says where (the phone shows «Касса переехала в облако» with the link).
+ */
+export async function watchState(db: SqlDriver, now: number, token: string | null, ip: string, cloudBase: string | null = null): Promise<TrialWatchState> {
   const viewer = await viewerOf(db, now, token, ip, 'check');
   const rows = await db.all<{
     venue: string;
@@ -169,8 +172,9 @@ export async function watchState(db: SqlDriver, now: number, token: string | nul
     ends_at: number | string;
     snapshot_at: number | string | null;
     snapshot_bytes: number | string | null;
+    cloud_code: string | null;
   }>(
-    `SELECT venue, status, ${ms('started_at')} AS started_at, ${ms('ends_at')} AS ends_at, ${ms('snapshot_at')} AS snapshot_at, snapshot_bytes
+    `SELECT venue, status, ${ms('started_at')} AS started_at, ${ms('ends_at')} AS ends_at, ${ms('snapshot_at')} AS snapshot_at, snapshot_bytes, cloud_code
        FROM trials WHERE id = ?::uuid`,
     [viewer.trial_id],
   );
@@ -184,6 +188,7 @@ export async function watchState(db: SqlDriver, now: number, token: string | nul
     status: trialStatus({ status: r.status, endsAt }, now),
     snapshotAt: num(r.snapshot_at),
     snapshotBytes: num(r.snapshot_bytes),
+    ...(r.cloud_code ? { cloud: { code: r.cloud_code, url: cloudBase ? cloudCafeUrl(cloudBase, r.cloud_code) : null } } : {}),
   };
 }
 

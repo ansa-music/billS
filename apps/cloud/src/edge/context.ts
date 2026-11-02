@@ -1,3 +1,5 @@
+import type { CloudHub } from '../cloud-hub.ts';
+import { cloudHub, cloudHubConfigOf, cloudHubUrlOf } from '../cloud-hub.ts';
 import type { SqlDriver } from '../db/driver.ts';
 import type { AuthAdmin } from './auth-admin.ts';
 import { authAdminApi } from './auth-admin.ts';
@@ -57,6 +59,13 @@ export interface EdgeContext {
   telegram: TelegramBot | null;
   /** The `telegram` webhook accepts only calls with this X-Telegram-Bot-Api-Secret-Token (TELEGRAM_WEBHOOK_SECRET). */
   telegramWebhookSecret: string | null;
+  /**
+   * «Облачная касса» (apps/cloud/src/cloud-hub.ts): the Worker's admin API with CLOUD_HUB_URL + CLOUD_HUB_ADMIN_TOKEN;
+   * null without either — the cabinet then says «Облачная касса ещё не подключена».
+   */
+  cloudHub: CloudHub | null;
+  /** CLOUD_HUB_URL alone (the cafés' links `{url}/#/cafe/<code>`), even when the token is missing. */
+  cloudHubUrl: string | null;
 }
 
 export const DEFAULT_CABINET_URL = 'https://ts-cabinet.pages.dev';
@@ -99,6 +108,8 @@ export interface EdgeContextOptions {
   sender?: PushSender;
   /** `fetch` of the Telegram bot (tests stub the Bot API). */
   telegramFetch?: TelegramFetch;
+  /** `fetch` of the cloud cash desk's admin API (tests pass a fake Worker). */
+  cloudHubFetch?: typeof fetch;
 }
 
 /**
@@ -110,7 +121,8 @@ export interface EdgeContextOptions {
  * SUPABASE_URL + SUPABASE_ANON_KEY (Auth API lookups), SUPABASE_SERVICE_ROLE_KEY (Auth admin API),
  * TS_CLOUD_URL (connection codes; `${SUPABASE_URL}/functions/v1` by default),
  * TS_SIGNUP_DISABLED (=1 turns self sign-up off), TS_SIGNUP_PER_HOUR (5 sign-up attempts per IP an hour),
- * TELEGRAM_BOT_TOKEN + TELEGRAM_BOT_USERNAME + TELEGRAM_WEBHOOK_SECRET («TS в Telegram», all optional).
+ * TELEGRAM_BOT_TOKEN + TELEGRAM_BOT_USERNAME + TELEGRAM_WEBHOOK_SECRET («TS в Telegram», all optional),
+ * CLOUD_HUB_URL + CLOUD_HUB_ADMIN_TOKEN («Облачная касса», both optional: without them it is off).
  */
 export function edgeContext(db: SqlDriver, env: Env, options: EdgeContextOptions = {}): EdgeContext {
   const log = options.log ?? ((m: string) => console.log(m));
@@ -127,6 +139,7 @@ export function edgeContext(db: SqlDriver, env: Env, options: EdgeContextOptions
     ownerChannel: telegram ? new TelegramChannel(db, telegram, cabinetUrl, log) : null,
   });
   const pushChannels = sender instanceof RoutingSender ? sender.channels : sender.enabled ? ['custom'] : [];
+  const hubConfig = cloudHubConfigOf(env);
   return {
     db,
     push,
@@ -161,6 +174,8 @@ export function edgeContext(db: SqlDriver, env: Env, options: EdgeContextOptions
     },
     telegram,
     telegramWebhookSecret: env.TELEGRAM_WEBHOOK_SECRET?.trim() || null,
+    cloudHub: hubConfig ? cloudHub(hubConfig, options.cloudHubFetch ?? ((input, init) => fetch(input, init))) : null,
+    cloudHubUrl: cloudHubUrlOf(env),
   };
 }
 

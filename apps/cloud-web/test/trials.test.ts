@@ -58,6 +58,8 @@ function trial(over: Partial<TrialView> = {}): TrialView {
     decidedAt: null,
     ownerMessage: null,
     duplicateOf: null,
+    cloud: null,
+    paid: null,
     ...over,
   };
 }

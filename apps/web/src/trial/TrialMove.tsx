@@ -6,6 +6,7 @@ import { Modal } from '../ui.tsx';
 import type { ForcedCopy } from '../demo-hub/trial-move.ts';
 import { deskMoveApi, MOVE_AVAILABLE, MoveHttpError, trialMovedAway } from '../demo-hub/trial-move.ts';
 import { currentTrial, downloadBackup, subscribeTrial, TRIAL, trialVersion } from '../demo-hub/trial-store.ts';
+import { TrialCloudBanner } from './TrialCloud.tsx';
 import './trial.css';
 import './trial-move.css';
 
@@ -45,7 +46,15 @@ function useTrial() {
 function useCanMove(): boolean {
   const info = useTrial();
   const { roles } = useAuth();
-  return Boolean(info && !info.localOnly && !trialMovedAway(info) && !trialWaiting(info.status) && MOVE_AVAILABLE && roles.some((r) => r === 'manager' || r === 'admin' || r === 'owner'));
+  return Boolean(
+    info &&
+      !info.localOnly &&
+      !trialMovedAway(info) &&
+      !info.cloud &&
+      !trialWaiting(info.status) &&
+      MOVE_AVAILABLE &&
+      roles.some((r) => r === 'manager' || r === 'admin' || r === 'owner'),
+  );
 }
 
 function moveTime(ms: number): string {
@@ -252,12 +261,14 @@ export function TrialMovedState() {
 
 /**
  * «Касса перенесена на другой компьютер» on the old cash desk — on the sign-in screen (App.tsx) and over the
- * pages (license.tsx, in place of the read-only strip). Nothing on a desk that was not moved.
+ * pages (license.tsx, in place of the read-only strip). A cash desk that moved to the cloud gets
+ * «Касса переехала в облако» instead (TrialCloud.tsx). Nothing on a desk that was not moved.
  */
 export function TrialMovedBanner() {
   const info = useTrial();
   const [back, setBack] = useState(false);
   const [busy, setBusy] = useState(false);
+  if (info?.cloud) return <TrialCloudBanner />;
   if (!info || !trialMovedAway(info)) return null;
   return (
     <div className="license-banner trial-moved-banner" data-tone="danger" role="alert">

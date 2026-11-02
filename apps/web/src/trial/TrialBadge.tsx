@@ -1,14 +1,17 @@
 import { useEffect, useReducer, useState, useSyncExternalStore } from 'react';
+import { trialOverMessage } from '@bills/domain';
 import { Modal } from '../ui.tsx';
-import { currentTrial, daysLeft, downloadBackup, subscribeTrial, TRIAL, trialEndsAt, trialOver, trialPermanent, trialVersion } from '../demo-hub/trial-store.ts';
+import { currentTrial, daysLeft, downloadBackup, subscribeTrial, TRIAL, trialEndsAt, trialFull, trialOver, trialVersion } from '../demo-hub/trial-store.ts';
 import { openTrialWatch, TrialWatchHost, useCanWatchFromPhone } from './TrialWatch.tsx';
 import { openTrialLink, TrialLinkHost, useCanLinkDevices } from './TrialLink.tsx';
 import { trialMovedAway } from '../demo-hub/trial-move.ts';
 import { TrialCafeCodeSection, TrialMovedState, TrialMoveHost } from './TrialMove.tsx';
+import { TrialCloudState } from './TrialCloud.tsx';
 
 /**
  * Browser trial (VITE_TRIAL=1): a quiet line at the bottom of the menu — «Пробная · 12 дн.», or
- * «Полная версия» once TS made it permanent — instead of a strip over every page. A click opens the
+ * «Полная версия» once TS made it permanent or the café bought it («Купили»: no date, no countdown, no price
+ * until the paid day passes — then «Оплата закончилась») — instead of a strip over every page. A click opens the
  * details: the end date (none for the full version), «Скачать копию», the director's code (role manager,
  * «Директор» in a coffee shop), devices, «Открыть на телефоне» and how to extend. Renders nothing in other builds.
  */
@@ -23,18 +26,33 @@ export function TrialBadge({ place = 'sidebar' }: { place?: 'sidebar' | 'sheet' 
   const [open, setOpen] = useState(false);
   const info = TRIAL ? currentTrial() : null;
   if (!info) return null;
-  const full = trialPermanent(info);
-  // «Касса перенесена на другой компьютер» (TrialMove.tsx): read-only like a finished trial, whatever its status.
-  const moved = trialMovedAway(info);
+  const full = trialFull(info);
+  const paidOver = !full && (info.status === 'paid' || Boolean(info.everPaid));
+  // «Касса перенесена на другой компьютер» (TrialMove.tsx) or «Касса переехала в облако» (TrialCloud.tsx):
+  // read-only like a finished trial, whatever its status.
+  const cloud = Boolean(info.cloud);
+  const moved = cloud || trialMovedAway(info);
   const over = moved || (!full && trialOver(info));
   const left = daysLeft(info);
-  const label = moved ? 'Касса перенесена' : full ? 'Полная версия' : over ? 'Пробная завершена' : `Пробная · ${left} дн.`;
-  const title = moved
+  const label = cloud
+    ? 'В облаке'
+    : moved
+      ? 'Касса перенесена'
+      : full
+        ? 'Полная версия'
+        : over
+          ? paidOver
+            ? 'Оплата закончилась'
+            : 'Пробная завершена'
+          : `Пробная · ${left} дн.`;
+  const title = cloud
+    ? 'Касса переехала в облако — теперь она работает на любом телефоне и компьютере'
+    : moved
     ? 'Касса перенесена на другой компьютер'
     : full
       ? 'Полная версия TS — без срока'
       : over
-        ? (info.message ?? 'Пробный период завершён')
+        ? (trialOverMessage(info) ?? 'Пробный период завершён')
         : `Пробная версия: осталось ${left} ${daysWord(left)}`;
   return (
     <>
@@ -51,7 +69,7 @@ export function TrialBadge({ place = 'sidebar' }: { place?: 'sidebar' | 'sheet' 
         <span className="trial-badge-dot" aria-hidden="true" />
         <span className="trial-badge-text">{label}</span>
         <span className="trial-badge-short" aria-hidden="true">
-          {moved ? 'Перенесена' : full ? 'TS' : over ? 'Пробная' : `${left} дн.`}
+          {cloud ? 'Облако' : moved ? 'Перенесена' : full ? 'TS' : over ? 'Пробная' : `${left} дн.`}
         </span>
       </button>
       {open && <TrialDetails onClose={() => setOpen(false)} />}
@@ -73,15 +91,17 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
   const canWatch = useCanWatchFromPhone();
   const canLink = useCanLinkDevices();
   if (!info) return null;
-  const full = trialPermanent(info);
-  const moved = trialMovedAway(info);
+  const full = trialFull(info);
+  const moved = Boolean(info.cloud) || trialMovedAway(info);
   const over = !full && trialOver(info);
   const left = daysLeft(info);
   const until = new Date(trialEndsAt(info)).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
   return (
-    <Modal open title={full ? 'Полная версия' : 'Пробная версия'} onClose={onClose}>
+    <Modal open title={info.cloud ? 'Облачная касса' : full ? 'Полная версия' : 'Пробная версия'} onClose={onClose}>
       <div className="trial-details">
-        {moved ? (
+        {info.cloud ? (
+          <TrialCloudState cloud={info.cloud} />
+        ) : moved ? (
           <TrialMovedState />
         ) : full ? (
           <p className="trial-details-state">
@@ -89,7 +109,7 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
           </p>
         ) : over ? (
           <p className="trial-details-state" data-over="">
-            {info.message ?? 'Пробный период завершён: данные можно смотреть и скачать, новые заказы недоступны.'}
+            {trialOverMessage(info) ?? 'Пробный период завершён: данные можно смотреть и скачать, новые заказы недоступны.'}
           </p>
         ) : (
           <p className="trial-details-state">
@@ -97,9 +117,11 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
           </p>
         )}
         <p className="muted">
-          {info.localOnly
-            ? 'Это копия данных для просмотра: она хранится только в этом браузере и не связана с TS.'
-            : 'Данные хранятся в этом браузере. Раз в несколько дней скачивайте копию.'}
+          {info.cloud
+            ? 'Здесь, в браузере, остались старые данные — только для просмотра. «Скачать копию» сохранит их файлом.'
+            : info.localOnly
+              ? 'Это копия данных для просмотра: она хранится только в этом браузере и не связана с TS.'
+              : 'Данные хранятся в этом браузере. Раз в несколько дней скачивайте копию.'}
         </p>
         <div className="trial-details-actions">
           <button
@@ -115,7 +137,12 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
           </button>
           {showKey ? (
             <p className="trial-details-key">
-              {info.managerName}: {info.managerKey ? <code>{info.managerKey}</code> : 'тот же код, что был на старом компьютере'}
+              {info.managerName}:{' '}
+              {info.directorKeyStale
+                ? 'код мог быть изменён в кассе — посмотрите в «Сотрудники» или попросите новый у TS'
+                : info.managerKey
+                  ? <code>{info.managerKey}</code>
+                  : 'тот же код, что был на старом компьютере'}
             </p>
           ) : (
             <button
@@ -160,7 +187,9 @@ function TrialDetails({ onClose }: { onClose: () => void }) {
             </button>
           </div>
         )}
-        <p className="trial-details-foot">{full ? 'Вопросы и помощь — напишите TS.' : 'Продлить или подключить полную версию — напишите TS.'}</p>
+        <p className="trial-details-foot">
+          {full || info.cloud ? 'Вопросы и помощь — напишите TS.' : 'Продлить или подключить полную версию — напишите TS.'}
+        </p>
       </div>
     </Modal>
   );

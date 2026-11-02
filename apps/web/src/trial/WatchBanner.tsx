@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { BrandMark } from '../BrandMark.tsx';
 import type { WatchProblemKind } from '../demo-hub/watch-mode.ts';
 import { isWatchMode, refreshWatch, stopWatching, subscribeWatch, watchVersion, watchView } from '../demo-hub/watch-mode.ts';
+import { CloudMovedScreen, useCloudScreenDismissed } from './TrialCloud.tsx';
 import '../onboarding/onboarding.css';
 import './trial.css';
 
@@ -80,10 +81,23 @@ const PROBLEM: Record<WatchProblemKind, { title: string; lead: string; retry: bo
     lead: 'Обновите страницу TS на кассе, подождите минуту и попробуйте снова.',
     retry: true,
   },
+  cloud: {
+    title: 'Касса переехала в облако',
+    lead: 'Теперь она работает на любом телефоне и компьютере. Откройте ссылку облачной кассы и войдите своим кодом.',
+    retry: false,
+  },
 };
+
+const stopButton = (
+  <button type="button" className="btn btn-ghost" onClick={stopWatching}>
+    Перестать смотреть
+  </button>
+);
 
 /** Full screen: why the cash desk's data is not shown, and what to do. */
 export function WatchProblemScreen({ kind, detail }: { kind: WatchProblemKind; detail?: string | undefined }) {
+  const cloud = watchView().cloud;
+  if (kind === 'cloud' && cloud) return <CloudMovedScreen cloud={cloud} extra={stopButton} />;
   const p = PROBLEM[kind];
   return (
     <section className="page onboarding trial-welcome watch-problem">
@@ -109,9 +123,15 @@ export function WatchProblemScreen({ kind, detail }: { kind: WatchProblemKind; d
   );
 }
 
-/** The app while the link works; the «Ссылка отключена» screen once the cash desk switched it off. */
+/**
+ * The app while the link works; the «Ссылка отключена» screen once the cash desk switched it off; «Касса переехала
+ * в облако» once the cloud says so (the old copy stays behind «Посмотреть старые данные»).
+ */
 export function WatchGate({ children }: { children: ReactNode }) {
   useSyncExternalStore(subscribeWatch, watchVersion);
-  if (watchView().revoked) return <WatchProblemScreen kind="revoked" />;
+  const [dismissed, dismiss] = useCloudScreenDismissed();
+  const v = watchView();
+  if (v.revoked) return <WatchProblemScreen kind="revoked" />;
+  if (v.cloud && !dismissed) return <CloudMovedScreen cloud={v.cloud} onDismiss={dismiss} extra={stopButton} />;
   return children;
 }

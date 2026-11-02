@@ -9,6 +9,8 @@
  * (`platform` function, /platform/trials…). Pure types and rules shared by the cloud and both web apps.
  */
 import { isBookingDay, localInstant, shiftDay } from './booking.ts';
+import type { TrialCloudInfo, TrialCloudView } from './cloud-cafe.ts';
+import type { TrialPaidView } from './trial-paid.ts';
 import { isValidTimeZone } from './time.ts';
 
 export interface TrialStats {
@@ -26,12 +28,13 @@ export interface TrialStats {
 
 /**
  * Stored: 'pending' (a request waiting for TS), 'active', 'ended' (ended early by TS), 'rejected' (a request
- * TS turned down) and 'permanent' (no end date). 'expired' is computed: active and endsAt has passed.
+ * TS turned down), 'permanent' (no end date) and 'paid' (the café bought TS until a date: trial-paid.ts).
+ * 'expired' is computed: active or paid, and endsAt has passed.
  * A pending or rejected trial has not started: the cash desk takes no orders (as when it is over).
  */
-export type TrialStatus = 'pending' | 'active' | 'ended' | 'expired' | 'rejected' | 'permanent';
+export type TrialStatus = 'pending' | 'active' | 'ended' | 'expired' | 'rejected' | 'permanent' | 'paid';
 
-export const TRIAL_STATUSES: readonly TrialStatus[] = ['pending', 'active', 'ended', 'expired', 'rejected', 'permanent'];
+export const TRIAL_STATUSES: readonly TrialStatus[] = ['pending', 'active', 'ended', 'expired', 'rejected', 'permanent', 'paid'];
 
 export function isTrialStatus(v: unknown): v is TrialStatus {
   return typeof v === 'string' && (TRIAL_STATUSES as readonly string[]).includes(v);
@@ -54,6 +57,11 @@ export interface TrialTerms {
   /** The end; for 'permanent' and 'pending' it means nothing (the page ignores it). */
   endsAt: number;
   message?: string;
+  /**
+   * The café moved to the cloud cash desk (packages/domain/src/cloud-cafe.ts): its link, and once the director's
+   * key of a request approved straight into the cloud. The status is then 'ended' (this browser takes no orders).
+   */
+  cloud?: TrialCloudInfo;
 }
 
 export interface TrialStartRequest {
@@ -71,6 +79,8 @@ export interface TrialStartRequest {
    * A page without it is a page from before requests: it gets TRIAL_RELOAD_ID and nothing is stored.
    */
   installId?: string;
+  /** «Заполнить меню примером» on the welcome form: a request approved into the cloud gets the sample menu too. */
+  withMenu?: boolean;
 }
 
 /** The start's answer: the trial's id and token plus its terms ('pending' for a new request). */
@@ -90,8 +100,11 @@ export const TRIAL_RELOAD_ID = '00000000-0000-0000-0000-000000000000';
 export const TRIAL_RELOAD_TOKEN = 'reload';
 export const TRIAL_RELOAD_MESSAGE = 'Обновите страницу TS (F5), чтобы отправить заявку на пробную версию.';
 
-/** The terms' version a current page asks for (`v=2` on /terms, `v: 2` in /report); others get legacyTrialTerms. */
-export const TRIAL_TERMS_VERSION = 2;
+/**
+ * The terms' version a current page asks for (`v=3` on /terms, `v: 3` in /report): every status, 'paid' included.
+ * `v=2` pages get 'paid' as 'active'; older ones legacyTrialTerms (trialTermsForVersion, trial-paid.ts).
+ */
+export const TRIAL_TERMS_VERSION = 3;
 
 /** What an old page is told for a permanent trial: «active» until this far date (its license then never runs out). */
 export const TRIAL_PERMANENT_LEGACY_ENDS_AT = Date.UTC(2100, 0, 1);
@@ -150,6 +163,10 @@ export interface TrialView {
   ownerMessage: string | null;
   /** An earlier trial this one looks like a repeat of (trialDuplicates), or null. */
   duplicateOf: TrialDuplicate | null;
+  /** Its café in the cloud cash desk (moved there, or approved straight into it); null while it is a browser trial. */
+  cloud: TrialCloudView | null;
+  /** «Купили»: paid until a date, with the internal amount, note and history (trial-paid.ts); null when it never bought. */
+  paid: TrialPaidView | null;
 }
 
 export const TRIAL_DEFAULT_DAYS = 14;
@@ -181,7 +198,7 @@ export const TRIAL_REJECTED_MESSAGE = 'TS отклонил заявку на п�
 /** The page's request is gone from the cloud (the platform owner deleted it). */
 export const TRIAL_DELETED_MESSAGE = 'Заявка удалена в TS. Если это ошибка — напишите TS.';
 
-/** The status a trial has now: a stored 'active' whose endsAt has come is 'expired'; the others stay as stored. */
+/** The status a trial has now: a stored 'active' or 'paid' whose endsAt has come is 'expired'; the others stay as stored. */
 export function trialStatus(row: { status: TrialStatus | string; endsAt: number }, now: number): TrialStatus {
   switch (row.status) {
     case 'pending':
@@ -190,10 +207,15 @@ export function trialStatus(row: { status: TrialStatus | string; endsAt: number 
     case 'rejected':
     case 'permanent':
       return row.status;
+    case 'paid':
+      return row.endsAt <= now ? 'expired' : 'paid';
     default:
       return row.endsAt <= now ? 'expired' : 'active';
   }
 }
+
+/** What a café that bought TS («Купили», trial-paid.ts) sees the day after its paid date. */
+export const TRIAL_PAID_ENDED_MESSAGE = 'Оплаченный срок закончился — свяжитесь с TS.';
 
 /**
  * What the trial is told: its status, the end and (when it is over) why. A rejected request carries the
@@ -202,7 +224,7 @@ export function trialStatus(row: { status: TrialStatus | string; endsAt: number 
 export function trialTerms(row: { status: TrialStatus | string; endsAt: number; ownerMessage?: string | null }, now: number): TrialTerms {
   const status = trialStatus(row, now);
   if (status === 'ended') return { status, endsAt: row.endsAt, message: TRIAL_ENDED_MESSAGE };
-  if (status === 'expired') return { status, endsAt: row.endsAt, message: TRIAL_EXPIRED_MESSAGE };
+  if (status === 'expired') return { status, endsAt: row.endsAt, message: row.status === 'paid' ? TRIAL_PAID_ENDED_MESSAGE : TRIAL_EXPIRED_MESSAGE };
   const message = row.ownerMessage?.trim();
   if (status === 'rejected' && message) return { status, endsAt: row.endsAt, message };
   return { status, endsAt: row.endsAt };
@@ -216,6 +238,8 @@ export function legacyTrialTerms(terms: TrialTerms, now: number): TrialTerms {
   switch (terms.status) {
     case 'permanent':
       return { status: 'active', endsAt: TRIAL_PERMANENT_LEGACY_ENDS_AT };
+    case 'paid':
+      return { status: 'active', endsAt: terms.endsAt };
     case 'pending':
       return { status: 'ended', endsAt: now, message: TRIAL_PENDING_LEGACY_MESSAGE };
     case 'rejected':
@@ -357,6 +381,8 @@ export function trialPageOver(info: TrialPageTerms, now: number, days = TRIAL_DE
 export function trialPageLicense(info: TrialPageTerms, now: number, days = TRIAL_DEFAULT_DAYS): { validUntil: number; permanent: boolean } {
   if (info.status === 'permanent') return { validUntil: TRIAL_PERMANENT_LICENSE_UNTIL, permanent: true };
   const end = info.endsAt ?? info.startedAt + days * DAY_MS;
+  // «Купили»: the full version until the end of the paid day (then read-only by itself).
+  if (info.status === 'paid') return { validUntil: end, permanent: true };
   const locked = trialWaiting(info.status) || info.status === 'ended' || info.status === 'expired';
   return { validUntil: locked ? Math.min(end, now) : end, permanent: false };
 }

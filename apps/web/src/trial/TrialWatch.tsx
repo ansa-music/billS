@@ -39,7 +39,8 @@ export function useCanWatchFromPhone(): boolean {
   useSyncExternalStore(subscribeTrial, trialVersion);
   const { roles } = useAuth();
   const info = TRIAL ? currentTrial() : null;
-  return watchAvailable(info) && roles.some((r) => r === 'manager' || r === 'owner');
+  // A cash desk moved to the cloud cash desk has nothing current to show.
+  return watchAvailable(info) && !info?.cloud && roles.some((r) => r === 'manager' || r === 'owner');
 }
 
 /** Mounted once (with the trial badge in the menu); the dialog goes to <body>, so a hidden menu does not hide it. */
