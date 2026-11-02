@@ -9,7 +9,7 @@ import './trial.css';
 
 /**
  * First visit of the browser trial: two fields and one button. The coffee shop is created in
- * this browser, then «Готово» shows the manager's six-digit key once, big, to write down.
+ * this browser, then «Готово» shows the director's (role manager) six-digit key once, big, to write down.
  * «Уже пробовали на другом устройстве?» restores a «Скачать копию» file instead.
  */
 export function TrialWelcome({ onStart, onRestored }: { onStart: (t: NewTrial) => void; onRestored: () => void }) {
@@ -95,7 +95,7 @@ export function TrialWelcome({ onStart, onRestored }: { onStart: (t: NewTrial) =
   );
 }
 
-/** «Готово»: the manager's key, once, big. */
+/** «Готово»: the director's key, once, big. */
 export function TrialReady({ venue, managerKey, onContinue }: { venue: string; managerKey: string; onContinue: () => void }) {
   return (
     <section className="page onboarding trial-welcome">
@@ -107,12 +107,12 @@ export function TrialReady({ venue, managerKey, onContinue }: { venue: string; m
         </div>
       </header>
       <div className="onboarding-card onboarding-done">
-        <p>Ваш код входа (управляющий):</p>
+        <p>Ваш код входа (директор):</p>
         <p className="trial-key" aria-label={`Код входа ${managerKey.split('').join(' ')}`}>
           {managerKey.slice(0, 3)} {managerKey.slice(3)}
         </p>
         <p className="onboarding-note">
-          Запишите его. Код спросят при входе в кассу. Если забудете — внизу меню нажмите «Пробная» → «Код управляющего».
+          Запишите его. Код спросят при входе в кассу. Если забудете — внизу меню нажмите «Пробная» → «Код директора».
         </p>
         <ol className="trial-next">
           <li>Войдите с этим кодом.</li>

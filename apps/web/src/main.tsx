@@ -10,6 +10,8 @@ import './sections.css';
 import './app.css';
 import { applyStoredTheme } from './theme.ts';
 import { App } from './App.tsx';
+import { watchTokenFromHash } from '@bills/domain';
+import { watchToken } from './demo-hub/watch-mode.ts';
 
 applyStoredTheme();
 
@@ -22,9 +24,17 @@ function render() {
 }
 
 // Two-week browser trial (VITE_TRIAL=1 with VITE_DEMO_LOCAL=1): the coffee shop is created on the
-// welcome screen and then runs in the page like the demo, kept in IndexedDB.
+// welcome screen and then runs in the page like the demo, kept in IndexedDB. A watch link
+// (#/watch/<token>, «Смотреть с телефона») opens the cash desk's latest data read-only instead.
 if (import.meta.env.VITE_DEMO_LOCAL === '1' && import.meta.env.VITE_TRIAL === '1') {
-  void startTrial();
+  const watching = watchToken();
+  if (watching) void startWatch(watching);
+  else void startTrial();
+  // A watch link opened in a tab that already shows TS changes only the hash: start over as the copy.
+  window.addEventListener('hashchange', () => {
+    const next = watchTokenFromHash(window.location.hash);
+    if (next && next !== watching) window.location.reload();
+  });
 } else if (import.meta.env.VITE_DEMO_LOCAL === '1') {
   // Public demo without a server (VITE_DEMO_LOCAL=1): start the HUB inside the page first.
   // Other builds drop this branch and never load the demo HUB.
@@ -35,6 +45,37 @@ if (import.meta.env.VITE_DEMO_LOCAL === '1' && import.meta.env.VITE_TRIAL === '1
     .then(render);
 } else {
   render();
+}
+
+/**
+ * A phone watching a trial cash desk: no lock, no IndexedDB — the copy lives in memory beside
+ * (and never instead of) this browser's own trial. Signs in with the person's own code.
+ */
+async function startWatch(token: string): Promise<void> {
+  const rootEl = document.getElementById('root')!;
+  rootEl.textContent = 'Загружаем данные кассы…';
+  // The link is remembered (watch-mode.ts); the address goes back to the app's own routes.
+  if (window.location.hash.startsWith('#/watch/')) history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/login`);
+  const [hub, ui] = await Promise.all([import('./demo-hub/watch-hub.ts'), import('./trial/WatchBanner.tsx')]);
+  const root = createRoot(rootEl);
+  rootEl.setAttribute('aria-busy', 'true');
+  try {
+    await hub.startWatchHub(token);
+  } catch (err) {
+    const problem = err instanceof hub.WatchProblem ? err : null;
+    if (!problem) console.error('[watch] the copy did not open', err);
+    root.render(<ui.WatchProblemScreen kind={problem?.kind ?? 'broken'} detail={problem?.message} />);
+    return;
+  } finally {
+    rootEl.removeAttribute('aria-busy');
+  }
+  root.render(
+    <StrictMode>
+      <ui.WatchGate>
+        <App />
+      </ui.WatchGate>
+    </StrictMode>,
+  );
 }
 
 async function startTrial(): Promise<void> {

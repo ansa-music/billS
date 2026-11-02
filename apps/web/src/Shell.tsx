@@ -15,6 +15,7 @@ import type { ThemePreference } from './theme.ts';
 import { BrandMark } from './BrandMark.tsx';
 import { TRIAL } from './demo-hub/trial-store.ts';
 import { TrialBadge } from './trial/TrialBadge.tsx';
+import { TrialWatchMenuItem } from './trial/TrialWatch.tsx';
 
 /** Badge counts by route path (unpaid checks, lamp problems …). */
 export type NavBadges = Record<string, { count: number; tone: 'info' | 'danger' }>;
@@ -414,6 +415,7 @@ export function Topbar(props: {
               <a className="btn btn-small btn-ghost actor-apps" href={hrefFor('/apps')} onClick={close}>
                 <Icon name="download" size={18} /> Приложения TS
               </a>
+              {TRIAL && <TrialWatchMenuItem onPick={close} />}
             </div>
           )}
         </Popover>

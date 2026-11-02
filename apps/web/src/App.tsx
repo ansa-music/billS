@@ -43,6 +43,7 @@ import { GuestPage } from './guest/GuestPage.tsx';
 import { ConnectPage } from './onboarding/Connect.tsx';
 import { CafeNeedsCounterModule } from './onboarding/CafeLicense.tsx';
 import { useSetupGate } from './onboarding/setup.ts';
+import { WatchBanner } from './trial/WatchBanner.tsx';
 
 /** Route path → page. The table of routes (titles, icons, permissions) lives in router.tsx. */
 const PAGES: Record<string, (query: URLSearchParams, business: BusinessType) => ReactNode> = {
@@ -185,6 +186,7 @@ export function App() {
     const next = path === '/login' ? (query.get('next') ?? '/') : path.startsWith('/code=') ? '/' : path;
     return (
       <div className="login-shell">
+        <WatchBanner />
         <LoginPage next={next} />
       </div>
     );
